@@ -227,6 +227,7 @@ async function loadDashboard(){
         <a class="btn secondary" href="#keys">密钥</a>
         <a class="btn secondary" href="#users">用户</a>
         <a class="btn secondary" href="#risk">风控</a>
+        <a class="btn" href="/admin/backup/full.zip">全量备份</a>
       </div>
     </div>
     <div class="grid">
@@ -303,7 +304,7 @@ async function loadAdmin(){
     <div class="grid">
       <section class="card stat"><div class="label">端口池</div><div class="num">${data.stats.free_ports}</div><div class="sub">剩余 / 总数 ${data.stats.total_ports} · 默认范围 ${data.stats.port_start}-${data.stats.port_end}</div></section>
       <section class="card stat"><div class="label">隧道</div><div class="num">${data.stats.tunnel_count}</div><div class="sub">已登记隧道</div><p><a class="btn secondary" href="/config/frps.example.toml">下载默认 frps 配置</a></p></section>
-      <section class="card stat"><div class="label">注册密钥</div><div class="num">${data.stats.invite_key_count || 0}</div><div class="sub">封禁记录 ${data.stats.ban_count || 0} · 用户注册必须持有效密钥</div></section>
+      <section class="card stat"><div class="label">注册密钥</div><div class="num">${data.stats.invite_key_count || 0}</div><div class="sub">封禁记录 ${data.stats.ban_count || 0} · 用户注册必须持有效密钥</div><p><a class="btn secondary" href="/admin/backup/full.zip">下载全量备份</a></p></section>
     </div>
     <section class="card hidden" id="editNodeCard"><div class="section-title"><h2>编辑地区节点</h2><p>建议使用稳定域名，方便后期更换 VPS</p></div><form id="editNodeForm" class="grid">
       <input type="hidden" name="id">

@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import io
 import json
 import mimetypes
 import os
@@ -16,6 +17,7 @@ import secrets
 import sqlite3
 import sys
 import time
+import zipfile
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -658,6 +660,8 @@ class Handler(BaseHTTPRequestHandler):
             self.download_frps_example()
         elif path == "/admin/export/invite-keys.csv":
             self.export_invite_keys_csv()
+        elif path == "/admin/backup/full.zip":
+            self.download_full_backup()
         else:
             self.serve_static(path)
 
@@ -670,11 +674,84 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_json({"ok": False, "error": "not found"}, 404)
 
+    def download_full_backup(self) -> None:
+        admin = self.require_admin()
+        if not admin:
+            return
+        stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now()))
+        mem = sqlite3.connect(":memory:")
+        try:
+            with sqlite3.connect(DB_PATH) as src:
+                src.backup(mem)
+            dump_sql = "\n".join(mem.iterdump()) + "\n"
+            db_bytes = mem.serialize()
+            meta = {
+                "app": APP_NAME,
+                "created_at": now(),
+                "created_at_text": fmt_time(now()),
+                "created_by": admin["username"],
+                "db_path": str(DB_PATH),
+                "files": ["data.sqlite3", "dump.sql", "metadata.json", "RESTORE.md"],
+                "note": "Full backup contains users, nodes, ports, tunnels, sessions, invite keys, bans, and audit logs. Keep it private.",
+            }
+            restore = f"""# frp-manager-lite 恢复说明
+
+备份时间：{meta['created_at_text']}
+
+## 内容
+
+- `data.sqlite3`：SQLite 完整数据库快照，优先用于恢复
+- `dump.sql`：SQL 文本转储，备用
+- `metadata.json`：备份元信息
+
+## 恢复步骤
+
+1. 停止服务：
+
+```bash
+sudo systemctl stop frp-manager-lite
+```
+
+2. 备份当前数据库：
+
+```bash
+cp /var/lib/frp-manager-lite/data.sqlite3 /var/lib/frp-manager-lite/data.sqlite3.bak.$(date +%F-%H%M%S)
+```
+
+3. 解压本 ZIP，把 `data.sqlite3` 复制到你的 `FML_DB` 路径，例如：
+
+```bash
+cp data.sqlite3 /var/lib/frp-manager-lite/data.sqlite3
+chown www-data:www-data /var/lib/frp-manager-lite/data.sqlite3
+```
+
+4. 启动服务：
+
+```bash
+sudo systemctl start frp-manager-lite
+```
+
+## 注意
+
+- 这个备份包含用户 token、注册密钥、会话、审计日志等敏感数据，请勿公开。
+- 恢复后，用户、端口、节点、密钥都会回到备份时状态。
+- 如果新服务器路径不同，只要 `FML_DB` 指向恢复后的数据库即可。
+"""
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+                z.writestr("data.sqlite3", db_bytes)
+                z.writestr("dump.sql", dump_sql)
+                z.writestr("metadata.json", json.dumps(meta, ensure_ascii=False, indent=2))
+                z.writestr("RESTORE.md", restore)
+            audit("backup_download", admin, None, None, "", f"full backup {stamp}")
+            self.send_body(buf.getvalue(), 200, "application/zip", {"Content-Disposition": f'attachment; filename="frp-manager-lite-backup-{stamp}.zip"'})
+        finally:
+            mem.close()
+
     def export_invite_keys_csv(self) -> None:
         if not self.require_admin():
             return
         import csv
-        import io
         buf = io.StringIO()
         w = csv.writer(buf)
         w.writerow(["key", "note", "used_count", "max_uses", "max_ports", "user_expires_days", "active", "expires_at", "created_at"])

@@ -222,7 +222,32 @@ udp
 
 收到投诉时，根据被投诉的 `服务器IP:端口` 查询并封禁。
 
-## 10. 备份
+## 10. 备份与恢复
+
+### 面板全量备份
+
+管理员后台提供：
+
+```text
+全量备份
+```
+
+下载地址：
+
+```text
+/admin/backup/full.zip
+```
+
+ZIP 内包含：
+
+- `data.sqlite3`：SQLite 完整数据库快照
+- `dump.sql`：SQL 文本转储
+- `metadata.json`：备份元信息
+- `RESTORE.md`：恢复说明
+
+这个备份包含用户 token、注册密钥、会话、审计日志等敏感数据，请妥善保存，不要公开。
+
+### 命令行备份
 
 需要重点备份：
 
@@ -238,6 +263,18 @@ mkdir -p ~/backup/frp-manager-lite
 cp /var/lib/frp-manager-lite/data.sqlite3 ~/backup/frp-manager-lite/data-$(date +%F).sqlite3
 cp /etc/frp-manager-lite/env ~/backup/frp-manager-lite/env-$(date +%F)
 ```
+
+### 恢复
+
+```bash
+sudo systemctl stop frp-manager-lite
+cp /var/lib/frp-manager-lite/data.sqlite3 /var/lib/frp-manager-lite/data.sqlite3.bak.$(date +%F-%H%M%S)
+cp data.sqlite3 /var/lib/frp-manager-lite/data.sqlite3
+chown www-data:www-data /var/lib/frp-manager-lite/data.sqlite3
+sudo systemctl start frp-manager-lite
+```
+
+如果 `FML_DB` 使用了其他路径，请复制到对应路径。
 
 ## 11. 升级
 
