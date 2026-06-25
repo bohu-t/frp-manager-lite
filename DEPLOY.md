@@ -1,0 +1,264 @@
+# frp-manager-lite 部署文档
+
+本文档以 Ubuntu/Debian VPS 为例，说明如何部署面板和 frps 节点。
+
+## 1. 准备环境
+
+要求：
+
+- Linux VPS
+- Python 3.10+
+- frp/frps 已下载或可自行安装
+- 一个域名，推荐用于面板和各地区节点
+
+检查 Python：
+
+```bash
+python3 --version
+```
+
+项目不需要 pip 安装依赖。
+
+## 2. 获取代码
+
+```bash
+git clone https://github.com/YOUR_NAME/frp-manager-lite.git
+cd frp-manager-lite
+```
+
+如果你通过压缩包上传，也进入项目目录即可。
+
+## 3. 设置环境变量
+
+生产环境不要使用默认密码。可以创建环境文件：
+
+```bash
+sudo mkdir -p /etc/frp-manager-lite
+sudo nano /etc/frp-manager-lite/env
+```
+
+示例：
+
+```bash
+FML_HOST=127.0.0.1
+FML_PORT=18081
+FML_DB=/var/lib/frp-manager-lite/data.sqlite3
+FML_ADMIN_USER=admin
+FML_ADMIN_PASSWORD=CHANGE_THIS_STRONG_PASSWORD
+FML_PORT_START=20000
+FML_PORT_END=20199
+FML_DEFAULT_MAX_PORTS=5
+FRP_SERVER_ADDR=hk.example.com
+FRP_SERVER_PORT=7000
+FRP_AUTH_TOKEN=CHANGE_THIS_FRPS_TOKEN
+```
+
+创建数据目录：
+
+```bash
+sudo mkdir -p /var/lib/frp-manager-lite
+sudo chown -R $USER:$USER /var/lib/frp-manager-lite
+```
+
+## 4. 直接测试运行
+
+```bash
+set -a
+. /etc/frp-manager-lite/env
+set +a
+python3 app.py
+```
+
+如果 `FML_HOST=127.0.0.1`，只能本机访问。推荐生产环境通过 Nginx/Caddy 反代 HTTPS。
+
+## 5. systemd 服务
+
+创建服务文件：
+
+```bash
+sudo nano /etc/systemd/system/frp-manager-lite.service
+```
+
+内容示例，注意把路径换成你的项目路径：
+
+```ini
+[Unit]
+Description=frp-manager-lite
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/frp-manager-lite
+EnvironmentFile=/etc/frp-manager-lite/env
+ExecStart=/usr/bin/python3 /opt/frp-manager-lite/app.py
+Restart=always
+RestartSec=3
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target
+```
+
+如果项目在 `/opt/frp-manager-lite`：
+
+```bash
+sudo mkdir -p /opt
+sudo cp -r . /opt/frp-manager-lite
+sudo chown -R www-data:www-data /opt/frp-manager-lite /var/lib/frp-manager-lite
+sudo systemctl daemon-reload
+sudo systemctl enable --now frp-manager-lite
+sudo systemctl status frp-manager-lite
+```
+
+查看日志：
+
+```bash
+journalctl -u frp-manager-lite -f
+```
+
+## 6. Nginx 反向代理 HTTPS
+
+推荐面板只监听本机：
+
+```bash
+FML_HOST=127.0.0.1
+FML_PORT=18081
+```
+
+Nginx 示例：
+
+```nginx
+server {
+    listen 80;
+    server_name panel.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:18081;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+然后用 Certbot 或 acme.sh 配置 HTTPS。
+
+## 7. frps 节点部署
+
+每个地区节点建议使用稳定域名：
+
+```text
+hk.example.com
+jp.example.com
+us.example.com
+```
+
+后台新增节点时填写：
+
+- 地区
+- 节点名
+- frps 域名/地址
+- frps bindPort
+- frps token
+- 端口池范围
+
+管理员后台可以下载该节点的 `frps.example.toml`。
+
+核心配置示例：
+
+```toml
+bindPort = 7000
+auth.method = "token"
+auth.token = "CHANGE_THIS_FRPS_TOKEN"
+
+allowPorts = [
+  { start = 20000, end = 20199 }
+]
+```
+
+`allowPorts` 很重要，它限制整个 frps 节点只能使用你的端口池。
+
+## 8. 配置 frps HTTP Plugin
+
+仅靠面板不能防止用户手写 `frpc.toml` 抢端口。生产环境建议启用 frps HTTP Plugin。
+
+示例，具体字段请按你的 frp 版本文档调整：
+
+```toml
+[[httpPlugins]]
+name = "frp-manager-lite-auth"
+addr = "panel.example.com:443"
+path = "/frp-plugin"
+ops = ["Login", "NewProxy"]
+```
+
+如果 frp 版本支持 HTTPS 插件地址，请优先走 HTTPS。若 frps 和面板在同一内网，也可以使用内网地址。
+
+面板 `/frp-plugin` 会校验：
+
+- 用户是否存在、启用、未过期
+- 用户 token 是否正确
+- 用户使用的 remote_port 是否属于自己
+- 协议是否在白名单内，默认只允许 TCP/UDP
+
+## 9. 防滥用建议
+
+默认不要开放 HTTP/HTTPS 代理给普通用户。推荐只允许：
+
+```text
+tcp
+udp
+```
+
+后台风控功能：
+
+- 按端口查询用户
+- 查看端口相关审计日志
+- 一键封禁用户
+- 记录封禁原因
+
+收到投诉时，根据被投诉的 `服务器IP:端口` 查询并封禁。
+
+## 10. 备份
+
+需要重点备份：
+
+```text
+/var/lib/frp-manager-lite/data.sqlite3
+/etc/frp-manager-lite/env
+```
+
+示例：
+
+```bash
+mkdir -p ~/backup/frp-manager-lite
+cp /var/lib/frp-manager-lite/data.sqlite3 ~/backup/frp-manager-lite/data-$(date +%F).sqlite3
+cp /etc/frp-manager-lite/env ~/backup/frp-manager-lite/env-$(date +%F)
+```
+
+## 11. 升级
+
+```bash
+cd /opt/frp-manager-lite
+git pull
+sudo systemctl restart frp-manager-lite
+```
+
+升级前建议备份数据库。
+
+## 12. 常见问题
+
+### 用户能不能自己乱用端口？
+
+面板层面不能选别人的端口；frps 层面需要 HTTP Plugin 才能防止用户绕过面板。
+
+### 换 VPS 用户是否需要改配置？
+
+如果用户 `frpc.toml` 里写的是域名，并且 bindPort/token/端口池不变，一般只需要改 DNS，用户无需改配置。
+
+### 为什么不建议开放 HTTP/HTTPS？
+
+HTTP/HTTPS 很容易被用于搭建公开网站，增加色情、赌博、钓鱼等违法内容风险。建议先只开放 TCP/UDP，域名绑定后续做审核制。

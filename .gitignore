@@ -1,0 +1,23 @@
+# Runtime data
+*.sqlite3
+*.sqlite3-*
+*.db
+*.log
+.env
+.env.*
+!.env.example
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Local backups generated during development
+app_before_*.py
+app_legacy.py
+frontend/*_before_*.js
+frontend/*_before_*.css
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
