@@ -11,6 +11,8 @@ import hashlib
 import hmac
 import io
 import json
+import urllib.error
+import urllib.request
 import mimetypes
 import os
 import secrets
@@ -23,6 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
+import urllib.parse
 
 APP_NAME = "frp-manager-lite"
 BASE_DIR = Path(__file__).resolve().parent
@@ -38,6 +41,11 @@ ADMIN_PASSWORD = os.getenv("FML_ADMIN_PASSWORD", "admin123")
 FRP_SERVER_ADDR = os.getenv("FRP_SERVER_ADDR", "YOUR_FRPS_IP_OR_DOMAIN")
 FRP_SERVER_PORT = int(os.getenv("FRP_SERVER_PORT", "7000"))
 FRP_AUTH_TOKEN = os.getenv("FRP_AUTH_TOKEN", "CHANGE_ME_SHARED_FRPS_TOKEN")
+R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID", "")
+R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID", "")
+R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "")
+R2_BUCKET = os.getenv("R2_BUCKET", "")
+R2_PREFIX = os.getenv("R2_PREFIX", "frp-manager-lite/backups")
 SESSION_TTL = 7 * 24 * 3600
 MAX_BODY = 128 * 1024
 ALLOWED_PROXY_TYPES = {"tcp", "udp"}
@@ -601,6 +609,124 @@ ops = ["Login", "NewProxy"]
 '''
 
 
+def make_full_backup_zip(admin_username: str) -> tuple[str, bytes]:
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now()))
+    mem = sqlite3.connect(":memory:")
+    try:
+        with sqlite3.connect(DB_PATH) as src:
+            src.backup(mem)
+        dump_sql = "\n".join(mem.iterdump()) + "\n"
+        db_bytes = mem.serialize()
+        meta = {
+            "app": APP_NAME,
+            "created_at": now(),
+            "created_at_text": fmt_time(now()),
+            "created_by": admin_username,
+            "db_path": str(DB_PATH),
+            "files": ["data.sqlite3", "dump.sql", "metadata.json", "RESTORE.md"],
+            "note": "Full backup contains users, nodes, ports, tunnels, sessions, invite keys, bans, and audit logs. Keep it private.",
+        }
+        restore = f"""# frp-manager-lite 恢复说明
+
+备份时间：{meta['created_at_text']}
+
+## 内容
+
+- `data.sqlite3`：SQLite 完整数据库快照，优先用于恢复
+- `dump.sql`：SQL 文本转储，备用
+- `metadata.json`：备份元信息
+
+## 恢复步骤
+
+1. 停止服务：
+
+```bash
+sudo systemctl stop frp-manager-lite
+```
+
+2. 备份当前数据库：
+
+```bash
+cp /var/lib/frp-manager-lite/data.sqlite3 /var/lib/frp-manager-lite/data.sqlite3.bak.$(date +%F-%H%M%S)
+```
+
+3. 解压本 ZIP，把 `data.sqlite3` 复制到你的 `FML_DB` 路径，例如：
+
+```bash
+cp data.sqlite3 /var/lib/frp-manager-lite/data.sqlite3
+chown www-data:www-data /var/lib/frp-manager-lite/data.sqlite3
+```
+
+4. 启动服务：
+
+```bash
+sudo systemctl start frp-manager-lite
+```
+
+## 注意
+
+- 这个备份包含用户 token、注册密钥、会话、审计日志等敏感数据，请勿公开。
+- 恢复后，用户、端口、节点、密钥都会回到备份时状态。
+- 如果新服务器路径不同，只要 `FML_DB` 指向恢复后的数据库即可。
+"""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("data.sqlite3", db_bytes)
+            z.writestr("dump.sql", dump_sql)
+            z.writestr("metadata.json", json.dumps(meta, ensure_ascii=False, indent=2))
+            z.writestr("RESTORE.md", restore)
+        return stamp, buf.getvalue()
+    finally:
+        mem.close()
+
+
+def _sign(key: bytes, msg: str) -> bytes:
+    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+
+def r2_configured() -> bool:
+    return bool(R2_ACCOUNT_ID and R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_BUCKET)
+
+
+def upload_to_r2(object_key: str, body: bytes, content_type: str = "application/zip") -> str:
+    if not r2_configured():
+        raise RuntimeError("R2 未配置，请设置 R2_ACCOUNT_ID/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/R2_BUCKET")
+    host = f"{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+    region = "auto"
+    service = "s3"
+    method = "PUT"
+    encoded_key = "/" + "/".join(urllib.parse.quote(part, safe="") for part in object_key.split("/"))
+    url = f"https://{host}/{R2_BUCKET}{encoded_key}"
+    t = time.gmtime()
+    amz_date = time.strftime("%Y%m%dT%H%M%SZ", t)
+    date_stamp = time.strftime("%Y%m%d", t)
+    payload_hash = hashlib.sha256(body).hexdigest()
+    canonical_uri = f"/{R2_BUCKET}{encoded_key}"
+    canonical_headers = f"content-type:{content_type}\nhost:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n"
+    signed_headers = "content-type;host;x-amz-content-sha256;x-amz-date"
+    canonical_request = "\n".join([method, canonical_uri, "", canonical_headers, signed_headers, payload_hash])
+    credential_scope = f"{date_stamp}/{region}/{service}/aws4_request"
+    string_to_sign = "\n".join(["AWS4-HMAC-SHA256", amz_date, credential_scope, hashlib.sha256(canonical_request.encode()).hexdigest()])
+    signing_key = _sign(_sign(_sign(_sign(("AWS4" + R2_SECRET_ACCESS_KEY).encode("utf-8"), date_stamp), region), service), "aws4_request")
+    signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    auth = f"AWS4-HMAC-SHA256 Credential={R2_ACCESS_KEY_ID}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}"
+    req = urllib.request.Request(url, data=body, method="PUT", headers={
+        "Content-Type": content_type,
+        "Host": host,
+        "X-Amz-Date": amz_date,
+        "X-Amz-Content-Sha256": payload_hash,
+        "Authorization": auth,
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            if resp.status not in (200, 201, 204):
+                raise RuntimeError(f"R2 上传失败：HTTP {resp.status}")
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "ignore")[:500]
+        raise RuntimeError(f"R2 上传失败：HTTP {e.code} {detail}") from e
+    return object_key
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "frp-manager-lite-api/0.2"
 
@@ -678,75 +804,22 @@ class Handler(BaseHTTPRequestHandler):
         admin = self.require_admin()
         if not admin:
             return
-        stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now()))
-        mem = sqlite3.connect(":memory:")
+        stamp, payload = make_full_backup_zip(admin["username"])
+        audit("backup_download", admin, None, None, "", f"full backup {stamp}")
+        self.send_body(payload, 200, "application/zip", {"Content-Disposition": f'attachment; filename="frp-manager-lite-backup-{stamp}.zip"'})
+
+    def admin_backup_r2(self, admin: sqlite3.Row) -> None:
+        if not self.require_admin():
+            return
         try:
-            with sqlite3.connect(DB_PATH) as src:
-                src.backup(mem)
-            dump_sql = "\n".join(mem.iterdump()) + "\n"
-            db_bytes = mem.serialize()
-            meta = {
-                "app": APP_NAME,
-                "created_at": now(),
-                "created_at_text": fmt_time(now()),
-                "created_by": admin["username"],
-                "db_path": str(DB_PATH),
-                "files": ["data.sqlite3", "dump.sql", "metadata.json", "RESTORE.md"],
-                "note": "Full backup contains users, nodes, ports, tunnels, sessions, invite keys, bans, and audit logs. Keep it private.",
-            }
-            restore = f"""# frp-manager-lite 恢复说明
-
-备份时间：{meta['created_at_text']}
-
-## 内容
-
-- `data.sqlite3`：SQLite 完整数据库快照，优先用于恢复
-- `dump.sql`：SQL 文本转储，备用
-- `metadata.json`：备份元信息
-
-## 恢复步骤
-
-1. 停止服务：
-
-```bash
-sudo systemctl stop frp-manager-lite
-```
-
-2. 备份当前数据库：
-
-```bash
-cp /var/lib/frp-manager-lite/data.sqlite3 /var/lib/frp-manager-lite/data.sqlite3.bak.$(date +%F-%H%M%S)
-```
-
-3. 解压本 ZIP，把 `data.sqlite3` 复制到你的 `FML_DB` 路径，例如：
-
-```bash
-cp data.sqlite3 /var/lib/frp-manager-lite/data.sqlite3
-chown www-data:www-data /var/lib/frp-manager-lite/data.sqlite3
-```
-
-4. 启动服务：
-
-```bash
-sudo systemctl start frp-manager-lite
-```
-
-## 注意
-
-- 这个备份包含用户 token、注册密钥、会话、审计日志等敏感数据，请勿公开。
-- 恢复后，用户、端口、节点、密钥都会回到备份时状态。
-- 如果新服务器路径不同，只要 `FML_DB` 指向恢复后的数据库即可。
-"""
-            buf = io.BytesIO()
-            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-                z.writestr("data.sqlite3", db_bytes)
-                z.writestr("dump.sql", dump_sql)
-                z.writestr("metadata.json", json.dumps(meta, ensure_ascii=False, indent=2))
-                z.writestr("RESTORE.md", restore)
-            audit("backup_download", admin, None, None, "", f"full backup {stamp}")
-            self.send_body(buf.getvalue(), 200, "application/zip", {"Content-Disposition": f'attachment; filename="frp-manager-lite-backup-{stamp}.zip"'})
-        finally:
-            mem.close()
+            stamp, payload = make_full_backup_zip(admin["username"])
+            prefix = R2_PREFIX.strip("/")
+            object_key = f"{prefix}/frp-manager-lite-backup-{stamp}.zip" if prefix else f"frp-manager-lite-backup-{stamp}.zip"
+            upload_to_r2(object_key, payload)
+            audit("backup_r2_upload", admin, None, None, "", object_key)
+            self.send_json({"ok": True, "message": "已上传全量备份到 R2", "object_key": object_key, "size": len(payload)})
+        except Exception as e:
+            self.send_json({"ok": False, "error": str(e)}, 400)
 
     def export_invite_keys_csv(self) -> None:
         if not self.require_admin():
@@ -930,6 +1003,8 @@ sudo systemctl start frp-manager-lite
             self.admin_ban_user(user, data)
         elif path == "/api/admin/risk/lookup-port":
             self.admin_lookup_port(data)
+        elif path == "/api/admin/backup/r2":
+            self.admin_backup_r2(user)
         elif path == "/api/admin/invite-keys/create":
             self.admin_invite_create(user, data)
         elif path == "/api/admin/invite-keys/toggle":

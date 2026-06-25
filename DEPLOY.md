@@ -247,6 +247,32 @@ ZIP 内包含：
 
 这个备份包含用户 token、注册密钥、会话、审计日志等敏感数据，请妥善保存，不要公开。
 
+### 上传到 Cloudflare R2
+
+如果配置了 R2 环境变量，后台会显示：
+
+```text
+备份到 R2
+```
+
+需要配置：
+
+```bash
+R2_ACCOUNT_ID=你的 Cloudflare Account ID
+R2_ACCESS_KEY_ID=R2 S3 API Access Key ID
+R2_SECRET_ACCESS_KEY=R2 S3 API Secret Access Key
+R2_BUCKET=你的 bucket 名称
+R2_PREFIX=frp-manager-lite/backups
+```
+
+建议创建专用 R2 API Token / S3 凭证，只给目标 bucket 的对象写入权限。不要把 R2 密钥提交到 Git。
+
+备份对象路径类似：
+
+```text
+frp-manager-lite/backups/frp-manager-lite-backup-20260625-230000.zip
+```
+
 ### 命令行备份
 
 需要重点备份：

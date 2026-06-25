@@ -23,6 +23,7 @@
 - 登录/注册限速
 - 颜色模式：跟随系统 / 深色 / 浅色
 - 风控能力：协议白名单、按端口查用户、一键封禁、封禁原因、审计日志
+- 全量备份下载，支持上传到 Cloudflare R2
 - `/frp-plugin` 接口：用于 frps HTTP Plugin 做用户与端口二次鉴权
 
 ## 快速启动
@@ -136,6 +137,11 @@ udp
 | `FRP_SERVER_ADDR` | `YOUR_FRPS_IP_OR_DOMAIN` | 默认节点 frps 地址 |
 | `FRP_SERVER_PORT` | `7000` | 默认节点 frps bindPort |
 | `FRP_AUTH_TOKEN` | `CHANGE_ME_SHARED_FRPS_TOKEN` | 默认节点 frps token |
+| `R2_ACCOUNT_ID` | 空 | Cloudflare R2 Account ID |
+| `R2_ACCESS_KEY_ID` | 空 | R2 S3 API Access Key ID |
+| `R2_SECRET_ACCESS_KEY` | 空 | R2 S3 API Secret Access Key |
+| `R2_BUCKET` | 空 | R2 bucket 名称 |
+| `R2_PREFIX` | `frp-manager-lite/backups` | R2 备份对象前缀 |
 
 ## 项目结构
 
