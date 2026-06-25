@@ -72,7 +72,9 @@ input,select,textarea{
 }
 input:focus,select:focus,textarea:focus{border-color:rgba(56,189,248,.72);box-shadow:0 0 0 3px rgba(56,189,248,.13)}
 label{display:block;margin:8px 0 5px;color:var(--muted);font-size:12px;font-weight:700}
-table{width:100%;border-collapse:separate;border-spacing:0;display:block;overflow:auto;border:1px solid var(--line);border-radius:14px;background:rgba(2,8,23,.28)}
+table{width:100%;min-width:980px;border-collapse:separate;border-spacing:0;border:1px solid var(--line);border-radius:14px;background:rgba(2,8,23,.28)}
+.card:has(> table),.card:has(> .section-title + table),.risk-result{overflow-x:auto}
+.card table{margin:0}
 th,td{text-align:left;border-bottom:1px solid var(--line);padding:11px 12px;vertical-align:middle;white-space:nowrap}
 tr:last-child td{border-bottom:0}
 th{position:sticky;top:0;background:rgba(15,23,42,.96);color:#a8b6c8;font-size:12px;text-transform:uppercase;letter-spacing:.04em;z-index:1}
@@ -157,3 +159,7 @@ code{padding:2px 6px}pre{padding:14px;overflow:auto;white-space:pre-wrap}
 :root[data-theme="light"] .admin-toolbar{background:rgba(255,255,255,.78)}
 :root[data-theme="light"] .empty-state{background:rgba(248,250,252,.78)}
 :root[data-theme="light"] .panel-note{background:rgba(14,165,233,.07);border-color:rgba(14,165,233,.22);color:#334155}
+
+/* Table width fix: keep tables filling the card while allowing horizontal scroll on small screens. */
+.card > table, .risk-result table{width:100%;}
+@media(max-width:1100px){table{min-width:880px}}
