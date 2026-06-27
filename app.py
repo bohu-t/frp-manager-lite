@@ -48,7 +48,15 @@ R2_BUCKET = os.getenv("R2_BUCKET", "")
 R2_PREFIX = os.getenv("R2_PREFIX", "frp-manager-lite/backups")
 SESSION_TTL = 7 * 24 * 3600
 MAX_BODY = 128 * 1024
-ALLOWED_PROXY_TYPES = {"tcp", "udp"}
+ALLOWED_PROXY_TYPES = {"tcp", "udp", "http", "https", "stcp", "xtcp", "tcpmux"}
+REMOTE_PORT_PROXY_TYPES = {"tcp", "udp"}
+DOMAIN_PROXY_TYPES = {"http", "https", "tcpmux"}
+SECRET_KEY_PROXY_TYPES = {"stcp", "xtcp"}
+PROXY_TYPE_ORDER = ["tcp", "udp", "http", "https", "stcp", "xtcp", "tcpmux"]
+SOFTWARE_LICENSE_SECRET = os.getenv("FML_SOFTWARE_LICENSE_SECRET", "")
+SOFTWARE_LICENSE_SERVER_URL = os.getenv("FML_LICENSE_SERVER_URL", "").rstrip("/")
+SOFTWARE_LICENSE_AUTHORITY = os.getenv("FML_LICENSE_AUTHORITY", "0").lower() in {"1", "true", "yes", "on"}
+SOFTWARE_LICENSE_REQUIRED = os.getenv("FML_SOFTWARE_LICENSE_REQUIRED", "0").lower() in {"1", "true", "yes", "on"} or bool(SOFTWARE_LICENSE_SERVER_URL)
 RATE_WINDOW = 15 * 60
 LOGIN_RATE_LIMIT = 8
 REGISTER_RATE_LIMIT = 5
@@ -108,12 +116,105 @@ def is_expired(user: sqlite3.Row | dict[str, Any]) -> bool:
     return bool(expires_at and expires_at <= now())
 
 
+def make_license_key() -> str:
+    return "LIC-" + secrets.token_urlsafe(24).replace("-", "").replace("_", "")[:32].upper()
+
+
+def normalize_machine_id(machine_id: str) -> str:
+    return " ".join(machine_id.strip().split())[:128]
+
+
+def software_machine_fingerprint() -> str:
+    parts: list[str] = []
+    for p in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+        try:
+            value = Path(p).read_text().strip()
+            if value:
+                parts.append(value)
+                break
+        except Exception:
+            pass
+    parts.extend([os.uname().nodename if hasattr(os, "uname") else "", str(BASE_DIR), str(DB_PATH)])
+    raw = "|".join(parts)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def software_license_signature(license_key: str, machine_id: str, plan: str, expires_at: int) -> str:
+    if not SOFTWARE_LICENSE_SECRET:
+        return ""
+    msg = f"{license_key}|{machine_id}|{plan}|{int(expires_at)}"
+    return hmac.new(SOFTWARE_LICENSE_SECRET.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def signed_license_payload(license_key: str, machine_id: str, plan: str, expires_at: int) -> dict[str, Any]:
+    return {
+        "license_key": license_key,
+        "machine_id": machine_id,
+        "plan": plan,
+        "expires_at": int(expires_at),
+        "signature": software_license_signature(license_key, machine_id, plan, int(expires_at)),
+    }
+
+
+def verify_signed_license(payload: dict[str, Any]) -> bool:
+    if not SOFTWARE_LICENSE_SECRET:
+        return True
+    return hmac.compare_digest(
+        str(payload.get("signature") or ""),
+        software_license_signature(str(payload.get("license_key") or ""), str(payload.get("machine_id") or ""), str(payload.get("plan") or "deploy"), int(payload.get("expires_at") or 0)),
+    )
+
+
+def public_software_license(row: sqlite3.Row | None) -> dict[str, Any]:
+    fingerprint = software_machine_fingerprint()
+    configured = bool(SOFTWARE_LICENSE_SERVER_URL or SOFTWARE_LICENSE_SECRET or SOFTWARE_LICENSE_AUTHORITY)
+    if not row:
+        return {"configured": configured, "required": SOFTWARE_LICENSE_REQUIRED, "active": not SOFTWARE_LICENSE_REQUIRED, "licensed": False, "machine_id": fingerprint, "message": "未激活软件授权" if SOFTWARE_LICENSE_REQUIRED else "未启用软件授权"}
+    expires_at = int(row["expires_at"] or 0)
+    valid_sig = verify_signed_license({"license_key": row["license_key"], "machine_id": row["machine_id"], "plan": row["plan"], "expires_at": expires_at, "signature": row["signature"]})
+    bound_ok = row["machine_id"] == fingerprint
+    active = bool(row["active"]) and valid_sig and bound_ok and not (expires_at and expires_at <= now())
+    return {
+        "configured": configured,
+        "required": SOFTWARE_LICENSE_REQUIRED,
+        "active": active or not SOFTWARE_LICENSE_REQUIRED,
+        "licensed": active,
+        "license_key": row["license_key"],
+        "machine_id": fingerprint,
+        "bound_machine_id": row["machine_id"],
+        "plan": row["plan"],
+        "expires_at": expires_at,
+        "expires_text": fmt_time(expires_at),
+        "valid_signature": valid_sig,
+        "bound_ok": bound_ok,
+        "message": "软件授权有效" if active else ("软件授权签名无效" if not valid_sig else "软件授权机器不匹配" if not bound_ok else "软件授权已停用或过期"),
+    }
+
+
+def current_software_license(conn: sqlite3.Connection) -> dict[str, Any]:
+    row = conn.execute("SELECT * FROM software_license ORDER BY id DESC LIMIT 1").fetchone()
+    return public_software_license(row)
+
+
+def software_license_ok() -> bool:
+    if not SOFTWARE_LICENSE_REQUIRED:
+        return True
+    with db() as conn:
+        return bool(current_software_license(conn).get("active"))
+
+
 def public_user(user: sqlite3.Row) -> dict[str, Any]:
+    license_key = user["license_key"] if "license_key" in user.keys() else ""
+    machine_id = user["machine_id"] if "machine_id" in user.keys() else ""
     return {
         "id": user["id"],
         "username": user["username"],
         "role": user["role"],
         "token": user["token"],
+        "license_key": license_key,
+        "machine_id": machine_id,
+        "licensed": bool(license_key),
+        "license_bound": bool(machine_id),
         "max_ports": user["max_ports"],
         "active": bool(user["active"]),
         "expires_at": user["expires_at"],
@@ -176,6 +277,14 @@ def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int) -> None
     if "node_id" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN node_id INTEGER REFERENCES nodes(id) ON DELETE SET NULL")
         conn.execute("UPDATE users SET node_id=? WHERE node_id IS NULL", (default_node_id,))
+    if "license_key" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN license_key TEXT NOT NULL DEFAULT ''")
+        for r in conn.execute("SELECT id FROM users WHERE license_key='' OR license_key IS NULL").fetchall():
+            conn.execute("UPDATE users SET license_key=? WHERE id=?", (make_license_key(), r["id"]))
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_license_key ON users(license_key)")
+    if "machine_id" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN machine_id TEXT NOT NULL DEFAULT ''")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_license_key ON users(license_key)")
 
     port_cols = [r["name"] for r in conn.execute("PRAGMA table_info(ports)").fetchall()]
     if "node_id" not in port_cols or "id" not in port_cols:
@@ -211,17 +320,47 @@ def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int) -> None
                 local_ip TEXT NOT NULL DEFAULT '127.0.0.1',
                 local_port INTEGER NOT NULL,
                 remote_port INTEGER NOT NULL,
+                custom_domains TEXT NOT NULL DEFAULT '',
+                secret_key TEXT NOT NULL DEFAULT '',
                 enabled INTEGER NOT NULL DEFAULT 1,
                 created_at INTEGER NOT NULL,
-                UNIQUE(user_id, name),
-                UNIQUE(node_id, remote_port)
+                UNIQUE(user_id, name)
             );
             """
         )
-        conn.execute("INSERT OR IGNORE INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, enabled, created_at) SELECT ?, user_id, name, proxy_type, local_ip, local_port, remote_port, enabled, created_at FROM tunnels_old", (default_node_id,))
+        conn.execute("INSERT OR IGNORE INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at) SELECT ?, user_id, name, proxy_type, local_ip, local_port, remote_port, '', '', enabled, created_at FROM tunnels_old", (default_node_id,))
         conn.execute("DROP TABLE tunnels_old")
     else:
-        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tunnels_node_port ON tunnels(node_id, remote_port)")
+        if "custom_domains" not in tunnel_cols:
+            conn.execute("ALTER TABLE tunnels ADD COLUMN custom_domains TEXT NOT NULL DEFAULT ''")
+        if "secret_key" not in tunnel_cols:
+            conn.execute("ALTER TABLE tunnels ADD COLUMN secret_key TEXT NOT NULL DEFAULT ''")
+        schema = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tunnels'").fetchone()["sql"] or ""
+        if "UNIQUE(node_id, remote_port)" in schema:
+            conn.execute("ALTER TABLE tunnels RENAME TO tunnels_old")
+            conn.execute(
+                """
+                CREATE TABLE tunnels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL,
+                    proxy_type TEXT NOT NULL DEFAULT 'tcp',
+                    local_ip TEXT NOT NULL DEFAULT '127.0.0.1',
+                    local_port INTEGER NOT NULL,
+                    remote_port INTEGER NOT NULL,
+                    custom_domains TEXT NOT NULL DEFAULT '',
+                    secret_key TEXT NOT NULL DEFAULT '',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at INTEGER NOT NULL,
+                    UNIQUE(user_id, name)
+                );
+                """
+            )
+            conn.execute("INSERT OR IGNORE INTO tunnels(id, node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at) SELECT id, node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at FROM tunnels_old")
+            conn.execute("DROP TABLE tunnels_old")
+    conn.execute("DROP INDEX IF EXISTS idx_tunnels_node_port")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tunnels_node_port_remote ON tunnels(node_id, remote_port) WHERE remote_port > 0")
 
 
 def list_public_nodes(conn: sqlite3.Connection, active_only: bool = True) -> list[dict[str, Any]]:
@@ -267,6 +406,8 @@ def init_db() -> None:
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'user',
                 token TEXT NOT NULL UNIQUE,
+                license_key TEXT NOT NULL UNIQUE,
+                machine_id TEXT NOT NULL DEFAULT '',
                 max_ports INTEGER NOT NULL DEFAULT 5,
                 active INTEGER NOT NULL DEFAULT 1,
                 expires_at INTEGER NOT NULL DEFAULT 0,
@@ -285,10 +426,11 @@ def init_db() -> None:
                 local_ip TEXT NOT NULL DEFAULT '127.0.0.1',
                 local_port INTEGER NOT NULL,
                 remote_port INTEGER NOT NULL,
+                custom_domains TEXT NOT NULL DEFAULT '',
+                secret_key TEXT NOT NULL DEFAULT '',
                 enabled INTEGER NOT NULL DEFAULT 1,
                 created_at INTEGER NOT NULL,
-                UNIQUE(user_id, name),
-                UNIQUE(remote_port)
+                UNIQUE(user_id, name)
             );
             CREATE TABLE IF NOT EXISTS sessions (
                 token TEXT PRIMARY KEY,
@@ -338,6 +480,30 @@ def init_db() -> None:
                 created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
                 created_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS software_license (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                license_key TEXT NOT NULL,
+                machine_id TEXT NOT NULL,
+                plan TEXT NOT NULL DEFAULT 'deploy',
+                expires_at INTEGER NOT NULL DEFAULT 0,
+                active INTEGER NOT NULL DEFAULT 1,
+                signature TEXT NOT NULL DEFAULT '',
+                activated_at INTEGER NOT NULL,
+                last_check_at INTEGER NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS software_license_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                license_key TEXT NOT NULL UNIQUE,
+                note TEXT NOT NULL DEFAULT '',
+                plan TEXT NOT NULL DEFAULT 'deploy',
+                machine_id TEXT NOT NULL DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1,
+                expires_at INTEGER NOT NULL DEFAULT 0,
+                activated_at INTEGER NOT NULL DEFAULT 0,
+                last_check_at INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL
+            );
             """
         )
         default_node_id = ensure_default_node(conn)
@@ -352,8 +518,8 @@ def init_db() -> None:
         admin = conn.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
         if not admin:
             conn.execute(
-                "INSERT INTO users(username, password_hash, role, token, max_ports, expires_at, node_id, created_at) VALUES(?,?,?,?,?,?,?,?)",
-                (ADMIN_USER, password_hash(ADMIN_PASSWORD), "admin", secrets.token_urlsafe(24), DEFAULT_MAX_PORTS, 0, default_node_id, now()),
+                "INSERT INTO users(username, password_hash, role, token, license_key, max_ports, expires_at, node_id, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                (ADMIN_USER, password_hash(ADMIN_PASSWORD), "admin", secrets.token_urlsafe(24), make_license_key(), DEFAULT_MAX_PORTS, 0, default_node_id, now()),
             )
         else:
             conn.execute("UPDATE users SET node_id=? WHERE role='admin' AND node_id IS NULL", (default_node_id,))
@@ -379,14 +545,95 @@ def create_user(username: str, password: str, max_ports: int, expires_days: int,
             return False, f"端口池不足，只剩 {len(free_ports)} 个可用端口"
         try:
             cur = conn.execute(
-                "INSERT INTO users(username, password_hash, role, token, max_ports, expires_at, node_id, created_at) VALUES(?,?,?,?,?,?,?,?)",
-                (username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, expires_at, node_id, now()),
+                "INSERT INTO users(username, password_hash, role, token, license_key, max_ports, expires_at, node_id, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                (username, password_hash(password), "user", secrets.token_urlsafe(24), make_license_key(), max_ports, expires_at, node_id, now()),
             )
         except sqlite3.IntegrityError:
             return False, "用户名已存在"
         user_id = cur.lastrowid
         conn.executemany("UPDATE ports SET user_id=? WHERE node_id=? AND port=?", [(user_id, node_id, r["port"]) for r in free_ports])
     return True, f"已创建用户 {username}，地区节点：{node['region']} / {node['name']}，分配 {max_ports} 个端口，到期时间：{fmt_time(expires_at)}"
+
+
+def local_license_authority_activate(license_key: str, machine_id: str) -> tuple[bool, str, dict[str, Any] | None]:
+    with db() as conn:
+        row = conn.execute("SELECT * FROM software_license_keys WHERE license_key=?", (license_key,)).fetchone()
+        if not row:
+            return False, "授权码不存在", None
+        if not row["active"]:
+            return False, "授权码已停用", None
+        if row["expires_at"] and row["expires_at"] <= now():
+            return False, "授权码已过期", None
+        if row["machine_id"] and row["machine_id"] != machine_id:
+            return False, "授权码已绑定其他机器", None
+        if not row["machine_id"]:
+            conn.execute("UPDATE software_license_keys SET machine_id=?, activated_at=?, last_check_at=? WHERE id=?", (machine_id, now(), now(), row["id"]))
+        else:
+            conn.execute("UPDATE software_license_keys SET last_check_at=? WHERE id=?", (now(), row["id"]))
+        payload = signed_license_payload(license_key, machine_id, row["plan"], int(row["expires_at"] or 0))
+    return True, "授权成功", payload
+
+
+def call_license_server(license_key: str, machine_id: str) -> tuple[bool, str, dict[str, Any] | None]:
+    if not SOFTWARE_LICENSE_SERVER_URL:
+        return local_license_authority_activate(license_key, machine_id)
+    body = json.dumps({"license_key": license_key, "machine_id": machine_id, "app": APP_NAME}).encode("utf-8")
+    req = urllib.request.Request(f"{SOFTWARE_LICENSE_SERVER_URL}/api/license/activate", data=body, method="POST", headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            data = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            data = {"error": f"授权服务器 HTTP {e.code}"}
+    except Exception as e:
+        return False, f"连接授权服务器失败：{e}", None
+    if not data.get("ok"):
+        return False, str(data.get("error") or data.get("message") or "授权失败"), None
+    payload = data.get("license") or data
+    if not isinstance(payload, dict) or not verify_signed_license(payload):
+        return False, "授权服务器返回签名无效", None
+    if payload.get("machine_id") != machine_id:
+        return False, "授权服务器返回机器绑定不匹配", None
+    return True, str(data.get("message") or "授权成功"), payload
+
+
+def activate_software_license(license_key: str) -> tuple[bool, str]:
+    license_key = license_key.strip().upper()
+    if not license_key:
+        return False, "请输入软件授权码"
+    machine_id = software_machine_fingerprint()
+    ok, msg, payload = call_license_server(license_key, machine_id)
+    if not ok or not payload:
+        return False, msg
+    with db() as conn:
+        conn.execute("UPDATE software_license SET active=0")
+        conn.execute(
+            "INSERT INTO software_license(license_key, machine_id, plan, expires_at, active, signature, activated_at, last_check_at, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            (payload["license_key"], payload["machine_id"], payload.get("plan", "deploy"), int(payload.get("expires_at") or 0), 1, payload.get("signature", ""), now(), now(), now()),
+        )
+    return True, "软件授权已激活并绑定当前服务器"
+
+
+def create_software_license_keys_batch(note: str, plan: str, expires_days: int, count: int) -> tuple[bool, str, list[str]]:
+    if count < 1 or count > 500:
+        return False, "单次生成数量必须在 1-500 之间", []
+    if expires_days < 0 or expires_days > 3650:
+        return False, "有效期必须在 0-3650 天之间", []
+    plan = (plan.strip() or "deploy")[:40]
+    note = note.strip()[:120]
+    expires_at = 0 if expires_days == 0 else now() + expires_days * 86400
+    keys: list[str] = []
+    with db() as conn:
+        for _ in range(count):
+            key = "FMLD-" + secrets.token_urlsafe(20).replace("-", "").replace("_", "")[:28].upper()
+            conn.execute(
+                "INSERT INTO software_license_keys(license_key, note, plan, active, expires_at, created_at) VALUES(?,?,?,?,?,?)",
+                (key, note, plan, 1, expires_at, now()),
+            )
+            keys.append(key)
+    return True, f"已生成 {len(keys)} 个软件授权码", keys
 
 
 def create_invite_key(note: str, max_uses: int, max_ports: int, user_expires_days: int, key_expires_days: int, created_by: int) -> tuple[bool, str, str | None]:
@@ -464,8 +711,8 @@ def register_with_invite(username: str, password: str, invite_key: str, node_id:
         user_expires_at = 0 if expires_days == 0 else now() + expires_days * 86400
         try:
             cur = conn.execute(
-                "INSERT INTO users(username, password_hash, role, token, max_ports, expires_at, node_id, created_at) VALUES(?,?,?,?,?,?,?,?)",
-                (username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, user_expires_at, node_id, now()),
+                "INSERT INTO users(username, password_hash, role, token, license_key, max_ports, expires_at, node_id, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                (username, password_hash(password), "user", secrets.token_urlsafe(24), make_license_key(), max_ports, user_expires_at, node_id, now()),
             )
         except sqlite3.IntegrityError:
             return False, "用户名已存在"
@@ -565,23 +812,33 @@ def tunnel_config(user: sqlite3.Row, node: sqlite3.Row, tunnels: list[sqlite3.Ro
         f'auth.token = "{node["auth_token"]}"',
         f'user = "{user["username"]}"',
         f'metadatas.panelToken = "{user["token"]}"',
+        f'metadatas.licenseKey = "{user["license_key"] if "license_key" in user.keys() else ""}"',
+        "# 必须改成本机唯一标识；首次通过鉴权后授权会绑定这个 machineId。",
+        'metadatas.machineId = "CHANGE_ME_DEVICE_ID"',
         "",
     ]
     for t in tunnels:
         if not t["enabled"]:
             lines.append(f"# disabled: {t['name']}")
             continue
+        proxy_type = t["proxy_type"]
         lines.extend(
             [
                 "[[proxies]]",
                 f'name = "{user["username"]}_{t["name"]}"',
-                f'type = "{t["proxy_type"]}"',
+                f'type = "{proxy_type}"',
                 f'localIP = "{t["local_ip"]}"',
                 f'localPort = {t["local_port"]}',
-                f'remotePort = {t["remote_port"]}',
-                "",
             ]
         )
+        if proxy_type in REMOTE_PORT_PROXY_TYPES:
+            lines.append(f'remotePort = {t["remote_port"]}')
+        if proxy_type in DOMAIN_PROXY_TYPES and t["custom_domains"]:
+            domains = [d.strip() for d in str(t["custom_domains"]).split(",") if d.strip()]
+            lines.append("customDomains = [" + ", ".join(json.dumps(d, ensure_ascii=False) for d in domains) + "]")
+        if proxy_type in SECRET_KEY_PROXY_TYPES and t["secret_key"]:
+            lines.append(f'secretKey = {json.dumps(t["secret_key"], ensure_ascii=False)}')
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -601,6 +858,7 @@ webServer.user = "admin"
 webServer.password = "CHANGE_ME"
 
 # 可选：frps HTTP 插件鉴权，字段需按你的 frp 版本文档校准。
+# 面板会校验账号状态、授权码、机器绑定和端口归属。
 [[httpPlugins]]
 name = "frp-manager-lite-auth"
 addr = "127.0.0.1:{PORT}"
@@ -776,6 +1034,16 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return user
 
+    def require_software_license(self) -> bool:
+        if not SOFTWARE_LICENSE_REQUIRED:
+            return True
+        with db() as conn:
+            sw_license = current_software_license(conn)
+        if sw_license.get("licensed"):
+            return True
+        self.send_json({"ok": False, "error": "software_license_required", "license": sw_license}, 402)
+        return False
+
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         if path.startswith("/api/"):
@@ -795,14 +1063,24 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/frp-plugin":
             self.frp_plugin()
+        elif path == "/api/license/activate" and SOFTWARE_LICENSE_AUTHORITY:
+            self.license_authority_activate()
         elif path.startswith("/api/"):
             self.api_post(path)
         else:
             self.send_json({"ok": False, "error": "not found"}, 404)
 
+    def license_authority_activate(self) -> None:
+        try:
+            data = self.read_json()
+            ok, msg, payload = local_license_authority_activate(str(data.get("license_key", "")).strip().upper(), normalize_machine_id(str(data.get("machine_id", ""))))
+            self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "license": payload}, 200 if ok else 400)
+        except Exception as e:
+            self.send_json({"ok": False, "error": str(e)}, 400)
+
     def download_full_backup(self) -> None:
         admin = self.require_admin()
-        if not admin:
+        if not admin or not self.require_software_license():
             return
         stamp, payload = make_full_backup_zip(admin["username"])
         audit("backup_download", admin, None, None, "", f"full backup {stamp}")
@@ -822,7 +1100,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "error": str(e)}, 400)
 
     def export_invite_keys_csv(self) -> None:
-        if not self.require_admin():
+        if not self.require_admin() or not self.require_software_license():
             return
         import csv
         buf = io.StringIO()
@@ -856,19 +1134,29 @@ class Handler(BaseHTTPRequestHandler):
             with db() as conn:
                 self.send_json({"ok": True, "nodes": list_public_nodes(conn, active_only=True)})
             return
+        if path == "/api/license/status":
+            with db() as conn:
+                self.send_json({"ok": True, "license": current_software_license(conn)})
+            return
         if path == "/api/me":
             user = self.current_user
-            self.send_json({"ok": True, "user": public_user(user) if user else None})
+            with db() as conn:
+                sw_license = current_software_license(conn)
+            self.send_json({"ok": True, "user": public_user(user) if user else None, "software_license": sw_license})
             return
         user = self.require_user()
         if not user:
             return
         if path == "/api/dashboard":
             with db() as conn:
+                sw_license = current_software_license(conn)
+                if SOFTWARE_LICENSE_REQUIRED and not sw_license.get("licensed"):
+                    self.send_json({"ok": False, "error": "software_license_required", "license": sw_license}, 402)
+                    return
                 node = conn.execute("SELECT * FROM nodes WHERE id=?", (user["node_id"],)).fetchone()
                 ports = [r["port"] for r in conn.execute("SELECT port FROM ports WHERE node_id=? AND user_id=? ORDER BY port", (user["node_id"], user["id"]))]
                 tunnels = [row_dict(r) for r in conn.execute("SELECT * FROM tunnels WHERE user_id=? ORDER BY id DESC", (user["id"],))]
-            self.send_json({"ok": True, "user": public_user(user), "node": node_public(node) if node else None, "ports": ports, "tunnels": tunnels, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
+            self.send_json({"ok": True, "user": public_user(user), "software_license": sw_license, "node": node_public(node) if node else None, "ports": ports, "tunnels": tunnels, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
             return
         if path == "/api/admin/overview":
             if not self.require_admin():
@@ -919,7 +1207,16 @@ class Handler(BaseHTTPRequestHandler):
                     "invite_key_count": conn.execute("SELECT COUNT(*) c FROM invite_keys").fetchone()["c"],
                     "ban_count": conn.execute("SELECT COUNT(*) c FROM user_bans").fetchone()["c"],
                 }
-            self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "invite_keys": invite_keys, "logs": logs, "allowed_proxy_types": sorted(ALLOWED_PROXY_TYPES)})
+                sw_license = current_software_license(conn)
+                software_keys = []
+                if SOFTWARE_LICENSE_AUTHORITY:
+                    for k in conn.execute("SELECT * FROM software_license_keys ORDER BY id DESC LIMIT 200"):
+                        software_keys.append({
+                            "id": k["id"], "license_key": k["license_key"], "note": k["note"], "plan": k["plan"], "machine_id": k["machine_id"],
+                            "active": bool(k["active"]), "expires_at": k["expires_at"], "expires_text": fmt_time(k["expires_at"]),
+                            "expired": bool(k["expires_at"] and k["expires_at"] <= now()), "activated_at": k["activated_at"], "last_check_at": k["last_check_at"], "created_at": k["created_at"],
+                        })
+            self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "invite_keys": invite_keys, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys})
             return
         self.send_json({"ok": False, "error": "not found"}, 404)
 
@@ -973,6 +1270,23 @@ class Handler(BaseHTTPRequestHandler):
         if not user:
             return
 
+        if path == "/api/license/activate":
+            if user["role"] != "admin":
+                self.send_json({"ok": False, "error": "forbidden"}, 403)
+                return
+            ok, msg = activate_software_license(str(data.get("license_key", "")))
+            with db() as conn:
+                sw_license = current_software_license(conn)
+            audit("software_license_activate", user, None, None, "", msg)
+            self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "license": sw_license}, 200 if ok else 400)
+            return
+
+        if SOFTWARE_LICENSE_REQUIRED and not software_license_ok():
+            with db() as conn:
+                sw_license = current_software_license(conn)
+            self.send_json({"ok": False, "error": "software_license_required", "license": sw_license}, 402)
+            return
+
         if path == "/api/tunnels/create":
             self.tunnel_create(user, data)
         elif path == "/api/tunnels/toggle":
@@ -997,6 +1311,10 @@ class Handler(BaseHTTPRequestHandler):
             self.admin_extend_user(data)
         elif path == "/api/admin/users/reset-password":
             self.admin_reset_password(data)
+        elif path == "/api/admin/users/reset-license":
+            self.admin_reset_license(data)
+        elif path == "/api/admin/users/unbind-machine":
+            self.admin_unbind_machine(data)
         elif path == "/api/admin/users/delete":
             self.admin_delete_user(user, data)
         elif path == "/api/admin/users/ban":
@@ -1005,6 +1323,12 @@ class Handler(BaseHTTPRequestHandler):
             self.admin_lookup_port(data)
         elif path == "/api/admin/backup/r2":
             self.admin_backup_r2(user)
+        elif path == "/api/admin/software-licenses/create":
+            self.admin_software_license_create(data)
+        elif path == "/api/admin/software-licenses/toggle":
+            self.admin_software_license_toggle(data)
+        elif path == "/api/admin/software-licenses/unbind":
+            self.admin_software_license_unbind(data)
         elif path == "/api/admin/invite-keys/create":
             self.admin_invite_create(user, data)
         elif path == "/api/admin/invite-keys/toggle":
@@ -1028,23 +1352,38 @@ class Handler(BaseHTTPRequestHandler):
             proxy_type = str(data.get("proxy_type", "tcp")).lower()
             local_ip = str(data.get("local_ip", "127.0.0.1")).strip()
             local_port = int(data.get("local_port", 0))
-            remote_port = int(data.get("remote_port", 0))
+            remote_port = int(data.get("remote_port", 0) or 0)
+            custom_domains = ",".join([d.strip().lower() for d in str(data.get("custom_domains", "")).replace("\n", ",").split(",") if d.strip()])[:500]
+            secret_key = str(data.get("secret_key", "")).strip()[:120]
             if not name or len(name) > 40 or not name.replace("_", "").replace("-", "").isalnum():
                 raise ValueError("隧道名称只能包含字母、数字、下划线、短横线，长度 1-40")
             if proxy_type not in ALLOWED_PROXY_TYPES:
                 audit("tunnel_rejected_protocol", user, user["node_id"], remote_port, proxy_type, "协议不在白名单")
-                raise ValueError("当前只允许 TCP/UDP 协议")
+                raise ValueError("协议不支持")
             if not (1 <= local_port <= 65535):
                 raise ValueError("本地端口不合法")
+            if proxy_type in REMOTE_PORT_PROXY_TYPES:
+                if not (1 <= remote_port <= 65535):
+                    raise ValueError("TCP/UDP 必须选择公网端口")
+            else:
+                remote_port = 0
+            if proxy_type in DOMAIN_PROXY_TYPES and not custom_domains:
+                raise ValueError("HTTP/HTTPS/TCPMUX 必须填写自定义域名")
+            if proxy_type in SECRET_KEY_PROXY_TYPES and not secret_key:
+                secret_key = secrets.token_urlsafe(16)
             with db() as conn:
-                owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (user["node_id"], user["id"], remote_port)).fetchone()
-                if not owned:
-                    raise ValueError("这个公网端口不属于当前账号")
+                if proxy_type in REMOTE_PORT_PROXY_TYPES:
+                    owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (user["node_id"], user["id"], remote_port)).fetchone()
+                    if not owned:
+                        raise ValueError("这个公网端口不属于当前账号")
                 conn.execute(
-                    "INSERT INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, created_at) VALUES(?,?,?,?,?,?,?,?)",
-                    (user["node_id"], user["id"], name, proxy_type, local_ip, local_port, remote_port, now()),
+                    "INSERT INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (user["node_id"], user["id"], name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, now()),
                 )
-            audit("tunnel_create", user, user["node_id"], remote_port, proxy_type, f"{name} -> {local_ip}:{local_port}")
+            detail = f"{name} -> {local_ip}:{local_port}"
+            if custom_domains:
+                detail += f" domains={custom_domains}"
+            audit("tunnel_create", user, user["node_id"], remote_port or None, proxy_type, detail)
             self.send_json({"ok": True})
         except sqlite3.IntegrityError:
             self.send_json({"ok": False, "error": "隧道名称或公网端口已被使用"}, 400)
@@ -1099,6 +1438,32 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash(new_password), user_id))
             conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
         self.send_json({"ok": True, "message": f"用户 {row['username']} 新密码：{new_password}", "password": new_password})
+
+    def admin_reset_license(self, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        user_id = int(data.get("id", 0))
+        with db() as conn:
+            row = conn.execute("SELECT username FROM users WHERE id=? AND role!='admin'", (user_id,)).fetchone()
+            if not row:
+                self.send_json({"ok": False, "error": "用户不存在或不允许重置管理员授权"}, 404)
+                return
+            license_key = make_license_key()
+            conn.execute("UPDATE users SET license_key=?, machine_id='' WHERE id=?", (license_key, user_id))
+            conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        self.send_json({"ok": True, "message": f"用户 {row['username']} 新授权码：{license_key}", "license_key": license_key})
+
+    def admin_unbind_machine(self, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        user_id = int(data.get("id", 0))
+        with db() as conn:
+            row = conn.execute("SELECT username FROM users WHERE id=?", (user_id,)).fetchone()
+            if not row:
+                self.send_json({"ok": False, "error": "用户不存在"}, 404)
+                return
+            conn.execute("UPDATE users SET machine_id='' WHERE id=?", (user_id,))
+        self.send_json({"ok": True, "message": f"已解绑用户 {row['username']} 的机器"})
 
     def admin_delete_user(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
         if not self.require_admin():
@@ -1162,6 +1527,42 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchall()
             logs = [row_dict(r) for r in conn.execute("SELECT * FROM audit_logs WHERE remote_port=? ORDER BY id DESC LIMIT 30", (remote_port,))]
         self.send_json({"ok": True, "matches": [row_dict(r) for r in row], "logs": logs})
+
+    def admin_software_license_create(self, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        if not SOFTWARE_LICENSE_AUTHORITY:
+            self.send_json({"ok": False, "error": "当前实例不是授权服务器，请设置 FML_LICENSE_AUTHORITY=1"}, 400)
+            return
+        ok, msg, keys = create_software_license_keys_batch(
+            str(data.get("note", "")),
+            str(data.get("plan", "deploy")),
+            int(data.get("expires_days", 0)),
+            int(data.get("count", 1)),
+        )
+        self.send_json({"ok": ok, "message": msg if ok else None, "keys": keys, "key": keys[0] if keys else None, "error": None if ok else msg}, 200 if ok else 400)
+
+    def admin_software_license_toggle(self, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        if not SOFTWARE_LICENSE_AUTHORITY:
+            self.send_json({"ok": False, "error": "当前实例不是授权服务器"}, 400)
+            return
+        key_id = int(data.get("id", 0))
+        with db() as conn:
+            conn.execute("UPDATE software_license_keys SET active=CASE active WHEN 1 THEN 0 ELSE 1 END WHERE id=?", (key_id,))
+        self.send_json({"ok": True})
+
+    def admin_software_license_unbind(self, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        if not SOFTWARE_LICENSE_AUTHORITY:
+            self.send_json({"ok": False, "error": "当前实例不是授权服务器"}, 400)
+            return
+        key_id = int(data.get("id", 0))
+        with db() as conn:
+            conn.execute("UPDATE software_license_keys SET machine_id='', activated_at=0, last_check_at=0 WHERE id=?", (key_id,))
+        self.send_json({"ok": True, "message": "已解绑软件授权"})
 
     def admin_invite_create(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
         if not self.require_admin():
@@ -1293,7 +1694,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def download_frpc(self) -> None:
         user = self.require_user()
-        if not user:
+        if not user or not self.require_software_license():
             return
         with db() as conn:
             node = conn.execute("SELECT * FROM nodes WHERE id=?", (user["node_id"],)).fetchone()
@@ -1304,7 +1705,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_body(tunnel_config(user, node, tunnels).encode(), 200, "application/toml; charset=utf-8", {"Content-Disposition": 'attachment; filename="frpc.toml"'})
 
     def download_frps_example(self) -> None:
-        if not self.require_admin():
+        if not self.require_admin() or not self.require_software_license():
             return
         query = urlparse(self.path).query
         node_id = 0
@@ -1331,18 +1732,30 @@ class Handler(BaseHTTPRequestHandler):
             panel_token = metas.get("panelToken") or metas.get("panel_token") or content.get("panelToken") or ""
             reject = False
             reason = ""
+            license_key = metas.get("licenseKey") or metas.get("license_key") or content.get("licenseKey") or ""
+            machine_id = normalize_machine_id(metas.get("machineId") or metas.get("machine_id") or content.get("machineId") or "")
             with db() as conn:
                 user = conn.execute("SELECT * FROM users WHERE username=? AND active=1 AND (expires_at=0 OR expires_at>?)", (user_name, now())).fetchone()
                 if not user:
                     reject, reason = True, "unknown, disabled or expired user"
-                elif op.lower() == "login" and panel_token and not hmac.compare_digest(panel_token, user["token"]):
+                elif panel_token and not hmac.compare_digest(panel_token, user["token"]):
                     reject, reason = True, "invalid panel token"
-                elif op.lower() == "newproxy":
-                    remote_port = content.get("remote_port") or content.get("remotePort") or content.get("RemotePort")
-                    if remote_port is not None:
-                        owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (user["node_id"], user["id"], int(remote_port))).fetchone()
-                        if not owned:
-                            reject, reason = True, "remote port is not assigned to this user"
+                elif not license_key or not hmac.compare_digest(str(license_key), user["license_key"]):
+                    reject, reason = True, "invalid license key"
+                elif not machine_id or machine_id == "CHANGE_ME_DEVICE_ID":
+                    reject, reason = True, "missing machine id"
+                elif user["machine_id"] and user["machine_id"] != machine_id:
+                    reject, reason = True, "license already bound to another machine"
+                else:
+                    if not user["machine_id"]:
+                        conn.execute("UPDATE users SET machine_id=? WHERE id=?", (machine_id, user["id"]))
+                    if op.lower() == "newproxy":
+                        remote_port = content.get("remote_port") or content.get("remotePort") or content.get("RemotePort")
+                        proxy_type = str(content.get("type") or content.get("proxy_type") or content.get("ProxyType") or "").lower()
+                        if remote_port is not None and proxy_type in ("", "tcp", "udp"):
+                            owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (user["node_id"], user["id"], int(remote_port))).fetchone()
+                            if not owned:
+                                reject, reason = True, "remote port is not assigned to this user"
             self.send_json({"reject": reject, "reject_reason": reason})
         except Exception as e:
             self.send_json({"reject": True, "reject_reason": f"plugin error: {e}"})
