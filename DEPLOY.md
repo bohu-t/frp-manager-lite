@@ -71,7 +71,109 @@ python3 app.py
 
 如果 `FML_HOST=127.0.0.1`，只能本机访问。推荐生产环境通过 Nginx/Caddy 反代 HTTPS。
 
-## 5. systemd 服务
+## 5. Docker Compose 部署
+
+适合想快速上线、方便迁移和隔离运行环境的部署方式。
+
+### 5.1 准备配置
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+至少修改：
+
+```bash
+FML_ADMIN_PASSWORD=CHANGE_THIS_STRONG_PASSWORD
+FRP_AUTH_TOKEN=CHANGE_THIS_FRPS_TOKEN
+FRP_SERVER_ADDR=panel-or-frps.example.com
+```
+
+Compose 默认把容器端口 `8080` 发布到宿主机本地 `127.0.0.1:18081`：
+
+```bash
+FML_PUBLISH_PORT=18081
+```
+
+这样面板不会直接暴露公网，推荐由 Nginx/Caddy 反代 HTTPS。
+
+### 5.2 启动
+
+```bash
+docker compose up -d --build
+```
+
+Dockerfile 默认使用固定基础镜像 `python:3.13.5-slim-bookworm`。如果你的部署环境需要 Python 3.11，可改用：
+
+```bash
+docker compose build --build-arg PYTHON_IMAGE=python:3.11.9-slim-bookworm
+docker compose up -d
+```
+
+查看状态和日志：
+
+```bash
+docker compose ps
+docker compose logs -f
+```
+
+访问：
+
+```text
+http://127.0.0.1:18081
+```
+
+### 5.3 数据持久化
+
+Docker 部署时会自动设置：
+
+```bash
+FML_DB=/data/data.sqlite3
+```
+
+SQLite 数据保存在命名卷：
+
+```text
+frp-manager-lite-data
+```
+
+查看卷：
+
+```bash
+docker volume inspect frp-manager-lite_frp-manager-lite-data
+```
+
+备份数据库：
+
+```bash
+mkdir -p ./backup
+docker compose exec frp-manager-lite python - <<'PY'
+import sqlite3
+src = sqlite3.connect('/data/data.sqlite3')
+dst = sqlite3.connect('/data/backup.sqlite3')
+src.backup(dst)
+dst.close(); src.close()
+PY
+docker compose cp frp-manager-lite:/data/backup.sqlite3 ./backup/data-$(date +%F-%H%M%S).sqlite3
+```
+
+### 5.4 升级
+
+升级前建议先备份数据库，然后：
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+### 5.5 生产注意事项
+
+- `.env` 不要提交到 Git，里面包含管理员密码、frps token、R2 密钥等敏感信息。
+- 默认 Compose 已设置非 root 用户、健康检查、日志轮转和 256M 内存限制。
+- 如果你确实要直接公网暴露面板端口，把 `docker-compose.yml` 里的 `127.0.0.1:${FML_PUBLISH_PORT:-18081}:8080` 改为 `${FML_PUBLISH_PORT:-18081}:8080`，但更推荐保留本地绑定并走 HTTPS 反代。
+
+## 6. systemd 服务
 
 创建服务文件：
 
@@ -118,7 +220,7 @@ sudo systemctl status frp-manager-lite
 journalctl -u frp-manager-lite -f
 ```
 
-## 6. Nginx 反向代理 HTTPS
+## 7. Nginx 反向代理 HTTPS
 
 推荐面板只监听本机：
 
@@ -146,7 +248,7 @@ server {
 
 然后用 Certbot 或 acme.sh 配置 HTTPS。
 
-## 7. frps 节点部署
+## 8. frps 节点部署
 
 每个地区节点建议使用稳定域名：
 
@@ -181,7 +283,7 @@ allowPorts = [
 
 `allowPorts` 很重要，它限制整个 frps 节点只能使用你的端口池。
 
-## 8. 配置 frps HTTP Plugin
+## 9. 配置 frps HTTP Plugin
 
 仅靠面板不能防止用户手写 `frpc.toml` 抢端口。生产环境建议启用 frps HTTP Plugin。
 
@@ -204,7 +306,7 @@ ops = ["Login", "NewProxy"]
 - 用户使用的 remote_port 是否属于自己
 - 协议是否在白名单内，默认只允许 TCP/UDP
 
-## 9. 防滥用建议
+## 10. 防滥用建议
 
 默认不要开放 HTTP/HTTPS 代理给普通用户。推荐只允许：
 
@@ -222,7 +324,7 @@ udp
 
 收到投诉时，根据被投诉的 `服务器IP:端口` 查询并封禁。
 
-## 10. 备份与恢复
+## 11. 备份与恢复
 
 ### 面板全量备份
 
@@ -302,7 +404,7 @@ sudo systemctl start frp-manager-lite
 
 如果 `FML_DB` 使用了其他路径，请复制到对应路径。
 
-## 11. 升级
+## 12. 升级
 
 ```bash
 cd /opt/frp-manager-lite
@@ -312,7 +414,7 @@ sudo systemctl restart frp-manager-lite
 
 升级前建议备份数据库。
 
-## 12. 常见问题
+## 13. 常见问题
 
 ### 用户能不能自己乱用端口？
 

@@ -1,6 +1,6 @@
 # frp-manager-lite
 
-轻量级 frp 多用户管理面板，Python 标准库实现，无 Docker、无第三方依赖。适合做多地区 frps 节点、邀请码注册、每用户固定端口配额的管理面板。
+轻量级 frp 多用户管理面板，Python 标准库实现，无第三方依赖。支持直接运行或 Docker Compose 部署，适合做多地区 frps 节点、邀请码注册、每用户固定端口配额的管理面板。
 
 > 当前项目仍是轻量 MVP。正式运营前请务必配置 HTTPS、强管理员密码、备份、frps HTTP Plugin 鉴权、日志保留和投诉处理流程。
 
@@ -28,6 +28,8 @@
 
 ## 快速启动
 
+### 直接运行
+
 ```bash
 python3 app.py
 ```
@@ -37,6 +39,24 @@ python3 app.py
 ```text
 http://127.0.0.1:8080
 ```
+
+### Docker Compose
+
+```bash
+cp .env.example .env
+# 编辑 .env，至少修改 FML_ADMIN_PASSWORD 和 FRP_AUTH_TOKEN
+docker compose up -d --build
+```
+
+Compose 默认只发布到本机：
+
+```text
+http://127.0.0.1:18081
+```
+
+生产环境建议用 Nginx/Caddy 反代 HTTPS；SQLite 数据保存在 Docker 命名卷 `frp-manager-lite-data`。
+
+> Dockerfile 默认使用 `python:3.13.5-slim-bookworm`。如需换基础镜像，可构建时传入 `--build-arg PYTHON_IMAGE=python:3.11.9-slim-bookworm`。
 
 建议通过环境变量设置管理员密码和节点默认配置：
 
@@ -152,6 +172,9 @@ frp-manager-lite/
 │   ├── index.html
 │   ├── app.js
 │   └── style.css
+├── Dockerfile
+├── docker-compose.yml
+├── .env.example
 ├── README.md
 ├── DEPLOY.md
 └── .gitignore

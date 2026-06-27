@@ -1,0 +1,30 @@
+# Git / editor
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+
+# Runtime data / secrets
+*.sqlite3
+*.sqlite3-*
+*.db
+*.log
+.env
+.env.*
+!.env.example
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local backup snapshots
+app_before_*.py
+app_legacy.py
+frontend/*_before_*.js
+frontend/*_before_*.css
+
+# Docs are not needed in the runtime image
+README.md
+DEPLOY.md
