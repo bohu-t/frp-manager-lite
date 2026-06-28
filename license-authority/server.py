@@ -231,15 +231,18 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             self.send_json({"ok": False, "error": "请求格式错误"}, 400)
             return
-        license_key = str(data.get("license_key", ""))
-        machine_id = str(data.get("machine_id", ""))
-        app_name = str(data.get("app", "frp-manager-lite"))
-        ok, msg, payload = activate_license(license_key, machine_id, app_name)
-        print(f"[activate] key={license_key[:12]}*** machine={machine_id[:16]}*** ok={ok} msg={msg}")
-        if ok and payload:
-            self.send_json({"ok": True, "message": msg, "license": payload})
-        else:
-            self.send_json({"ok": False, "error": msg}, 400)
+        try:
+            license_key = str(data.get("license_key", ""))
+            machine_id = str(data.get("machine_id", ""))
+            app_name = str(data.get("app", "frp-manager-lite"))
+            ok, msg, payload = activate_license(license_key, machine_id, app_name)
+            print(f"[activate] key={license_key[:12]}*** machine={machine_id[:16]}*** ok={ok} msg={msg}")
+            if ok and payload:
+                self.send_json({"ok": True, "message": msg, "license": payload})
+            else:
+                self.send_json({"ok": False, "error": msg}, 400)
+        except Exception as e:
+            self.send_json({"ok": False, "error": f"服务器内部错误：{e}"}, 500)
 
     # ── admin endpoints ──────────────────────────────────
 

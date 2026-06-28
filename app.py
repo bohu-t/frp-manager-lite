@@ -1101,10 +1101,13 @@ class Handler(BaseHTTPRequestHandler):
         if not validate_csrf(csrf):
             self.send_json({"ok": False, "error": "CSRF token 无效，请刷新页面"}, 403)
             return
-        ok, msg = activate_software_license(str(data.get("license_key", "")), str(data.get("server_url", "")))
-        with db() as conn:
-            sw_license = current_software_license(conn)
-        self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "license": sw_license}, 200 if ok else 400)
+        try:
+            ok, msg = activate_software_license(str(data.get("license_key", "")), str(data.get("server_url", "")))
+            with db() as conn:
+                sw_license = current_software_license(conn)
+            self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "license": sw_license}, 200 if ok else 400)
+        except Exception as e:
+            self.send_json({"ok": False, "error": f"激活处理失败：{e}"}, 500)
 
     def download_full_backup(self) -> None:
         admin = self.require_admin()
@@ -1309,7 +1312,11 @@ class Handler(BaseHTTPRequestHandler):
             if user["role"] != "admin":
                 self.send_json({"ok": False, "error": "forbidden"}, 403)
                 return
-            ok, msg = activate_software_license(str(data.get("license_key", "")), str(data.get("server_url", "")))
+            try:
+                ok, msg = activate_software_license(str(data.get("license_key", "")), str(data.get("server_url", "")))
+            except Exception as e:
+                self.send_json({"ok": False, "error": f"激活处理失败：{e}"}, 500)
+                return
             with db() as conn:
                 sw_license = current_software_license(conn)
             audit("software_license_activate", user, None, None, "", msg)
