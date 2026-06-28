@@ -203,8 +203,11 @@ def current_software_license(conn: sqlite3.Connection) -> dict[str, Any]:
 def software_license_ok() -> bool:
     if not SOFTWARE_LICENSE_REQUIRED:
         return True
-    with db() as conn:
-        return bool(current_software_license(conn).get("active"))
+    try:
+        with db() as conn:
+            return bool(current_software_license(conn).get("active"))
+    except Exception:
+        return False
 
 
 def public_user(user: sqlite3.Row) -> dict[str, Any]:
@@ -1071,6 +1074,12 @@ class Handler(BaseHTTPRequestHandler):
             self.serve_static(path)
 
     def do_POST(self) -> None:  # noqa: N802
+        try:
+            self._do_POST()
+        except Exception as e:
+            self.send_json({"ok": False, "error": f"服务器错误：{e}"}, 500)
+
+    def _do_POST(self) -> None:
         path = urlparse(self.path).path
         if path == "/frp-plugin":
             self.frp_plugin()
