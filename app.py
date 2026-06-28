@@ -125,10 +125,6 @@ def make_license_key() -> str:
     return "LIC-" + secrets.token_urlsafe(24).replace("-", "").replace("_", "")[:32].upper()
 
 
-def make_machine_id() -> str:
-    return "MID-" + secrets.token_urlsafe(18).replace("-", "").replace("_", "")[:24].upper()
-
-
 def normalize_machine_id(machine_id: str) -> str:
     return " ".join(machine_id.strip().split())[:128]
 
@@ -221,16 +217,13 @@ def software_license_ok() -> bool:
 
 def public_user(user: sqlite3.Row) -> dict[str, Any]:
     license_key = row_val(user, "license_key")
-    machine_id = row_val(user, "machine_id")
     return {
         "id": user["id"],
         "username": user["username"],
         "role": user["role"],
         "token": user["token"],
         "license_key": license_key,
-        "machine_id": machine_id,
         "licensed": bool(license_key),
-        "license_bound": bool(machine_id),
         "max_ports": user["max_ports"],
         "active": bool(user["active"]),
         "expires_at": user["expires_at"],
@@ -539,8 +532,8 @@ def init_db() -> None:
         admin = conn.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
         if not admin:
             conn.execute(
-                "INSERT INTO users(username, password_hash, role, token, license_key, machine_id, max_ports, expires_at, node_id, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (ADMIN_USER, password_hash(ADMIN_PASSWORD), "admin", secrets.token_urlsafe(24), make_license_key(), make_machine_id(), DEFAULT_MAX_PORTS, 0, default_node_id, now()),
+                "INSERT INTO users(username, password_hash, role, token, license_key, max_ports, expires_at, node_id, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                (ADMIN_USER, password_hash(ADMIN_PASSWORD), "admin", secrets.token_urlsafe(24), make_license_key(), DEFAULT_MAX_PORTS, 0, default_node_id, now()),
             )
         else:
             conn.execute("UPDATE users SET node_id=? WHERE role='admin' AND node_id IS NULL", (default_node_id,))
@@ -566,8 +559,8 @@ def create_user(username: str, password: str, max_ports: int, expires_days: int,
             return False, f"端口池不足，只剩 {len(free_ports)} 个可用端口"
         try:
             cur = conn.execute(
-                "INSERT INTO users(username, password_hash, role, token, license_key, machine_id, max_ports, expires_at, node_id, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (username, password_hash(password), "user", secrets.token_urlsafe(24), make_license_key(), make_machine_id(), max_ports, expires_at, node_id, now()),
+                "INSERT INTO users(username, password_hash, role, token, license_key, max_ports, expires_at, node_id, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                (username, password_hash(password), "user", secrets.token_urlsafe(24), make_license_key(), max_ports, expires_at, node_id, now()),
             )
         except sqlite3.IntegrityError:
             return False, "用户名已存在"
@@ -734,8 +727,8 @@ def register_with_invite(username: str, password: str, invite_key: str, node_id:
         user_expires_at = 0 if expires_days == 0 else now() + expires_days * 86400
         try:
             cur = conn.execute(
-                "INSERT INTO users(username, password_hash, role, token, license_key, machine_id, max_ports, expires_at, node_id, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (username, password_hash(password), "user", secrets.token_urlsafe(24), make_license_key(), make_machine_id(), max_ports, user_expires_at, node_id, now()),
+                "INSERT INTO users(username, password_hash, role, token, license_key, max_ports, expires_at, node_id, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                (username, password_hash(password), "user", secrets.token_urlsafe(24), make_license_key(), max_ports, user_expires_at, node_id, now()),
             )
         except sqlite3.IntegrityError:
             return False, "用户名已存在"
@@ -827,11 +820,6 @@ def rate_limit_check(key: str, limit: int, window: int = RATE_WINDOW) -> tuple[b
 
 
 def tunnel_config(user: sqlite3.Row, node: sqlite3.Row, tunnels: list[sqlite3.Row]) -> str:
-    mid = row_val(user, "machine_id")
-    if not mid:
-        mid = make_machine_id()
-        with db() as conn:
-            conn.execute("UPDATE users SET machine_id=? WHERE id=?", (mid, user["id"]))
     lines = [
         f'serverAddr = "{node["server_addr"]}"',
         f"serverPort = {node['server_port']}",
@@ -841,7 +829,6 @@ def tunnel_config(user: sqlite3.Row, node: sqlite3.Row, tunnels: list[sqlite3.Ro
         f'user = "{user["username"]}"',
         f'metadatas.panelToken = "{user["token"]}"',
         f'metadatas.licenseKey = "{row_val(user, "license_key")}"',
-        f'metadatas.machineId = "{mid}"',
         "",
     ]
     for t in tunnels:
@@ -1804,27 +1791,15 @@ class Handler(BaseHTTPRequestHandler):
             reject = False
             reason = ""
             license_key = metas.get("licenseKey") or metas.get("license_key") or content.get("licenseKey") or ""
-            machine_id = normalize_machine_id(metas.get("machineId") or metas.get("machine_id") or content.get("machineId") or "")
             with db() as conn:
                 user = conn.execute("SELECT * FROM users WHERE username=? AND active=1 AND (expires_at=0 OR expires_at>?)", (user_name, now())).fetchone()
                 if not user:
                     reject, reason = True, "unknown, disabled or expired user"
                 elif panel_token and not hmac.compare_digest(panel_token, user["token"]):
                     reject, reason = True, "invalid panel token"
-                elif not license_key or not hmac.compare_digest(str(license_key), user["license_key"]):
+                elif not license_key or not hmac.compare_digest(str(license_key), row_val(user, "license_key")):
                     reject, reason = True, "invalid license key"
-                elif not machine_id or machine_id == "CHANGE_ME_DEVICE_ID":
-                    # Legacy placeholder — auto-bind if not already bound
-                    if not user["machine_id"]:
-                        machine_id = make_machine_id()
-                        conn.execute("UPDATE users SET machine_id=? WHERE id=?", (machine_id, user["id"]))
-                    else:
-                        reject, reason = True, "missing machine id"
-                elif user["machine_id"] and user["machine_id"] != machine_id:
-                    reject, reason = True, "license already bound to another machine"
                 else:
-                    if not user["machine_id"]:
-                        conn.execute("UPDATE users SET machine_id=? WHERE id=?", (machine_id, user["id"]))
                     if op.lower() == "newproxy":
                         remote_port = content.get("remote_port") or content.get("remotePort") or content.get("RemotePort")
                         proxy_type = str(content.get("type") or content.get("proxy_type") or content.get("ProxyType") or "").lower()
