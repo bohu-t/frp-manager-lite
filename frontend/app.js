@@ -240,18 +240,22 @@ function renderLicenseActivatePublic(){
       <section class="auth-hero card">
         <div class="brand-mark">🔑</div>
         <h2>需要软件授权激活</h2>
-        <p>首次使用请向卖家索取部署版授权码。激活后系统自动绑定当前服务器，无需手动生成机器码。</p>
+        <p>请联系卖家获取<strong>鉴权服务器地址</strong>和<strong>软件授权码</strong>。激活后自动绑定当前服务器，一机一码。</p>
         <div class="feature-grid">
-          <div><b>一机一绑</b><span>激活后授权码与服务器绑定</span></div>
-          <div><b>安全验证</b><span>卖家签名防篡改</span></div>
+          <div><b>远程验证</b><span>授权码由卖家鉴权服务器签发</span></div>
+          <div><b>一机一绑</b><span>激活后授权码与服务器指纹绑定</span></div>
+          <div><b>防篡改</b><span>签名验证防止伪造授权</span></div>
         </div>
         <div class="hero-label">服务器指纹</div>
         <div class="hero-points"><span><code style="word-break:break-all">${esc(machineId)}</code></span></div>
       </section>
       <section class="auth-card card">
-        <div class="section-title"><h2>激活授权</h2><p>${esc(lic.message || '请输入卖家提供的授权码')}</p></div>
+        <div class="section-title"><h2>激活授权</h2><p>${esc(lic.message || '请填写卖家提供的以下信息')}</p></div>
         <form id="licenseActivateForm" class="stack-form">
-          <label>软件授权码</label><input name="license_key" placeholder="FMLD-..." required>
+          <label>鉴权服务器地址</label>
+          <input name="server_url" placeholder="https://license.你的卖家域名.com" required>
+          <label>软件授权码</label>
+          <input name="license_key" placeholder="FMLD-..." required>
           <p class="row"><button class="wide">激活并绑定</button></p>
         </form>
       </section>

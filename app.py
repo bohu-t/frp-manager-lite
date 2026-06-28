@@ -182,6 +182,7 @@ def public_software_license(row: sqlite3.Row | None) -> dict[str, Any]:
         "license_key": row["license_key"],
         "machine_id": fingerprint,
         "bound_machine_id": row["machine_id"],
+        "server_url": row.get("server_url", "") if "server_url" in row.keys() else "",
         "plan": row["plan"],
         "expires_at": expires_at,
         "expires_text": fmt_time(expires_at),
@@ -484,6 +485,7 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 license_key TEXT NOT NULL,
                 machine_id TEXT NOT NULL,
+                server_url TEXT NOT NULL DEFAULT '',
                 plan TEXT NOT NULL DEFAULT 'deploy',
                 expires_at INTEGER NOT NULL DEFAULT 0,
                 active INTEGER NOT NULL DEFAULT 1,
@@ -510,6 +512,10 @@ def init_db() -> None:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
         if "expires_at" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0")
+        # software_license.server_url migration
+        sw_cols = {r["name"] for r in conn.execute("PRAGMA table_info(software_license)").fetchall()}
+        if "server_url" not in sw_cols:
+            conn.execute("ALTER TABLE software_license ADD COLUMN server_url TEXT NOT NULL DEFAULT ''")
         migrate_region_nodes(conn, default_node_id)
         conn.executemany(
             "INSERT OR IGNORE INTO ports(node_id, port, created_at) VALUES(?, ?, ?)",
@@ -574,11 +580,12 @@ def local_license_authority_activate(license_key: str, machine_id: str) -> tuple
     return True, "授权成功", payload
 
 
-def call_license_server(license_key: str, machine_id: str) -> tuple[bool, str, dict[str, Any] | None]:
-    if not SOFTWARE_LICENSE_SERVER_URL:
+def call_license_server(license_key: str, machine_id: str, override_url: str = "") -> tuple[bool, str, dict[str, Any] | None]:
+    server_url = (override_url or SOFTWARE_LICENSE_SERVER_URL).rstrip("/")
+    if not server_url:
         return local_license_authority_activate(license_key, machine_id)
     body = json.dumps({"license_key": license_key, "machine_id": machine_id, "app": APP_NAME}).encode("utf-8")
-    req = urllib.request.Request(f"{SOFTWARE_LICENSE_SERVER_URL}/api/license/activate", data=body, method="POST", headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(f"{server_url}/api/license/activate", data=body, method="POST", headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             data = json.loads(resp.read().decode("utf-8"))
@@ -599,19 +606,20 @@ def call_license_server(license_key: str, machine_id: str) -> tuple[bool, str, d
     return True, str(data.get("message") or "授权成功"), payload
 
 
-def activate_software_license(license_key: str) -> tuple[bool, str]:
+def activate_software_license(license_key: str, server_url: str = "") -> tuple[bool, str]:
     license_key = license_key.strip().upper()
     if not license_key:
         return False, "请输入软件授权码"
+    server_url = server_url.strip()
     machine_id = software_machine_fingerprint()
-    ok, msg, payload = call_license_server(license_key, machine_id)
+    ok, msg, payload = call_license_server(license_key, machine_id, server_url)
     if not ok or not payload:
         return False, msg
     with db() as conn:
         conn.execute("UPDATE software_license SET active=0")
         conn.execute(
-            "INSERT INTO software_license(license_key, machine_id, plan, expires_at, active, signature, activated_at, last_check_at, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-            (payload["license_key"], payload["machine_id"], payload.get("plan", "deploy"), int(payload.get("expires_at") or 0), 1, payload.get("signature", ""), now(), now(), now()),
+            "INSERT INTO software_license(license_key, machine_id, server_url, plan, expires_at, active, signature, activated_at, last_check_at, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (payload["license_key"], payload["machine_id"], server_url, payload.get("plan", "deploy"), int(payload.get("expires_at") or 0), 1, payload.get("signature", ""), now(), now(), now()),
         )
     return True, "软件授权已激活并绑定当前服务器"
 
@@ -1090,7 +1098,7 @@ class Handler(BaseHTTPRequestHandler):
         if not validate_csrf(csrf):
             self.send_json({"ok": False, "error": "CSRF token 无效，请刷新页面"}, 403)
             return
-        ok, msg = activate_software_license(str(data.get("license_key", "")))
+        ok, msg = activate_software_license(str(data.get("license_key", "")), str(data.get("server_url", "")))
         with db() as conn:
             sw_license = current_software_license(conn)
         self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "license": sw_license}, 200 if ok else 400)
@@ -1298,7 +1306,7 @@ class Handler(BaseHTTPRequestHandler):
             if user["role"] != "admin":
                 self.send_json({"ok": False, "error": "forbidden"}, 403)
                 return
-            ok, msg = activate_software_license(str(data.get("license_key", "")))
+            ok, msg = activate_software_license(str(data.get("license_key", "")), str(data.get("server_url", "")))
             with db() as conn:
                 sw_license = current_software_license(conn)
             audit("software_license_activate", user, None, None, "", msg)
