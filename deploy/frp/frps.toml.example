@@ -1,0 +1,26 @@
+# frps.toml production example for frp-manager-lite.
+# Copy to /etc/frp/frps.toml or generate it with scripts/deploy-production.sh.
+
+bindPort = 7000
+
+auth.method = "token"
+auth.token = "CHANGE_THIS_FRPS_TOKEN"
+
+# Keep this range aligned with FML_PORT_START/FML_PORT_END and the node settings in the panel.
+allowPorts = [
+  { start = 20000, end = 20199 }
+]
+
+# Local-only frps dashboard. Put it behind SSH tunnel if you need to view it remotely.
+webServer.addr = "127.0.0.1"
+webServer.port = 7500
+webServer.user = "admin"
+webServer.password = "CHANGE_THIS_FRPS_DASHBOARD_PASSWORD"
+
+# Production-required authorization hook. It prevents users from bypassing the panel
+# with hand-written frpc configs and stealing ports.
+[[httpPlugins]]
+name = "frp-manager-lite-auth"
+addr = "127.0.0.1:18081"
+path = "/frp-plugin"
+ops = ["Login", "NewProxy"]
