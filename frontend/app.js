@@ -176,7 +176,14 @@ async function renderLogin(){
     try{
       const data = await api('/api/login', {method:'POST', body:{username:fd.get('username'), password:fd.get('password')}});
       currentUser = data.user; setNav(); await loadDashboard();
-    }catch(err){ show(err.message, true); }
+    }catch(err){
+      if(err.message === 'software_license_required'){
+        softwareLicense = err.data?.license || softwareLicense;
+        setNav();
+        return renderLicenseActivate();
+      }
+      show(err.message, true);
+    }
   };
 }
 
@@ -315,7 +322,7 @@ async function loadDashboard(){
   try{ data = await api('/api/dashboard'); }
   catch(err){
     if(err.message === 'unauthorized') return renderLogin();
-    if(err.message === 'software_license_required' && currentUser?.role === 'admin'){
+    if(err.message === 'software_license_required'){
       softwareLicense = err.data?.license || softwareLicense;
       setNav();
       return renderLicenseActivate();
