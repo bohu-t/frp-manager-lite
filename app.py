@@ -126,15 +126,18 @@ def normalize_machine_id(machine_id: str) -> str:
 
 def software_machine_fingerprint() -> str:
     parts: list[str] = []
-    for p in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+    # Prefer host machine-id mounted from /host/machine-id (stable across containers)
+    host_machine_id_paths = ("/host/machine-id", "/etc/machine-id", "/var/lib/dbus/machine-id")
+    for p in host_machine_id_paths:
         try:
             value = Path(p).read_text().strip()
-            if value:
+            if value and len(value) > 8:
                 parts.append(value)
                 break
         except Exception:
             pass
-    parts.extend([os.uname().nodename if hasattr(os, "uname") else "", str(BASE_DIR), str(DB_PATH)])
+    # Fallback: use DB path as secondary anchor
+    parts.append(str(DB_PATH.resolve()))
     raw = "|".join(parts)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 

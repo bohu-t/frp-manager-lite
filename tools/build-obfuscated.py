@@ -104,7 +104,7 @@ def write_dockerfile():
 FROM python:3.11-slim
 
 RUN pip install --no-cache-dir flask 2>/dev/null || true
-RUN mkdir -p /data
+RUN mkdir -p /data /host
 WORKDIR /app
 
 COPY app.py /app/app.py
@@ -138,6 +138,7 @@ services:
       - .env
     volumes:
       - frp-manager-lite-data:/data
+      - /etc/machine-id:/host/machine-id:ro
 
 volumes:
   frp-manager-lite-data:
