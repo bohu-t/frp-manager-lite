@@ -1487,9 +1487,10 @@ class Handler(BaseHTTPRequestHandler):
                 secret_key = secrets.token_urlsafe(16)
             with db() as conn:
                 if proxy_type in REMOTE_PORT_PROXY_TYPES:
-                    owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (user["node_id"], user["id"], remote_port)).fetchone()
-                    if not owned:
-                        raise ValueError("这个公网端口不属于当前账号")
+                    if user["role"] != "admin":
+                        owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (user["node_id"], user["id"], remote_port)).fetchone()
+                        if not owned:
+                            raise ValueError("这个公网端口不属于当前账号")
                 conn.execute(
                     "INSERT INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (user["node_id"], user["id"], name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, now()),
