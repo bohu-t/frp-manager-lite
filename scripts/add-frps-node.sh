@@ -15,8 +15,8 @@ NODE_NAME="${NODE_NAME:-}"
 REGION="${REGION:-}"
 FRPS_BIND_PORT="${FRPS_BIND_PORT:-7000}"
 FRPS_TOKEN="${FRPS_TOKEN:-}"
-PORT_START="${PORT_START:-20000}"
-PORT_END="${PORT_END:-20199}"
+PORT_START="${PORT_START:-}"
+PORT_END="${PORT_END:-}"
 FRPS_DASHBOARD_PORT="${FRPS_DASHBOARD_PORT:-7500}"
 FRPS_DASHBOARD_USER="${FRPS_DASHBOARD_USER:-admin}"
 FRPS_DASHBOARD_PWD="${FRPS_DASHBOARD_PWD:-}"
@@ -117,18 +117,19 @@ while [[ -z "$FRPS_TOKEN" ]]; do
 done
 
 while [[ -z "$PORT_START" ]] || ! [[ "$PORT_START" =~ ^[0-9]+$ ]]; do
-  read -r -p "  用户端口池起始 [20000]：" PORT_START
-  PORT_START="${PORT_START:-20000}"
+  read -r -p "  用户端口池起始（例如 30000）：" PORT_START
 done
 
 while [[ -z "$PORT_END" ]] || ! [[ "$PORT_END" =~ ^[0-9]+$ ]]; do
-  read -r -p "  用户端口池结束 [20199]：" PORT_END
-  PORT_END="${PORT_END:-20199}"
+  read -r -p "  用户端口池结束（例如 30199）：" PORT_END
 done
 
 if [[ $PORT_END -le $PORT_START ]]; then
-  PORT_END=$((PORT_START + 199))
-  warn "端口池范围无效，已自动调整为 ${PORT_START}-${PORT_END}"
+  err "端口池范围不合法：${PORT_START}-${PORT_END}，结束必须大于起始"
+fi
+
+if [[ $((PORT_END - PORT_START + 1)) -gt 20000 ]]; then
+  err "端口池太大（${PORT_COUNT} 个），单节点最多 20000 个端口"
 fi
 
 PORT_COUNT=$((PORT_END - PORT_START + 1))
