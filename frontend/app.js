@@ -345,6 +345,10 @@ async function loadDashboard(){
     </tr>`;
   }).join('') || emptyRow(6, '还没有隧道');
   const portOptions = data.ports.map(p => `<option value="${p}">${p}${used.has(p) ? '（已用）' : ''}</option>`).join('');
+  const isAdmin = data.user.role === 'admin';
+  const remotePortField = isAdmin
+    ? `<input name="remote_port" type="number" min="1" max="65535" placeholder="输入端口号">`
+    : `<select name="remote_port">${portOptions}</select>`;
   const proxyTypeOptions = (data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux']).map(t => `<option value="${t}">${t}</option>`).join('');
   app.innerHTML = `
     <div class="grid">
@@ -357,7 +361,7 @@ async function loadDashboard(){
       <div><label>类型</label><select name="proxy_type" id="proxyTypeSelect">${proxyTypeOptions}</select></div>
       <div><label>本地 IP</label><input name="local_ip" value="127.0.0.1" required></div>
       <div><label>本地端口</label><input name="local_port" type="number" min="1" max="65535" value="80" required></div>
-      <div class="remote-port-field"><label>公网端口</label><select name="remote_port">${portOptions}</select></div>
+      <div class="remote-port-field"><label>公网端口</label>${remotePortField}</div>
       <div class="domain-field hidden"><label>自定义域名</label><input name="custom_domains" placeholder="app.example.com,api.example.com"></div>
       <div class="secret-field hidden"><label>访问密钥</label><input name="secret_key" placeholder="留空自动生成"></div>
       <div style="align-self:end"><button>创建</button></div>

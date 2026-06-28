@@ -1251,6 +1251,8 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 node = conn.execute("SELECT * FROM nodes WHERE id=?", (user["node_id"],)).fetchone()
                 ports = [r["port"] for r in conn.execute("SELECT port FROM ports WHERE node_id=? AND user_id=? ORDER BY port", (user["node_id"], user["id"]))]
+                if not ports and user["role"] == "admin":
+                    ports = [r["port"] for r in conn.execute("SELECT port FROM ports WHERE node_id=? ORDER BY port", (user["node_id"],))]
                 tunnels = [row_dict(r) for r in conn.execute("SELECT * FROM tunnels WHERE user_id=? ORDER BY id DESC", (user["id"],))]
             self.send_json({"ok": True, "user": public_user(user), "software_license": sw_license, "node": node_public(node) if node else None, "ports": ports, "tunnels": tunnels, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
             return
