@@ -10,7 +10,6 @@ Output: dist/obfuscated/ contains the encrypted deployable code.
 """
 import argparse
 import base64
-import hashlib
 import os
 import secrets
 import sys
@@ -61,40 +60,6 @@ exec(compile(c,os.path.abspath(__file__),"exec"),g,g)
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text(loader)
     print(f"  obfuscated: {src.name} → {dst.name} ({len(original)} → {dst.stat().st_size} bytes)")
-
-
-def obfuscate_frontend(frontend_js: Path, dst_js: Path, seed: bytes):
-    """Minify + encode frontend JS, produce loadable wrapper."""
-    original = frontend_js.read_bytes()
-
-    # Compress
-    compressed = zlib.compress(original, level=9)
-
-    # XOR with seed
-    masked = xor_mask(compressed, seed)
-
-    # Base64
-    encoded = base64.b64encode(masked).decode("ascii")
-
-    seed_hex = "".join(f"'\\x{b:02x}'" for b in seed)
-
-    wrapper = f'''// Obfuscated frontend loader
-(function(){{
-  var s=[{"".join(f"0x{b:02x}," for b in seed)}];
-  var d=atob("{encoded}");
-  var b=new Uint8Array(d.length);
-  for(var i=0;i<d.length;i++)b[i]=d.charCodeAt(i);
-  var k=new Uint8Array(s.length);
-  for(var i=0;i<s.length;i++)k[i]=s[i];
-  for(var i=0;i<b.length;i++)b[i]^=k[i%k.length];
-  var r=new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream("deflate")));
-  r.text().then(function(c){{eval(c)}});
-}})();
-'''
-
-    dst_js.parent.mkdir(parents=True, exist_ok=True)
-    dst_js.write_text(wrapper)
-    print(f"  obfuscated: {frontend_js.name} → {dst_js.name} ({len(original)} → {dst_js.stat().st_size} bytes)")
 
 
 def write_dockerfile():
@@ -192,20 +157,33 @@ def main():
     # Obfuscate Python source
     obfuscate_file(ENTRY_SOURCE, ENTRY_TARGET, seed)
 
-    # Obfuscate frontend JS
-    for js_file in (FRONTEND_SRC / "app.js",):
-        if js_file.exists():
-            obfuscate_frontend(js_file, FRONTEND_DST / js_file.name, seed)
-        else:
-            print(f"  SKIP {js_file} — not found")
-
-    # Copy static files (HTML, CSS — public anyway)
+    # Frontend: copy JS/CSS/HTML as-is — browser code can't be hidden anyway
     for f in FRONTEND_SRC.iterdir():
-        if f.is_file() and f.suffix in {".html", ".css"} and "_before_" not in f.name and "_bak" not in f.name and "_legacy" not in f.name:
-            target = FRONTEND_DST / f.name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(f.read_bytes())
-            print(f"  copied: {f.name}")
+        if not f.is_file():
+            continue
+        if f.name == "app.js" or f.suffix in {".html", ".css"}:
+            if f.name == "app.js":
+                # Light minification: strip comments and blank lines only
+                js_content = f.read_text()
+                # Remove // comments (but not URLs with //)
+                lines = []
+                for line in js_content.split('\n'):
+                    stripped = line.strip()
+                    if stripped.startswith('//'):
+                        continue
+                    if not stripped and not line.endswith('\n'):
+                        continue
+                    lines.append(line.strip('\t'))
+                minified = '\n'.join(lines)
+                target = FRONTEND_DST / f.name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(minified)
+                print(f"  minified: {f.name} ({len(js_content)} → {len(minified)} chars)")
+            else:
+                target = FRONTEND_DST / f.name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(f.read_bytes())
+                print(f"  copied: {f.name}")
 
     # Copy .env.example, README, deploy/
     for f in [".env.example", "README.md", "DEPLOY.md", "deploy"]:
