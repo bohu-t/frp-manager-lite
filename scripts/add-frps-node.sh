@@ -10,7 +10,7 @@ set -Eeuo pipefail
 # 高级用户也可用环境变量跳过交互：
 #   PANEL_URL=... SETUP_KEY=... NODE_NAME=hk-01 bash add-frps-node.sh
 
-FRP_VERSION="${FRP_VERSION:-0.62.1}"
+FRP_VERSION="${FRP_VERSION:-0.66.0}"
 NODE_NAME="${NODE_NAME:-}"
 REGION="${REGION:-}"
 FRPS_BIND_PORT="${FRPS_BIND_PORT:-7000}"
