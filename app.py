@@ -272,6 +272,8 @@ def ensure_default_node(conn: sqlite3.Connection) -> int:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(nodes)").fetchall()}
     if "region" not in cols:
         conn.execute("ALTER TABLE nodes ADD COLUMN region TEXT NOT NULL DEFAULT '默认地区'")
+    if "web_port" not in cols:
+        conn.execute("ALTER TABLE nodes ADD COLUMN web_port INTEGER NOT NULL DEFAULT 0")
     row = conn.execute("SELECT id FROM nodes ORDER BY id LIMIT 1").fetchone()
     if row:
         return int(row["id"])
