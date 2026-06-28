@@ -18,7 +18,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 APP_NAME = "license-authority"
 BASE_DIR = Path(__file__).resolve().parent
@@ -267,7 +267,7 @@ class Handler(BaseHTTPRequestHandler):
     def admin_list_keys(self):
         if not self.require_admin():
             return
-        qs = urllib.parse.parse_qs(urlparse(self.path).query)
+        qs = parse_qs(urlparse(self.path).query)
         search = qs.get("q", [""])[0]
         with db() as conn:
             if search:
