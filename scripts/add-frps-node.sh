@@ -141,7 +141,7 @@ echo ''
 echo -e "${CYAN}━━━ 第 4 步：注册到面板 ━━━${NC}"
 log "正在注册节点 ${NODE_NAME}（${REGION}）…"
 
-API_RESP="$(curl -fsS --connect-timeout 10 -X POST "${PANEL_URL}/api/setup/register-node" \
+API_RESP="$(curl -sS --connect-timeout 10 -X POST "${PANEL_URL}/api/setup/register-node" \
   -H "Content-Type: application/json" \
   -d "$(python3 -c "
 import json, sys
@@ -161,7 +161,7 @@ if echo "$API_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.e
   log "面板注册成功！"
 else
   echo ''
-  err "面板返回错误：${API_RESP}"
+  err "面板返回：${API_RESP}"
 fi
 
 # ── 第 5 步：安装 frps ────────────────────────────────────
