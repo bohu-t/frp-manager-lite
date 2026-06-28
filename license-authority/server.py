@@ -267,11 +267,8 @@ class Handler(BaseHTTPRequestHandler):
     def admin_list_keys(self):
         if not self.require_admin():
             return
-        search = ""
-        for k, v in urlparse(self.path).query.split("&"):
-            if k == "q":
-                search = v
-                break
+        qs = urllib.parse.parse_qs(urlparse(self.path).query)
+        search = qs.get("q", [""])[0]
         with db() as conn:
             if search:
                 rows = conn.execute(
