@@ -151,6 +151,8 @@ udp
 | --- | --- | --- |
 | `FML_HOST` | `127.0.0.1` | 面板监听地址 |
 | `FML_PORT` | `8080` | 面板监听端口 |
+| `FML_PUBLISH_BIND` | `127.0.0.1` | Docker Compose 发布绑定地址；设 `0.0.0.0` 可从外网直连 |
+| `FML_PUBLISH_PORT` | `18081` | Docker Compose 发布端口 |
 | `FML_DB` | `./data.sqlite3` | SQLite 数据库路径 |
 | `FML_ADMIN_USER` | `admin` | 初始管理员用户名 |
 | `FML_ADMIN_PASSWORD` | `admin123` | 初始管理员密码，生产必须修改 |
@@ -184,9 +186,36 @@ frp-manager-lite/
 ├── .env.example
 ├── README.md
 ├── DEPLOY.md
-└── .gitignore
+├── .gitignore
+├── scripts/
+│   └── deploy-production.sh
+└── deploy/
+    └── frp/
+        ├── frps.toml.example
+        └── frps.service
 ```
 
-## 部署
+## 一键部署
+
+```bash
+git clone https://github.com/bohu-t/frp-manager-lite.git
+cd frp-manager-lite
+sudo bash scripts/deploy-production.sh
+```
+
+脚本会交互式询问面板域名、管理员密码和 frps token，然后自动安装 Docker、构建面板、下载 frps、写配置、起 systemd 服务。
+
+非交互式：
+
+```bash
+PANEL_DOMAIN=panel.example.com \
+FML_ADMIN_PASSWORD='...' \
+FRP_AUTH_TOKEN='...' \
+sudo bash scripts/deploy-production.sh
+```
+
+不填 `PANEL_DOMAIN` 时面板直接绑定 `0.0.0.0:18081`，跳过 Nginx/HTTPS。挂 Nginx 时自动绑定 `127.0.0.1` 并签发 Let's Encrypt 证书。
+
+## 手动部署
 
 见 [DEPLOY.md](./DEPLOY.md)。
