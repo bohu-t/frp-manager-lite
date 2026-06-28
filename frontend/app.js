@@ -334,7 +334,18 @@ async function loadDashboard(){
   }
   currentUser = data.user; softwareLicense = data.software_license || softwareLicense; setNav();
   const used = new Set(data.tunnels.map(t => t.remote_port));
-  const ports = data.ports.map(p => `<span class="${used.has(p) ? 'used' : ''}">${p}</span>`).join('');
+  const ps = data.port_stats || {};
+  const isAdmin = data.user.role === 'admin';
+  
+  // Port summary — show all known ports only when under 200; otherwise summary card
+  let portsHtml;
+  if (data.ports.length > 0 && data.ports.length <= 200) {
+    portsHtml = data.ports.map(p => `<span class="${used.has(p) ? 'used' : ''}">${p}</span>`).join('');
+  } else {
+    const usedPorts = data.tunnels.filter(t => t.remote_port).map(t => `<span class="used">${t.remote_port} (${t.name})</span>`).join('');
+    portsHtml = `<div class="ports-summary"><strong>端口池</strong>：${ps.total || 0} 个 · 已用 ${ps.used || 0} 个 · 可用 ${ps.free || 0} 个</div>
+      ${usedPorts ? `<div><strong>已用的端口：</strong>${usedPorts}</div>` : '<p class="muted small">暂无已使用的端口</p>'}`;
+  }
   const tunnelRows = data.tunnels.map(t => {
     const endpoint = ['tcp','udp'].includes(t.proxy_type) ? esc(t.remote_port || '-') : (t.custom_domains ? esc(t.custom_domains) : (t.secret_key ? `secretKey: ${esc(t.secret_key)}` : '-'));
     return `
@@ -345,8 +356,9 @@ async function loadDashboard(){
     </tr>`;
   }).join('') || emptyRow(6, '还没有隧道');
   const portOptions = data.ports.map(p => `<option value="${p}">${p}${used.has(p) ? '（已用）' : ''}</option>`).join('');
-  const isAdmin = data.user.role === 'admin';
-  const remotePortField = isAdmin
+  // Dropdown only for non-admin with reasonable port count; admin or huge lists get number input
+  const portCount = ps.total || data.ports.length;
+  const remotePortField = (isAdmin || portCount > 500)
     ? `<input name="remote_port" type="number" min="1" max="65535" placeholder="输入端口号">`
     : `<select name="remote_port">${portOptions}</select>`;
   const proxyTypeOptions = (data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux']).map(t => `<option value="${t}">${t}</option>`).join('');
@@ -355,7 +367,7 @@ async function loadDashboard(){
       <section class="card stat"><div class="label">当前账号</div><div class="num">${esc(data.user.username)}</div><p>地区节点：<b>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</b></p><p>端口上限：${esc(data.user.max_ports)} · 到期：<b>${esc(data.user.expires_text)}</b></p><p class="muted small">Token：<code>${esc(data.user.token)}</code></p><p class="muted small">授权码：<code>${esc(data.user.license_key)}</code></p><p class="muted small">绑定机器：${data.user.machine_id ? `<code>${esc(data.user.machine_id)}</code>` : '首次 frpc 鉴权时绑定'}</p></section>
       <section class="card stat"><div class="label">FRPS 接入点</div><div class="num" style="font-size:20px">${esc(data.frps.addr)}</div><p>端口：<code>${esc(data.frps.port)}</code></p><p><a class="btn" href="/config/frpc.toml">下载 frpc.toml</a></p><p class="muted small">全协议：${(data.allowed_proxy_types || []).join(' / ')}</p></section>
     </div>
-    <section class="card"><div class="section-title"><h2>已分配端口</h2><p>绿色表示已经创建隧道</p></div><p class="ports">${ports}</p></section>
+    <section class="card"><div class="section-title"><h2>已分配端口</h2><p>绿色表示已经创建隧道</p></div><div class="ports">${portsHtml}</div></section>
     <section class="card"><div class="section-title"><h2>新建隧道</h2><p>TCP/UDP 使用分配端口；HTTP/HTTPS/TCPMUX 使用自定义域名；STCP/XTCP 使用密钥。</p></div><form id="tunnelForm" class="grid">
       <div><label>名称</label><input name="name" placeholder="web" required></div>
       <div><label>类型</label><select name="proxy_type" id="proxyTypeSelect">${proxyTypeOptions}</select></div>

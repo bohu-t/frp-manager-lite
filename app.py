@@ -1253,8 +1253,13 @@ class Handler(BaseHTTPRequestHandler):
                 ports = [r["port"] for r in conn.execute("SELECT port FROM ports WHERE node_id=? AND user_id=? ORDER BY port", (user["node_id"], user["id"]))]
                 if not ports and user["role"] == "admin":
                     ports = [r["port"] for r in conn.execute("SELECT port FROM ports WHERE node_id=? ORDER BY port", (user["node_id"],))]
+                port_count = len(ports)
+                used_ports = [t["remote_port"] for t in tunnels if t["remote_port"]]
+                # Cap: only send first 200 for rendering, too many would freeze the browser
+                ports_display = ports[:200] if port_count > 200 else ports
+                port_stats = {"total": port_count, "used": len(used_ports), "free": port_count - len(used_ports)}
                 tunnels = [row_dict(r) for r in conn.execute("SELECT * FROM tunnels WHERE user_id=? ORDER BY id DESC", (user["id"],))]
-            self.send_json({"ok": True, "user": public_user(user), "software_license": sw_license, "node": node_public(node) if node else None, "ports": ports, "tunnels": tunnels, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
+            self.send_json({"ok": True, "user": public_user(user), "software_license": sw_license, "node": node_public(node) if node else None, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnels, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
             return
         if path == "/api/admin/overview":
             if not self.require_admin():
