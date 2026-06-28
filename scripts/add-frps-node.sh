@@ -60,6 +60,11 @@ if [[ "$PANEL_URL" =~ /$ ]]; then PANEL_URL="${PANEL_URL%/}"; fi
 while [[ -z "$SETUP_KEY" ]]; do
   read -r -s -p "  FML_SETUP_KEY（在面板后台 → 设置页查看，不回显）：" SETUP_KEY
   echo
+  SETUP_KEY="$(echo "$SETUP_KEY" | tr -d '[:space:]')"
+  if [[ ${#SETUP_KEY} -lt 8 ]]; then
+    echo '  ❌ 密钥太短，至少 8 位'
+    SETUP_KEY=""
+  fi
 done
 
 # 检查面板连通性
@@ -141,11 +146,10 @@ echo ''
 echo -e "${CYAN}━━━ 第 4 步：注册到面板 ━━━${NC}"
 log "正在注册节点 ${NODE_NAME}（${REGION}）…"
 
-API_RESP="$(set +e; curl -sS --connect-timeout 10 -X POST "${PANEL_URL}/api/setup/register-node" \
-  -H "Content-Type: application/json" \
-  -d "$(python3 -c "
+# Debug: show the JSON payload
+PAYLOAD="$(python3 -c "
 import json, sys
-json.dumps({
+print(json.dumps({
     'setup_key': sys.argv[1],
     'name': sys.argv[2],
     'region': sys.argv[3],
@@ -154,8 +158,13 @@ json.dumps({
     'auth_token': sys.argv[6],
     'port_start': int(sys.argv[7]),
     'port_end': int(sys.argv[8])
-}, ensure_ascii=False)
-" "$SETUP_KEY" "$NODE_NAME" "$REGION" "$SERVER_IP" "$FRPS_BIND_PORT" "$FRPS_TOKEN" "$PORT_START" "$PORT_END")")"
+}, ensure_ascii=False))
+" "$SETUP_KEY" "$NODE_NAME" "$REGION" "$SERVER_IP" "$FRPS_BIND_PORT" "$FRPS_TOKEN" "$PORT_START" "$PORT_END")"
+echo "  → 请求 JSON: ${PAYLOAD}"
+
+API_RESP="$(set +e; curl -sS --connect-timeout 10 -X POST "${PANEL_URL}/api/setup/register-node" \
+  -H "Content-Type: application/json" \
+  -d "${PAYLOAD}")"
 
 if echo "$API_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('ok') else 1)" 2>/dev/null; then
   log "面板注册成功！"
