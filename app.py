@@ -35,7 +35,7 @@ HOST = os.getenv("FML_HOST", "127.0.0.1")
 PORT = int(os.getenv("FML_PORT", "8080"))
 PORT_START = int(os.getenv("FML_PORT_START", "20000"))
 PORT_END = int(os.getenv("FML_PORT_END", "20199"))
-DEFAULT_MAX_PORTS = int(os.getenv("FML_DEFAULT_MAX_PORTS", "5"))
+DEFAULT_MAX_PORTS = int(os.getenv("FML_DEFAULT_MAX_PORTS", "10"))
 ADMIN_USER = os.getenv("FML_ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.getenv("FML_ADMIN_PASSWORD", "admin123")
 FRP_SERVER_ADDR = os.getenv("FRP_SERVER_ADDR", "YOUR_FRPS_IP_OR_DOMAIN")
@@ -1273,6 +1273,7 @@ class Handler(BaseHTTPRequestHandler):
                     LEFT JOIN nodes n ON n.id=u.node_id
                     LEFT JOIN ports p ON p.user_id=u.id AND p.node_id=u.node_id
                     LEFT JOIN tunnels t ON t.user_id=u.id
+                    WHERE u.role != 'admin'
                     GROUP BY u.id ORDER BY u.id
                     """
                 ):
