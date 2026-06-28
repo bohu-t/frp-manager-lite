@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>License Authority · frp-manager-lite</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>🔐 License Authority</h1>
+      <nav id="nav">
+        <button class="secondary" onclick="renderGenerate()">生成授权码</button>
+        <button class="secondary" onclick="renderKeys()">授权码列表</button>
+        <button class="secondary" onclick="renderStats()">统计</button>
+        <button class="secondary" onclick="renderSettings()">帮助</button>
+      </nav>
+    </header>
+    <div id="flash" class="flash hidden"></div>
+    <main id="app"></main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

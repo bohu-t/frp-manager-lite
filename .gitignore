@@ -21,3 +21,5 @@ frontend/*_before_*.css
 .DS_Store
 .vscode/
 .idea/
+license-authority/license.sqlite3
+license-authority/__pycache__/
