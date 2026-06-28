@@ -82,7 +82,7 @@ tbody tr:hover{background:rgba(56,189,248,.055)}
 code,pre{background:rgba(2,8,23,.78);border:1px solid var(--line);border-radius:10px;color:#dbeafe}
 code{padding:2px 6px}pre{padding:14px;overflow:auto;white-space:pre-wrap}
 .flash{background:rgba(20,184,166,.13);border:1px solid rgba(45,212,191,.35);color:#99f6e4;padding:12px 14px;border-radius:14px;margin-bottom:14px;box-shadow:0 8px 28px rgba(0,0,0,.2)}
-.flash.err{background:rgba(225,29,72,.13);border-color:rgba(251,113,133,.42);color:#fecdd3}
+.flash.err{background:rgba(225,29,72,.08);border-color:rgba(225,29,72,.4);color:#991b1b}
 .ports span{display:inline-flex;align-items:center;background:rgba(2,8,23,.58);border:1px solid var(--line);border-radius:999px;padding:6px 10px;margin:4px;font-weight:700}
 .ports span.used{border-color:rgba(52,211,153,.65);color:var(--ok);background:rgba(52,211,153,.08)}
 .login{max-width:460px;margin:58px auto;padding:24px}

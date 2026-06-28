@@ -1264,9 +1264,16 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path in {"/api/login", "/api/register"}:
-            if SOFTWARE_LICENSE_REQUIRED and not software_license_ok():
-                with db() as conn:
-                    sw_license = current_software_license(conn)
+            try:
+                license_ok = software_license_ok()
+            except Exception:
+                license_ok = False
+            if not license_ok:
+                try:
+                    with db() as conn:
+                        sw_license = current_software_license(conn)
+                except Exception:
+                    sw_license = {"licensed": False, "required": True, "message": "未激活软件授权"}
                 self.send_json({"ok": False, "error": "software_license_required", "license": sw_license, "message": "请先激活软件授权码"}, 402)
                 return
 
