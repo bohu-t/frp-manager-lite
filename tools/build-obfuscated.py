@@ -207,8 +207,8 @@ def main():
             target.write_bytes(f.read_bytes())
             print(f"  copied: {f.name}")
 
-    # Copy .env.example, README, deploy/ scripts/
-    for f in [".env.example", "README.md", "DEPLOY.md", "deploy", "scripts"]:
+    # Copy .env.example, README, deploy/
+    for f in [".env.example", "README.md", "DEPLOY.md", "deploy"]:
         src = ROOT / f
         if src.is_file():
             target = DIST / f
