@@ -73,6 +73,11 @@ def fmt_time(ts: int | None) -> str:
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(int(ts)))
 
 
+def row_val(row: sqlite3.Row, key: str, default: Any = "") -> Any:
+    """Safe Row access — sqlite3.Row lacks .get() on some Python builds."""
+    return row[key] if key in row.keys() else default
+
+
 def db() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
@@ -185,7 +190,7 @@ def public_software_license(row: sqlite3.Row | None) -> dict[str, Any]:
         "license_key": row["license_key"],
         "machine_id": fingerprint,
         "bound_machine_id": row["machine_id"],
-        "server_url": row.get("server_url", "") if "server_url" in row.keys() else "",
+        "server_url": row["server_url"] if "server_url" in row.keys() else "",
         "plan": row["plan"],
         "expires_at": expires_at,
         "expires_text": fmt_time(expires_at),
