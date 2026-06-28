@@ -21,6 +21,10 @@ FRPS_BIND_PORT="${FRPS_BIND_PORT:-7000}"
 FRPS_PORT_START="${FRPS_PORT_START:-20000}"
 FRPS_PORT_END="${FRPS_PORT_END:-20199}"
 FRPS_WEB_PORT="${FRPS_WEB_PORT:-7500}"
+FML_LICENSE_SECRET="${FML_LICENSE_SECRET:-}"
+FML_LICENSE_SERVER_URL="${FML_LICENSE_SERVER_URL:-}"
+FML_LICENSE_AUTHORITY="${FML_LICENSE_AUTHORITY:-0}"
+FML_LICENSE_REQUIRED="${FML_LICENSE_REQUIRED:-}"
 INSTALL_NGINX="${INSTALL_NGINX:-auto}"      # auto|0|1
 ENABLE_HTTPS="${ENABLE_HTTPS:-auto}"        # auto|0|1; 需要 PANEL_DOMAIN
 ENABLE_UFW="${ENABLE_UFW:-0}"               # 默认 0，避免不小心锁 SSH
@@ -139,7 +143,15 @@ FML_DEFAULT_MAX_PORTS=${FML_DEFAULT_MAX_PORTS:-5}
 FRP_SERVER_ADDR=${FRPS_DOMAIN}
 FRP_SERVER_PORT=${FRPS_BIND_PORT}
 FRP_AUTH_TOKEN=${FRP_AUTH_TOKEN}
+
+# Software license — leave empty to skip activation requirement
+${FML_LICENSE_SECRET:+# }FML_SOFTWARE_LICENSE_SECRET=${FML_LICENSE_SECRET}
+${FML_LICENSE_SERVER_URL:+# }FML_LICENSE_SERVER_URL=${FML_LICENSE_SERVER_URL}
+${FML_LICENSE_AUTHORITY:+# }FML_LICENSE_AUTHORITY=${FML_LICENSE_AUTHORITY}
+${FML_LICENSE_REQUIRED:+# }FML_SOFTWARE_LICENSE_REQUIRED=${FML_LICENSE_REQUIRED}
 ENV
+  # Remove empty comment lines
+  sed -i '/^# $/d' "${env_file}"
   chmod 600 "${env_file}"
   log ".env 配置文件已写入"
 }
@@ -401,6 +413,29 @@ main() {
   prompt_secret FML_ADMIN_PASSWORD "③ 面板管理员密码"
   prompt_secret FRP_AUTH_TOKEN "④ frps token"
   prompt_secret FRPS_WEB_PASSWORD "⑤ frps 仪表盘密码"
+  echo ''
+
+  # 软件授权设置
+  echo '--- 软件授权（可选，留空跳过）---'
+  echo '  如果售卖部署版，开启后可强制客户输入授权码才能使用面板。'
+  echo '  方式 A：填写授权服务器地址（FML_LICENSE_SERVER_URL），由授权服务器远程验证。'
+  echo '  方式 B：填写授权密钥（FML_LICENSE_SECRET），本地签名验证。'
+  echo '  留空则跳过授权检查。'
+  echo ''
+  prompt_value FML_LICENSE_SERVER_URL "⑥ 授权服务器地址（例如 https://license.example.com，回车跳过）" ""
+  if [[ -z "${FML_LICENSE_SERVER_URL}" ]]; then
+    prompt_value FML_LICENSE_SECRET "⑦ 授权签名密钥（回车跳过）" ""
+  fi
+  if [[ -z "${FML_LICENSE_REQUIRED}" ]]; then
+    if [[ -n "${FML_LICENSE_SERVER_URL}" || -n "${FML_LICENSE_SECRET}" ]]; then
+      FML_LICENSE_REQUIRED=1
+    fi
+  fi
+  if [[ -n "${FML_LICENSE_SERVER_URL}" || -n "${FML_LICENSE_SECRET}" ]]; then
+    log "软件授权已启用：${FML_LICENSE_SERVER_URL:+远程服务器}${FML_LICENSE_SECRET:+本地签名}${FML_LICENSE_AUTHORITY:+（授权签发模式）}"
+  else
+    log "未启用软件授权，面板可直接使用"
+  fi
   echo ''
 
   log "开始安装基础依赖…"

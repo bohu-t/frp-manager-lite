@@ -162,10 +162,10 @@ udp
 | `FRP_SERVER_ADDR` | `YOUR_FRPS_IP_OR_DOMAIN` | 默认节点 frps 地址 |
 | `FRP_SERVER_PORT` | `7000` | 默认节点 frps bindPort |
 | `FRP_AUTH_TOKEN` | `CHANGE_ME_SHARED_FRPS_TOKEN` | 默认节点 frps token |
-| `FML_SOFTWARE_LICENSE_SECRET` | 空 | 软件授权签名密钥 |
-| `FML_LICENSE_SERVER_URL` | 空 | 软件授权服务器地址 |
-| `FML_LICENSE_AUTHORITY` | `0` | 是否作为授权码签发服务器 |
-| `FML_SOFTWARE_LICENSE_REQUIRED` | `0` | 是否强制客户部署版激活授权 |
+| `FML_SOFTWARE_LICENSE_SECRET` | 空 | 软件授权签名密钥。设置后自动要求激活 |
+| `FML_SOFTWARE_LICENSE_SERVER_URL` | 空 | 远程授权服务器地址。设置后自动要求激活 |
+| `FML_SOFTWARE_LICENSE_AUTHORITY` | `0` | 设为 `1` 开启授权码签发（卖家后台） |
+| `FML_SOFTWARE_LICENSE_REQUIRED` | 自动 | 设为 `1` 强制要求激活；设置 SECRET 或 SERVER_URL 时自动生效 |
 | `R2_ACCOUNT_ID` | 空 | Cloudflare R2 Account ID |
 | `R2_ACCESS_KEY_ID` | 空 | R2 S3 API Access Key ID |
 | `R2_SECRET_ACCESS_KEY` | 空 | R2 S3 API Secret Access Key |

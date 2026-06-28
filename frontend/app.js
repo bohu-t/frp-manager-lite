@@ -204,6 +204,18 @@ async function renderRegister(){
 }
 
 async function loadMe(){
+  // 先检查软件授权状态 — 未激活时不需要登录就直接显示激活页
+  try{
+    const licRes = await fetch('/api/license/status', {credentials:'same-origin'});
+    const licData = await licRes.json();
+    if(licData.ok && licData.license){
+      softwareLicense = licData.license;
+      if(softwareLicense.required && !softwareLicense.licensed){
+        renderLicenseActivatePublic();
+        return;
+      }
+    }
+  }catch(e){}
   try{
     await ensureCsrf();
     const data = await api('/api/me');
@@ -215,6 +227,49 @@ async function loadMe(){
       else await loadDashboard();
     }else renderLogin();
   }catch{ renderLogin(); }
+}
+
+function renderLicenseActivatePublic(){
+  hideFlash();
+  currentUser = null;
+  setNav();
+  const lic = softwareLicense || {};
+  const machineId = lic.machine_id || '-';
+  app.innerHTML = `
+    <div class="auth-layout">
+      <section class="auth-hero card">
+        <div class="brand-mark">🔑</div>
+        <h2>需要软件授权激活</h2>
+        <p>首次使用请向卖家索取部署版授权码。激活后系统自动绑定当前服务器，无需手动生成机器码。</p>
+        <div class="feature-grid">
+          <div><b>一机一绑</b><span>激活后授权码与服务器绑定</span></div>
+          <div><b>安全验证</b><span>卖家签名防篡改</span></div>
+        </div>
+        <div class="hero-label">服务器指纹</div>
+        <div class="hero-points"><span><code style="word-break:break-all">${esc(machineId)}</code></span></div>
+      </section>
+      <section class="auth-card card">
+        <div class="section-title"><h2>激活授权</h2><p>${esc(lic.message || '请输入卖家提供的授权码')}</p></div>
+        <form id="licenseActivateForm" class="stack-form">
+          <label>软件授权码</label><input name="license_key" placeholder="FMLD-..." required>
+          <p class="row"><button class="wide">激活并绑定</button></p>
+        </form>
+      </section>
+    </div>`;
+  document.querySelector('#licenseActivateForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try{
+      const r = await api('/api/license/activate', {method:'POST', body:Object.fromEntries(fd)});
+      softwareLicense = r.license || softwareLicense;
+      show(r.message || '授权已激活，请登录');
+      currentUser = null;
+      renderLogin();
+    }catch(err){
+      softwareLicense = err.data?.license || softwareLicense;
+      show(err.message || '激活失败', true);
+    }
+  };
 }
 
 function renderLicenseActivate(){

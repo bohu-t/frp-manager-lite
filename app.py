@@ -56,7 +56,7 @@ PROXY_TYPE_ORDER = ["tcp", "udp", "http", "https", "stcp", "xtcp", "tcpmux"]
 SOFTWARE_LICENSE_SECRET = os.getenv("FML_SOFTWARE_LICENSE_SECRET", "")
 SOFTWARE_LICENSE_SERVER_URL = os.getenv("FML_LICENSE_SERVER_URL", "").rstrip("/")
 SOFTWARE_LICENSE_AUTHORITY = os.getenv("FML_LICENSE_AUTHORITY", "0").lower() in {"1", "true", "yes", "on"}
-SOFTWARE_LICENSE_REQUIRED = os.getenv("FML_SOFTWARE_LICENSE_REQUIRED", "0").lower() in {"1", "true", "yes", "on"} or bool(SOFTWARE_LICENSE_SERVER_URL)
+SOFTWARE_LICENSE_REQUIRED = os.getenv("FML_SOFTWARE_LICENSE_REQUIRED", "0").lower() in {"1", "true", "yes", "on"} or bool(SOFTWARE_LICENSE_SERVER_URL) or (bool(SOFTWARE_LICENSE_SECRET) and not SOFTWARE_LICENSE_AUTHORITY)
 RATE_WINDOW = 15 * 60
 LOGIN_RATE_LIMIT = 8
 REGISTER_RATE_LIMIT = 5
@@ -1065,6 +1065,8 @@ class Handler(BaseHTTPRequestHandler):
             self.frp_plugin()
         elif path == "/api/license/activate" and SOFTWARE_LICENSE_AUTHORITY:
             self.license_authority_activate()
+        elif path == "/api/license/activate" and SOFTWARE_LICENSE_REQUIRED and not software_license_ok():
+            self.api_license_activate_public()
         elif path.startswith("/api/"):
             self.api_post(path)
         else:
@@ -1077,6 +1079,21 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "license": payload}, 200 if ok else 400)
         except Exception as e:
             self.send_json({"ok": False, "error": str(e)}, 400)
+
+    def api_license_activate_public(self) -> None:
+        try:
+            data = self.read_json()
+        except Exception as e:
+            self.send_json({"ok": False, "error": str(e)}, 400)
+            return
+        csrf = self.headers.get("X-CSRF-Token")
+        if not validate_csrf(csrf):
+            self.send_json({"ok": False, "error": "CSRF token 无效，请刷新页面"}, 403)
+            return
+        ok, msg = activate_software_license(str(data.get("license_key", "")))
+        with db() as conn:
+            sw_license = current_software_license(conn)
+        self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "license": sw_license}, 200 if ok else 400)
 
     def download_full_backup(self) -> None:
         admin = self.require_admin()
@@ -1231,6 +1248,13 @@ class Handler(BaseHTTPRequestHandler):
         if not validate_csrf(csrf):
             self.send_json({"ok": False, "error": "CSRF token 无效或已过期，请刷新页面重试"}, 403)
             return
+
+        if path in {"/api/login", "/api/register"}:
+            if SOFTWARE_LICENSE_REQUIRED and not software_license_ok():
+                with db() as conn:
+                    sw_license = current_software_license(conn)
+                self.send_json({"ok": False, "error": "software_license_required", "license": sw_license, "message": "请先激活软件授权码"}, 402)
+                return
 
         if path == "/api/login":
             ok_rate, retry_after = rate_limit_check(f"login:{client_ip(self)}", LOGIN_RATE_LIMIT)
