@@ -118,6 +118,12 @@ install_docker() {
   log "Docker 安装完成"
 }
 
+build_obfuscated() {
+  log "正在加密编译源码…"
+  python3 "${PROJECT_DIR}/tools/build-obfuscated.py" --no-docker
+  log "源码加密完成"
+}
+
 write_env_file() {
   local env_file="${PROJECT_DIR}/.env"
   if [[ -f "${env_file}" ]]; then
@@ -142,11 +148,14 @@ FRP_AUTH_TOKEN=${FRP_AUTH_TOKEN}
 ENV
   chmod 600 "${env_file}"
   log ".env 配置文件已写入"
+  # Copy to obfuscated build directory so docker compose finds it
+  mkdir -p "${PROJECT_DIR}/dist/obfuscated"
+  cp -a "${env_file}" "${PROJECT_DIR}/dist/obfuscated/.env"
 }
 
 start_panel() {
-  log "正在构建并启动 ${APP_NAME} 面板…"
-  (cd "${PROJECT_DIR}" && docker compose up -d --build)
+  log "正在构建并启动 ${APP_NAME} 面板（加密版）…"
+  (cd "${PROJECT_DIR}/dist/obfuscated" && docker compose up -d --build)
   log "等待面板健康检查就绪…"
   for _ in $(seq 1 30); do
     if curl -fsS "http://127.0.0.1:${FML_PUBLISH_PORT}/api/nodes" >/dev/null 2>&1; then
@@ -155,7 +164,7 @@ start_panel() {
     fi
     sleep 2
   done
-  warn "面板 60 秒内未就绪，请检查：cd ${PROJECT_DIR} && docker compose logs --tail=100"
+  warn "面板 60 秒内未就绪，请检查：cd ${PROJECT_DIR}/dist/obfuscated && docker compose logs --tail=100"
 }
 
 frp_arch() {
@@ -336,8 +345,8 @@ print_summary() {
   echo "  frps 面板： http://127.0.0.1:${FRPS_WEB_PORT}"
   echo ''
   echo '【常用命令】'
-  echo "  面板日志：  cd ${PROJECT_DIR} && docker compose logs -f"
-  echo "  面板状态：  cd ${PROJECT_DIR} && docker compose ps"
+  echo "  面板日志：  cd ${PROJECT_DIR}/dist/obfuscated && docker compose logs -f"
+  echo "  面板状态：  cd ${PROJECT_DIR}/dist/obfuscated && docker compose ps"
   echo "  frps 日志： journalctl -u frps -f"
   echo "  frps 状态： systemctl status frps"
   echo ''
@@ -407,6 +416,7 @@ main() {
   log "开始安装基础依赖…"
   apt_install_base
   install_docker
+  build_obfuscated
   write_env_file
   start_panel
   install_frps_binary
