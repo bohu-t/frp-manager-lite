@@ -142,8 +142,9 @@ function fmtTs(ts){
 function setNav(){
   const themeBtn = `<button class="secondary" onclick="toggleColorMode()">${colorMode === 'dark' ? '浅色' : '深色'}模式</button>`;
   if(!currentUser){ nav.innerHTML = themeBtn; return; }
-  const licenseRequired = softwareLicense && softwareLicense.required && !softwareLicense.licensed;
-  const adminNav = currentUser.role === 'admin' && !licenseRequired ? `
+  const licenseRequired = !!(softwareLicense && softwareLicense.required && !softwareLicense.licensed);
+  const isAdmin = currentUser.role === 'admin';
+  const adminNav = isAdmin && !licenseRequired ? `
     <button class="secondary" onclick="loadAdmin('users')">用户</button>
     <button class="secondary" onclick="loadAdmin('keys')">密钥</button>
     <button class="secondary" onclick="loadAdmin('nodes')">节点</button>
@@ -151,7 +152,7 @@ function setNav(){
     <button class="secondary" onclick="loadAdmin('settings')">设置</button>
   ` : '';
   nav.innerHTML = `
-    ${licenseRequired && currentUser.role === 'admin' ? '<button class="secondary" onclick="renderLicenseActivate()">软件授权</button>' : '<button class="secondary" onclick="loadDashboard()">概览</button>'}
+    ${licenseRequired && isAdmin ? '<button class="secondary" onclick="renderLicenseActivate()">软件授权</button>' : (licenseRequired ? '' : '<button class="secondary" onclick="loadDashboard()">概览</button>')}
     ${adminNav}
     ${licenseRequired ? '' : '<a class="btn" href="/config/frpc.toml">frpc 配置</a>'}
     ${themeBtn}
@@ -289,12 +290,14 @@ function renderLicenseActivate(){
   const lic = softwareLicense || {};
   app.innerHTML = `
     <section class="card">
-      <div class="section-title"><h2>软件授权激活</h2><p>输入卖家发给你的部署版授权码；系统会自动绑定当前服务器，无需手动生成机器码。</p></div>
+      <div class="section-title"><h2>软件授权激活</h2><p>输入卖家给你的部署版授权码；系统会自动绑定当前服务器，无需手动生成机器码。</p></div>
       <div class="grid">
         <div><div class="label">授权状态</div><p>${esc(lic.message || '待激活')}</p></div>
         <div><div class="label">当前机器指纹</div><p><code class="token">${esc(lic.machine_id || '-')}</code></p><p class="muted small">仅用于自动绑定，客户不需要复制给卖家。</p></div>
       </div>
       <form id="licenseActivateForm" class="stack-form">
+        <label>鉴权服务器地址</label>
+        <input name="server_url" placeholder="${esc(lic.server_url || 'https://license.你的卖家域名.com')}">
         <label>软件授权码</label><input name="license_key" placeholder="FMLD-..." required>
         <p class="row"><button>激活授权</button><button type="button" class="secondary" onclick="loadMe()">刷新状态</button></p>
       </form>
