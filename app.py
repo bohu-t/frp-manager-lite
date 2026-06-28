@@ -41,6 +41,7 @@ ADMIN_PASSWORD = os.getenv("FML_ADMIN_PASSWORD", "admin123")
 FRP_SERVER_ADDR = os.getenv("FRP_SERVER_ADDR", "YOUR_FRPS_IP_OR_DOMAIN")
 FRP_SERVER_PORT = int(os.getenv("FRP_SERVER_PORT", "7000"))
 FRP_AUTH_TOKEN = os.getenv("FRP_AUTH_TOKEN", "CHANGE_ME_SHARED_FRPS_TOKEN")
+FML_SETUP_KEY = os.getenv("FML_SETUP_KEY", "")  # 用于一键添加 frps 节点的验证密钥
 R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID", "")
 R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID", "")
 R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "")
@@ -1083,6 +1084,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/frp-plugin":
             self.frp_plugin()
+        elif path == "/api/setup/register-node":
+            self.setup_register_node()
         elif path == "/api/license/activate" and SOFTWARE_LICENSE_AUTHORITY:
             self.license_authority_activate()
         elif path == "/api/license/activate" and SOFTWARE_LICENSE_REQUIRED and not software_license_ok():
@@ -1099,6 +1102,57 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "license": payload}, 200 if ok else 400)
         except Exception as e:
             self.send_json({"ok": False, "error": str(e)}, 400)
+
+    def setup_register_node(self) -> None:
+        """One-click frps node registration — authenticated via FML_SETUP_KEY."""
+        try:
+            data = self.read_json()
+        except Exception as e:
+            self.send_json({"ok": False, "error": str(e)}, 400)
+            return
+        setup_key = str(data.get("setup_key", ""))
+        if not FML_SETUP_KEY or not hmac.compare_digest(setup_key, FML_SETUP_KEY):
+            self.send_json({"ok": False, "error": "setup_key 无效，请在面板上设置 FML_SETUP_KEY"}, 403)
+            return
+        try:
+            region = str(data.get("region", "")).strip() or "默认地区"
+            name = str(data.get("name", "")).strip()
+            server_addr = str(data.get("server_addr", "")).strip()
+            server_port = int(data.get("server_port", 7000))
+            auth_token = str(data.get("auth_token", "")).strip()
+            port_start = int(data.get("port_start", 20000))
+            port_end = int(data.get("port_end", 20199))
+            note = str(data.get("note", "")).strip()[:120]
+            if not name or not name.replace("_", "").replace("-", "").isalnum():
+                raise ValueError("节点名称只能包含字母、数字、下划线、短横线")
+            if not server_addr:
+                raise ValueError("server_addr 不能为空")
+            if len(auth_token) < 6:
+                raise ValueError("auth_token 至少 6 位")
+            if not (1 <= port_start <= port_end <= 65535):
+                raise ValueError("端口池范围不合法")
+            if port_end - port_start > 20000:
+                raise ValueError("单节点端口池不要超过 20000 个")
+            with db() as conn:
+                existing = conn.execute("SELECT id FROM nodes WHERE name=?", (name,)).fetchone()
+                if existing:
+                    self.send_json({"ok": False, "error": f"节点名称 {name} 已存在"}, 409)
+                    return
+                cur = conn.execute(
+                    "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, note, active, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (region, name, server_addr, server_port, auth_token, port_start, port_end, 0, note, 1, now()),
+                )
+                node_id = cur.lastrowid
+                # Pre-create port pool
+                conn.executemany(
+                    "INSERT OR IGNORE INTO ports(node_id, port, user_id) VALUES(?,?,NULL)",
+                    [(node_id, p) for p in range(port_start, port_end + 1)],
+                )
+            self.send_json({"ok": True, "message": f"节点 {name} 注册成功", "node_id": node_id}, 201)
+        except ValueError as e:
+            self.send_json({"ok": False, "error": str(e)}, 400)
+        except Exception as e:
+            self.send_json({"ok": False, "error": f"注册失败：{e}"}, 500)
 
     def api_license_activate_public(self) -> None:
         try:
