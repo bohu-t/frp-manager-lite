@@ -145,7 +145,7 @@ API_RESP="$(curl -fsS --connect-timeout 10 -X POST "${PANEL_URL}/api/setup/regis
   -H "Content-Type: application/json" \
   -d "$(python3 -c "
 import json, sys
-json.dump({
+json.dumps({
     'setup_key': sys.argv[1],
     'name': sys.argv[2],
     'region': sys.argv[3],
