@@ -12,7 +12,20 @@ set -Eeuo pipefail
 
 APP_NAME="frp-manager-lite"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+# Resolve project root — works even if script was copied elsewhere
+if [[ -f "${SCRIPT_DIR}/../app.py" ]]; then
+  PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+else
+  # Copied into dist/obfuscated; walk up to find the real project root
+  PROJECT_DIR="${SCRIPT_DIR}"
+  while [[ ! -f "${PROJECT_DIR}/app.py" && "${PROJECT_DIR}" != "/" ]]; do
+    PROJECT_DIR="$(dirname "${PROJECT_DIR}")"
+  done
+  if [[ ! -f "${PROJECT_DIR}/app.py" ]]; then
+    echo "错误：找不到项目根目录（缺少 app.py），请在项目根目录下执行此脚本"
+    exit 1
+  fi
+fi
 
 FRP_VERSION="${FRP_VERSION:-0.62.1}"
 FML_PUBLISH_PORT="${FML_PUBLISH_PORT:-18081}"
