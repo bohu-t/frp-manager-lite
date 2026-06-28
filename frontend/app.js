@@ -367,7 +367,7 @@ async function loadDashboard(){
       <section class="card stat"><div class="label">当前账号</div><div class="num">${esc(data.user.username)}</div><p>地区节点：<b>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</b></p><p>端口上限：${esc(data.user.max_ports)} · 到期：<b>${esc(data.user.expires_text)}</b></p><p class="muted small">Token：<code>${esc(data.user.token)}</code></p><p class="muted small">授权码：<code>${esc(data.user.license_key)}</code></p><p class="muted small">绑定机器：${data.user.machine_id ? `<code>${esc(data.user.machine_id)}</code>` : '首次 frpc 鉴权时绑定'}</p></section>
       <section class="card stat"><div class="label">FRPS 接入点</div><div class="num" style="font-size:20px">${esc(data.frps.addr)}</div><p>端口：<code>${esc(data.frps.port)}</code></p><p><a class="btn" href="/config/frpc.toml">下载 frpc.toml</a></p><p class="muted small">全协议：${(data.allowed_proxy_types || []).join(' / ')}</p></section>
     </div>
-    <section class="card"><div class="section-title"><h2>已分配端口</h2><p>绿色表示已经创建隧道</p></div><div class="ports">${portsHtml}</div></section>
+    ${isAdmin ? '' : `<section class="card"><div class="section-title"><h2>已分配端口</h2><p>绿色表示已经创建隧道</p></div><div class="ports">${portsHtml}</div></section>`}
     <section class="card"><div class="section-title"><h2>新建隧道</h2><p>TCP/UDP 使用分配端口；HTTP/HTTPS/TCPMUX 使用自定义域名；STCP/XTCP 使用密钥。</p></div><form id="tunnelForm" class="grid">
       <div><label>名称</label><input name="name" placeholder="web" required></div>
       <div><label>类型</label><select name="proxy_type" id="proxyTypeSelect">${proxyTypeOptions}</select></div>

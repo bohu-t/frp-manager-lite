@@ -1252,7 +1252,10 @@ class Handler(BaseHTTPRequestHandler):
                 node = conn.execute("SELECT * FROM nodes WHERE id=?", (user["node_id"],)).fetchone()
                 ports = [r["port"] for r in conn.execute("SELECT port FROM ports WHERE node_id=? AND user_id=? ORDER BY port", (user["node_id"], user["id"]))]
                 if not ports and user["role"] == "admin":
-                    ports = [r["port"] for r in conn.execute("SELECT port FROM ports WHERE node_id=? ORDER BY port", (user["node_id"],))]
+                    # Admin doesn't own ports — return empty; port_stats from node totals
+                    ports = []
+                    port_count = conn.execute("SELECT MAX(port)-MIN(port)+1 FROM ports WHERE node_id=?", (user["node_id"],)).fetchone()
+                    port_count = (port_count[0] or 0) if port_count else 0
                 tunnel_rows = [row_dict(r) for r in conn.execute("SELECT * FROM tunnels WHERE user_id=? ORDER BY id DESC", (user["id"],))]
                 port_count = len(ports)
                 used_ports = [t["remote_port"] for t in tunnel_rows if t["remote_port"]]
@@ -1499,6 +1502,14 @@ class Handler(BaseHTTPRequestHandler):
                         owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (user["node_id"], user["id"], remote_port)).fetchone()
                         if not owned:
                             raise ValueError("这个公网端口不属于当前账号")
+                    else:
+                        # Admin: check port is in node range and not already tunneled
+                        in_range = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND port=?", (user["node_id"], remote_port)).fetchone()
+                        if not in_range:
+                            raise ValueError("端口不在当前节点的端口池范围内")
+                        used = conn.execute("SELECT 1 FROM tunnels WHERE node_id=? AND remote_port=? AND proxy_type IN ('tcp','udp')", (user["node_id"], remote_port)).fetchone()
+                        if used:
+                            raise ValueError("该端口已被其他隧道使用")
                 conn.execute(
                     "INSERT INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (user["node_id"], user["id"], name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, now()),
