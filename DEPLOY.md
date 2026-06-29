@@ -153,8 +153,8 @@ remotePort = 20000
 
 ```bash
 cd license-authority
-export LCA_LICENSE_SECRET=*** rand -base64 32)
-export LCA_API_KEY=*** rand -base64 24)
+export LCA_LICENSE_SECRET="$(openssl rand -base64 32)"
+export LCA_API_KEY="$(openssl rand -base64 24)"
 export LCA_PORT=8200
 python3 server.py
 ```

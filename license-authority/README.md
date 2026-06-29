@@ -8,8 +8,8 @@
 cd license-authority
 
 # 1. 配置密钥
-export LCA_LICENSE_SECRET=$(openssl rand -base64 32)   # 授权签名密钥
-export LCA_API_KEY=$(openssl rand -base64 24)           # 管理 API 密钥
+export LCA_LICENSE_SECRET="$(openssl rand -base64 32)" # 授权签名密钥
+export LCA_API_KEY="$(openssl rand -base64 24)"         # 管理 API 密钥
 export LCA_PORT=8200
 
 # 2. 启动
