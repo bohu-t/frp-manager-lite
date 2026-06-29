@@ -223,6 +223,7 @@ write_frps_config() {
 
   cat > /etc/frp/frps.toml <<TOML
 # 由 frp-manager-lite scripts/deploy-production.sh 生成于 $(date '+%Y-%m-%d %H:%M:%S')
+# frp 0.66+
 bindPort = ${FRPS_BIND_PORT}
 
 auth.method = "token"
@@ -232,10 +233,17 @@ allowPorts = [
   { start = ${FRPS_PORT_START}, end = ${FRPS_PORT_END} }
 ]
 
+# frp 0.66+ 传输层优化
+transport.tcpMux = true
+transport.maxPoolCount = 5
+
 webServer.addr = "127.0.0.1"
 webServer.port = ${FRPS_WEB_PORT}
 webServer.user = "admin"
 webServer.password = "${FRPS_WEB_PASSWORD}"
+
+# Prometheus 监控指标
+enablePrometheus = true
 
 # 生产环境鉴权插件：校验用户状态、panelToken、licenseKey、机器绑定和端口归属。
 # 不配置此项，用户可以绕过面板手写 frpc.toml 抢占端口。
