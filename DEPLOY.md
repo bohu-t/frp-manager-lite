@@ -119,7 +119,7 @@ bash add-frps-node.sh
 # 1. 注册账号（浏览器访问面板）
 
 # 2. 下载 frps（首次）
-wget https://github.com/fatedier/frp/releases/download/v0.62.1/frp_0.62.1_linux_amd64.tar.gz
+wget https://github.com/fatedier/frp/releases/download/v0.66.0/frp_0.66.0_linux_amd64.tar.gz
 tar xzf frp_*.tar.gz
 sudo cp frp_*/frpc /usr/local/bin/
 

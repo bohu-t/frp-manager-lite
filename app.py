@@ -828,10 +828,15 @@ def tunnel_config(user: sqlite3.Row, node: sqlite3.Row, tunnels: list[sqlite3.Ro
         f"serverPort = {node['server_port']}",
         "",
         "# frps 原生 token 通常是全局共享；生产环境建议配合本面板的 /frp-plugin 做二次鉴权。",
+        "auth.method = \"token\"",
         f'auth.token = "{node["auth_token"]}"',
         f'user = "{user["username"]}"',
         f'metadatas.panelToken = "{user["token"]}"',
         f'metadatas.licenseKey = "{row_val(user, "license_key")}"',
+        "",
+        "# frp 0.66+ 推荐配置：连接池、多路复用",
+        "transport.poolCount = 5",
+        "transport.tcpMux = true",
         "",
     ]
     for t in tunnels:
@@ -861,7 +866,9 @@ def tunnel_config(user: sqlite3.Row, node: sqlite3.Row, tunnels: list[sqlite3.Ro
 
 def frps_example_config(node: sqlite3.Row) -> str:
     return f'''# frps.example.toml for {node["region"]} / {node["name"]}
+# frp 0.66+ 配置模板
 bindPort = {node["server_port"]}
+
 auth.method = "token"
 auth.token = "{node["auth_token"]}"
 
@@ -869,13 +876,24 @@ allowPorts = [
   {{ start = {node["port_start"]}, end = {node["port_end"]} }}
 ]
 
+# frp 0.66+ 传输层优化
+transport.tcpMux = true
+transport.maxPoolCount = 5
+
+# 可选：TLS 加密 frpc↔frps 通信
+# transport.tls.force = false
+# transport.tls.certFile = "server.crt"
+# transport.tls.keyFile = "server.key"
+
 webServer.addr = "127.0.0.1"
 webServer.port = 7500
 webServer.user = "admin"
 webServer.password = "CHANGE_ME"
 
-# 可选：frps HTTP 插件鉴权，字段需按你的 frp 版本文档校准。
-# 面板会校验账号状态、授权码、机器绑定和端口归属。
+# Prometheus 监控指标（/metrics 端点）
+enablePrometheus = true
+
+# frps HTTP 插件鉴权 —— 面板会校验账号状态、授权码、机器绑定和端口归属。
 [[httpPlugins]]
 name = "frp-manager-lite-auth"
 addr = "127.0.0.1:{PORT}"
@@ -1003,7 +1021,7 @@ def upload_to_r2(object_key: str, body: bytes, content_type: str = "application/
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "frp-manager-lite-api/0.2"
+    server_version = "frp-manager-lite-api/0.3"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("[%s] %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), fmt % args))

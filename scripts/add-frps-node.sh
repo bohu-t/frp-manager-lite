@@ -217,13 +217,19 @@ cat > "${FRPS_DIR}/frps.toml" << EOF
 # frp-manager-lite frps 节点：${NODE_NAME}
 # 地区：${REGION}
 # 生成时间：$(date '+%Y-%m-%d %H:%M:%S')
+# frp ${FRP_VERSION}
 # ───────────────────────────────────
 
 bindAddr = "0.0.0.0"
 bindPort = ${FRPS_BIND_PORT}
 kcpBindPort = ${FRPS_BIND_PORT}
 
+auth.method = "token"
 auth.token = "${FRPS_TOKEN}"
+
+# frp 0.66+ 传输层优化
+transport.tcpMux = true
+transport.maxPoolCount = 5
 
 # 回调面板验权
 [[httpPlugins]]
@@ -237,6 +243,9 @@ webServer.addr = "0.0.0.0"
 webServer.port = ${FRPS_DASHBOARD_PORT}
 webServer.user = "${FRPS_DASHBOARD_USER}"
 webServer.password = "${FRPS_DASHBOARD_PWD}"
+
+# Prometheus 监控指标
+enablePrometheus = true
 EOF
 
 log "配置文件已生成：${FRPS_DIR}/frps.toml"
