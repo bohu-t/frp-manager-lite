@@ -532,14 +532,20 @@ def init_db() -> None:
             "INSERT OR IGNORE INTO ports(node_id, port, created_at) VALUES(?, ?, ?)",
             [(default_node_id, p, now()) for p in range(PORT_START, PORT_END + 1)],
         )
-        admin = conn.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
+        admin = conn.execute("SELECT * FROM users WHERE role='admin' LIMIT 1").fetchone()
         if not admin:
             conn.execute(
                 "INSERT INTO users(username, password_hash, role, token, license_key, max_ports, expires_at, node_id, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
                 (ADMIN_USER, password_hash(ADMIN_PASSWORD), "admin", secrets.token_urlsafe(24), make_license_key(), DEFAULT_MAX_PORTS, 0, default_node_id, now()),
             )
         else:
-            conn.execute("UPDATE users SET node_id=? WHERE role='admin' AND node_id IS NULL", (default_node_id,))
+            # 每次启动同步 admin 密码到环境变量值，保证改 .env 后不丢登录
+            if not verify_password(ADMIN_PASSWORD, admin["password_hash"]):
+                conn.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash(ADMIN_PASSWORD), admin["id"]))
+                print(f"INFO: admin password synced from FML_ADMIN_PASSWORD")
+            admin_node = admin["node_id"] or 0
+            if not admin_node:
+                conn.execute("UPDATE users SET node_id=? WHERE id=?", (default_node_id, admin["id"]))
         for r in conn.execute(
             """
             SELECT t.node_id, t.remote_port, t.user_id
