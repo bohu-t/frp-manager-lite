@@ -28,6 +28,7 @@ from urllib.parse import unquote, urlparse
 import urllib.parse
 
 APP_NAME = "frp-manager-lite"
+APP_VERSION = "0.66.0"
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 DB_PATH = Path(os.getenv("FML_DB", BASE_DIR / "data.sqlite3"))
@@ -1383,6 +1384,49 @@ class Handler(BaseHTTPRequestHandler):
                         })
             self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "invite_keys": invite_keys, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": (FML_SETUP_KEY if FML_SETUP_KEY else ""), "has_setup_key": bool(FML_SETUP_KEY)})
             return
+        if path == "/api/admin/dashboard":
+            if not self.require_admin():
+                return
+            with db() as conn:
+                nodes = list_public_nodes(conn, active_only=False)
+                node_count = len(nodes)
+                active_node_count = sum(1 for n in nodes if n.get("active"))
+                port_row = conn.execute(
+                    "SELECT COUNT(*) AS total, COUNT(CASE WHEN user_id IS NOT NULL THEN 1 END) AS used FROM ports"
+                ).fetchone()
+                port_stats = {
+                    "total": int(port_row["total"]),
+                    "used": int(port_row["used"]),
+                    "free": int(port_row["total"]) - int(port_row["used"]),
+                }
+                user_row = conn.execute(
+                    "SELECT COUNT(*) AS total, SUM(CASE WHEN active=1 THEN 1 ELSE 0 END) AS active FROM users WHERE role!='admin'"
+                ).fetchone()
+                user_stats = {
+                    "total": int(user_row["total"]),
+                    "active": int(user_row["active"] or 0),
+                }
+                node_list = []
+                for n in nodes:
+                    node_list.append({
+                        "id": n["id"],
+                        "name": n["name"],
+                        "region": n["region"],
+                        "server_addr": n["server_addr"],
+                        "active": n["active"],
+                        "port_count": n.get("port_count", 0),
+                        "free_count": n.get("free_count", 0),
+                    })
+            self.send_json({
+                "ok": True,
+                "version": APP_VERSION,
+                "node_count": node_count,
+                "active_node_count": active_node_count,
+                "port_stats": port_stats,
+                "user_stats": user_stats,
+                "nodes": node_list,
+            })
+            return
         self.send_json({"ok": False, "error": "not found"}, 404)
 
     def api_post(self, path: str) -> None:
@@ -1435,6 +1479,11 @@ class Handler(BaseHTTPRequestHandler):
             ok_rate, retry_after = rate_limit_check(f"register:{client_ip(self)}", REGISTER_RATE_LIMIT)
             if not ok_rate:
                 self.send_json({"ok": False, "error": f"注册尝试过多，请 {retry_after} 秒后再试", "retry_after": retry_after}, 429)
+                return
+            with db() as conn:
+                admin_exists = conn.execute("SELECT 1 FROM users WHERE role='admin' LIMIT 1").fetchone()
+            if admin_exists:
+                self.send_json({"ok": False, "error": "已存在管理员，不能创建第二个管理员"}, 403)
                 return
             ok, msg = register_with_invite(str(data.get("username", "")), str(data.get("password", "")), str(data.get("invite_key", "")), int(data.get("node_id", 0)))
             self.send_json({"ok": ok, "message": msg, "error": None if ok else msg}, 200 if ok else 400)
@@ -1532,6 +1581,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "error": "not found"}, 404)
 
     def tunnel_create(self, user: sqlite3.Row, data: dict[str, Any]) -> None:
+        if user["role"] == "admin":
+            self.send_json({"ok": False, "error": "管理员不能创建隧道"}, 403)
+            return
         try:
             name = str(data.get("name", "")).strip()
             proxy_type = str(data.get("proxy_type", "tcp")).lower()
