@@ -2,39 +2,20 @@
 set -Eeuo pipefail
 
 # frp-manager-lite 预构建镜像生产部署脚本
-# 功能：安装 Docker、拉取 GHCR 面板镜像、安装 frps、可选安装 Nginx + HTTPS。
+# 流程：先收集参数生成 /opt/frp-manager-lite/.env，再从 .env 读取变量部署面板、frps、Nginx。
 # 不会在用户服务器构建镜像，也不需要源码仓库。
 #
 # 快速使用：
 #   curl -fsSL https://raw.githubusercontent.com/bohu-t/frp-manager-lite/main/scripts/deploy-image-production.sh | sudo bash
 #
 # 非交互示例：
-#   PANEL_DOMAIN=panel.example.com FRPS_DOMAIN=frp.example.com \
+#   PANEL_DOMAIN=panel.example.com PANEL_HTTPS_PORT=8443 FRPS_DOMAIN=frp.example.com \
 #   FML_ADMIN_PASSWORD='change-me' FRP_AUTH_TOKEN='change-me-token' \
 #   sudo -E bash scripts/deploy-image-production.sh
 
 APP_NAME="frp-manager-lite"
 APP_DIR="${APP_DIR:-/opt/frp-manager-lite}"
-IMAGE="${IMAGE:-ghcr.io/bohu-t/frp-manager-lite:latest}"
-FRP_VERSION="${FRP_VERSION:-0.66.0}"
-
-FML_PUBLISH_PORT="${FML_PUBLISH_PORT:-18081}"
-FML_ADMIN_USER="${FML_ADMIN_USER:-admin}"
-FML_DEFAULT_MAX_PORTS="${FML_DEFAULT_MAX_PORTS:-5}"
-
-FRPS_BIND_PORT="${FRPS_BIND_PORT:-7000}"
-FRPS_PORT_START="${FRPS_PORT_START:-20000}"
-FRPS_PORT_END="${FRPS_PORT_END:-20199}"
-FRPS_WEB_PORT="${FRPS_WEB_PORT:-7500}"
-
-PANEL_DOMAIN="${PANEL_DOMAIN:-}"
-FRPS_DOMAIN="${FRPS_DOMAIN:-}"
-PANEL_HTTPS_PORT="${PANEL_HTTPS_PORT:-443}"
-INSTALL_NGINX="${INSTALL_NGINX:-auto}"      # auto|0|1
-ENABLE_HTTPS="${ENABLE_HTTPS:-auto}"        # auto|0|1
-ENABLE_UFW="${ENABLE_UFW:-0}"               # 默认关闭，避免锁 SSH
-FML_PUBLISH_BIND="${FML_PUBLISH_BIND:-}"     # 未填则根据是否有 PANEL_DOMAIN 自动决定
-PANEL_PLUGIN_ADDR="${PANEL_PLUGIN_ADDR:-127.0.0.1:${FML_PUBLISH_PORT}}"
+ENV_FILE="${ENV_FILE:-${APP_DIR}/.env}"
 
 log()   { printf '\033[1;34m[部署]\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m[警告]\033[0m %s\n' "$*"; }
@@ -97,6 +78,155 @@ prompt_secret() {
   printf -v "${var_name}" '%s' "${input:-${generated}}"
 }
 
+valid_port() {
+  [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= 65535 ))
+}
+
+require_port() {
+  local name="$1" value="${!1:-}"
+  if ! valid_port "${value}"; then
+    err "${name} 必须是 1-65535 的端口，当前：${value}"
+    exit 1
+  fi
+}
+
+env_value() {
+  local v="${1:-}"
+  v="${v//\\/\\\\}"
+  v="${v//\"/\\\"}"
+  v="${v//\$/\\\$}"
+  v="${v//\`/\\\`}"
+  printf '"%s"' "${v}"
+}
+
+write_env_var() {
+  printf '%s=%s\n' "$1" "$(env_value "${2:-}")" >> "${ENV_FILE}"
+}
+
+load_env_file() {
+  if [[ ! -f "${ENV_FILE}" ]]; then
+    err "找不到配置文件：${ENV_FILE}"
+    exit 1
+  fi
+  set -a
+  # shellcheck disable=SC1090
+  . "${ENV_FILE}"
+  set +a
+}
+
+collect_env_file() {
+  mkdir -p "${APP_DIR}"
+
+  if [[ -f "${ENV_FILE}" ]]; then
+    log "检测到现有 ${ENV_FILE}，将作为默认值读取并备份。"
+    load_env_file
+    cp -a "${ENV_FILE}" "${ENV_FILE}.bak.$(date +%Y%m%d-%H%M%S)"
+  fi
+
+  IMAGE="${IMAGE:-ghcr.io/bohu-t/frp-manager-lite:latest}"
+  FRP_VERSION="${FRP_VERSION:-0.66.0}"
+  FML_PUBLISH_PORT="${FML_PUBLISH_PORT:-18081}"
+  FML_ADMIN_USER="${FML_ADMIN_USER:-admin}"
+  FML_DEFAULT_MAX_PORTS="${FML_DEFAULT_MAX_PORTS:-5}"
+  FRPS_BIND_PORT="${FRPS_BIND_PORT:-7000}"
+  FRPS_PORT_START="${FRPS_PORT_START:-20000}"
+  FRPS_PORT_END="${FRPS_PORT_END:-20199}"
+  FRPS_WEB_PORT="${FRPS_WEB_PORT:-7500}"
+  PANEL_DOMAIN="${PANEL_DOMAIN:-}"
+  FRPS_DOMAIN="${FRPS_DOMAIN:-${FRP_SERVER_ADDR:-}}"
+  PANEL_HTTPS_PORT="${PANEL_HTTPS_PORT:-443}"
+  INSTALL_NGINX="${INSTALL_NGINX:-auto}"
+  ENABLE_HTTPS="${ENABLE_HTTPS:-auto}"
+  ENABLE_UFW="${ENABLE_UFW:-0}"
+
+  echo ''
+  echo '========================================'
+  echo '  frp-manager-lite 镜像版一键生产部署'
+  echo '========================================'
+  echo ''
+  echo '先收集部署参数并写入 .env，后续所有配置都从 .env 读取。'
+  echo ''
+
+  prompt_value PANEL_DOMAIN "① 面板域名（留空则不安装 Nginx/HTTPS，面板直连端口）" "${PANEL_DOMAIN}"
+  prompt_value FML_PUBLISH_PORT "② 面板容器映射端口" "${FML_PUBLISH_PORT}"
+  if [[ -n "${PANEL_DOMAIN}" ]]; then
+    prompt_value PANEL_HTTPS_PORT "③ 面板 HTTPS 端口（443 被占用可填 8443 等）" "${PANEL_HTTPS_PORT}"
+  fi
+
+  local detected_frps_domain="${FRPS_DOMAIN}"
+  if [[ -z "${detected_frps_domain}" ]]; then
+    detected_frps_domain="${PANEL_DOMAIN:-$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || hostname -f 2>/dev/null || hostname)}"
+  fi
+  prompt_value FRPS_DOMAIN "④ frps 域名或 IP（用户 frpc 连接地址）" "${detected_frps_domain}"
+  prompt_value FRPS_BIND_PORT "⑤ frps 入口端口" "${FRPS_BIND_PORT}"
+  prompt_value FRPS_PORT_START "⑥ 用户隧道端口池起始端口" "${FRPS_PORT_START}"
+  prompt_value FRPS_PORT_END "⑦ 用户隧道端口池结束端口" "${FRPS_PORT_END}"
+  prompt_value FRPS_WEB_PORT "⑧ frps 自带仪表盘本地端口" "${FRPS_WEB_PORT}"
+
+  prompt_value FML_ADMIN_USER "⑨ 面板管理员用户名" "${FML_ADMIN_USER}"
+  echo ''
+  echo '密码输入时不会回显。直接回车会自动生成。'
+  prompt_secret FML_ADMIN_PASSWORD "⑩ 面板管理员密码"
+  prompt_secret FRP_AUTH_TOKEN "⑪ frps token"
+  prompt_secret FRPS_WEB_PASSWORD "⑫ frps 仪表盘密码"
+  echo ''
+
+  if [[ -z "${FML_PUBLISH_BIND:-}" ]]; then
+    if [[ -z "${PANEL_DOMAIN}" ]]; then FML_PUBLISH_BIND="0.0.0.0"; else FML_PUBLISH_BIND="127.0.0.1"; fi
+  fi
+  PANEL_PLUGIN_ADDR="${PANEL_PLUGIN_ADDR:-127.0.0.1:${FML_PUBLISH_PORT}}"
+  FML_SETUP_KEY="${FML_SETUP_KEY:-$(random_secret)}"
+
+  require_port FML_PUBLISH_PORT
+  require_port FRPS_BIND_PORT
+  require_port FRPS_PORT_START
+  require_port FRPS_PORT_END
+  require_port FRPS_WEB_PORT
+  if [[ -n "${PANEL_DOMAIN}" ]]; then require_port PANEL_HTTPS_PORT; fi
+  if (( FRPS_PORT_START > FRPS_PORT_END )); then
+    err "端口池起始端口不能大于结束端口"
+    exit 1
+  fi
+
+  : > "${ENV_FILE}"
+  chmod 600 "${ENV_FILE}"
+  {
+    echo "# 由 scripts/deploy-image-production.sh 生成于 $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "# 修改本文件后，可重跑部署脚本或执行对应服务重启命令。"
+  } >> "${ENV_FILE}"
+
+  write_env_var APP_NAME "${APP_NAME}"
+  write_env_var APP_DIR "${APP_DIR}"
+  write_env_var IMAGE "${IMAGE}"
+  write_env_var FRP_VERSION "${FRP_VERSION}"
+  write_env_var PANEL_DOMAIN "${PANEL_DOMAIN}"
+  write_env_var PANEL_HTTPS_PORT "${PANEL_HTTPS_PORT}"
+  write_env_var INSTALL_NGINX "${INSTALL_NGINX}"
+  write_env_var ENABLE_HTTPS "${ENABLE_HTTPS}"
+  write_env_var ENABLE_UFW "${ENABLE_UFW}"
+  write_env_var FML_PUBLISH_BIND "${FML_PUBLISH_BIND}"
+  write_env_var FML_PUBLISH_PORT "${FML_PUBLISH_PORT}"
+  write_env_var FML_ADMIN_USER "${FML_ADMIN_USER}"
+  write_env_var FML_ADMIN_PASSWORD "${FML_ADMIN_PASSWORD}"
+  write_env_var FML_DEFAULT_MAX_PORTS "${FML_DEFAULT_MAX_PORTS}"
+  write_env_var FML_SETUP_KEY "${FML_SETUP_KEY}"
+  write_env_var FML_PORT_START "${FRPS_PORT_START}"
+  write_env_var FML_PORT_END "${FRPS_PORT_END}"
+  write_env_var FRPS_DOMAIN "${FRPS_DOMAIN}"
+  write_env_var FRPS_BIND_PORT "${FRPS_BIND_PORT}"
+  write_env_var FRPS_PORT_START "${FRPS_PORT_START}"
+  write_env_var FRPS_PORT_END "${FRPS_PORT_END}"
+  write_env_var FRPS_WEB_PORT "${FRPS_WEB_PORT}"
+  write_env_var FRPS_WEB_PASSWORD "${FRPS_WEB_PASSWORD}"
+  write_env_var FRP_SERVER_ADDR "${FRPS_DOMAIN}"
+  write_env_var FRP_SERVER_PORT "${FRPS_BIND_PORT}"
+  write_env_var FRP_AUTH_TOKEN "${FRP_AUTH_TOKEN}"
+  write_env_var PANEL_PLUGIN_ADDR "${PANEL_PLUGIN_ADDR}"
+
+  log "部署参数已写入 ${ENV_FILE}"
+  load_env_file
+}
+
 apt_install_base() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
@@ -125,29 +255,7 @@ write_panel_files() {
   mkdir -p "${APP_DIR}"
   cd "${APP_DIR}"
 
-  if [[ -f .env ]]; then
-    cp -a .env ".env.bak.$(date +%Y%m%d-%H%M%S)"
-    log "已备份原有 ${APP_DIR}/.env"
-  fi
-
-  cat > .env <<ENV
-# 由 scripts/deploy-image-production.sh 生成于 $(date '+%Y-%m-%d %H:%M:%S')
-FML_PUBLISH_BIND=${FML_PUBLISH_BIND}
-FML_PUBLISH_PORT=${FML_PUBLISH_PORT}
-FML_ADMIN_USER=${FML_ADMIN_USER}
-FML_ADMIN_PASSWORD=${FML_ADMIN_PASSWORD}
-FML_PORT_START=${FRPS_PORT_START}
-FML_PORT_END=${FRPS_PORT_END}
-FML_DEFAULT_MAX_PORTS=${FML_DEFAULT_MAX_PORTS}
-FML_SETUP_KEY=${FML_SETUP_KEY:-$(random_secret)}
-
-FRP_SERVER_ADDR=${FRPS_DOMAIN}
-FRP_SERVER_PORT=${FRPS_BIND_PORT}
-FRP_AUTH_TOKEN=${FRP_AUTH_TOKEN}
-ENV
-  chmod 600 .env
-
-  cat > docker-compose.yml <<EOF
+  cat > docker-compose.yml <<'EOF'
 services:
   frp-manager-lite:
     image: ${IMAGE}
@@ -162,7 +270,7 @@ services:
       FML_PORT: 8080
       FML_DB: /data/data.sqlite3
     ports:
-      - "\${FML_PUBLISH_BIND:-127.0.0.1}:\${FML_PUBLISH_PORT:-18081}:8080"
+      - "${FML_PUBLISH_BIND:-127.0.0.1}:${FML_PUBLISH_PORT:-18081}:8080"
     volumes:
       - frp-manager-lite-data:/data
       - /etc/machine-id:/host/machine-id:ro
@@ -244,8 +352,8 @@ write_frps_config() {
   fi
 
   cat > /etc/frp/frps.toml <<TOML
-# 由 frp-manager-lite deploy-image-production.sh 生成于 $(date '+%Y-%m-%d %H:%M:%S')
-# frp 0.66+
+# 由 ${ENV_FILE} 生成于 $(date '+%Y-%m-%d %H:%M:%S')
+# frp ${FRP_VERSION}
 bindPort = ${FRPS_BIND_PORT}
 
 auth.method = "token"
@@ -378,7 +486,7 @@ install_nginx_if_requested() {
   fi
   [[ "${do_nginx}" == "1" ]] || return 0
   if [[ -z "${PANEL_DOMAIN}" ]]; then
-    warn "INSTALL_NGINX=1 但未提供 PANEL_DOMAIN，跳过 Nginx"
+    warn "INSTALL_NGINX=1 但 .env 未配置 PANEL_DOMAIN，跳过 Nginx"
     return 0
   fi
 
@@ -433,6 +541,9 @@ print_summary() {
   echo '  部署完成！'
   echo '========================================'
   echo ''
+  echo '【配置文件】'
+  echo "  ${ENV_FILE}"
+  echo ''
   echo '【管理面板】'
   echo "  目录：      ${APP_DIR}"
   echo "  镜像：      ${IMAGE}"
@@ -457,6 +568,8 @@ print_summary() {
   echo "  frps 面板： http://127.0.0.1:${FRPS_WEB_PORT}"
   echo ''
   echo '【常用命令】'
+  echo "  改配置：    nano ${ENV_FILE}"
+  echo "  应用配置：  sudo -E bash <(curl -fsSL https://raw.githubusercontent.com/bohu-t/frp-manager-lite/main/scripts/deploy-image-production.sh)"
   echo "  面板升级：  cd ${APP_DIR} && docker compose pull && docker compose up -d"
   echo "  面板日志：  cd ${APP_DIR} && docker compose logs -f"
   echo "  frps 日志： journalctl -u frps -f"
@@ -478,33 +591,10 @@ print_summary() {
 main() {
   need_root
   require_supported_os
+  collect_env_file
 
-  echo ''
-  echo '========================================'
-  echo '  frp-manager-lite 镜像版一键生产部署'
-  echo '========================================'
-  echo ''
-
-  prompt_value PANEL_DOMAIN "① 面板域名（留空则不装 Nginx/HTTPS，面板直连端口）" "${PANEL_DOMAIN}"
-  local detected_frps_domain="${FRPS_DOMAIN}"
-  if [[ -z "${detected_frps_domain}" ]]; then
-    detected_frps_domain="${PANEL_DOMAIN:-$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || hostname -f 2>/dev/null || hostname)}"
-  fi
-  prompt_value FRPS_DOMAIN "② frps 域名或 IP（用户 frpc 连接地址）" "${detected_frps_domain}"
-  if [[ -n "${PANEL_DOMAIN}" ]]; then
-    prompt_value PANEL_HTTPS_PORT "③ 面板 HTTPS 端口（443 被占用可填 8443 等）" "${PANEL_HTTPS_PORT}"
-  fi
-
-  if [[ -z "${FML_PUBLISH_BIND}" ]]; then
-    if [[ -z "${PANEL_DOMAIN}" ]]; then FML_PUBLISH_BIND="0.0.0.0"; else FML_PUBLISH_BIND="127.0.0.1"; fi
-  fi
-
-  echo ''
-  echo '密码输入时不会回显。直接回车会自动生成。'
-  prompt_secret FML_ADMIN_PASSWORD "④ 面板管理员密码"
-  prompt_secret FRP_AUTH_TOKEN "⑤ frps token"
-  prompt_secret FRPS_WEB_PASSWORD "⑥ frps 仪表盘密码"
-  echo ''
+  log "重新从 ${ENV_FILE} 读取部署变量…"
+  load_env_file
 
   log "开始安装基础依赖…"
   apt_install_base
