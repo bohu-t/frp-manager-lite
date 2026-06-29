@@ -1859,6 +1859,9 @@ class Handler(BaseHTTPRequestHandler):
     def frp_plugin(self) -> None:
         try:
             payload = self.read_json()
+            print("=" * 80)
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+            print("=" * 80)
             op = payload.get("op") or payload.get("Op") or ""
             content = payload.get("content") or payload.get("Content") or payload
             user_name = content.get("user") or content.get("User") or content.get("clientUser") or ""
