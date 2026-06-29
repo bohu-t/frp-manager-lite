@@ -540,6 +540,32 @@ def init_db() -> None:
             )
         else:
             conn.execute("UPDATE users SET node_id=? WHERE role='admin' AND node_id IS NULL", (default_node_id,))
+        for r in conn.execute(
+            """
+            SELECT t.node_id, t.remote_port, t.user_id
+            FROM tunnels t
+            JOIN users u ON u.id=t.user_id
+            WHERE u.role='admin' AND t.proxy_type IN ('tcp','udp') AND t.remote_port>0
+            """
+        ).fetchall():
+            conn.execute("UPDATE ports SET user_id=? WHERE node_id=? AND port=? AND user_id IS NULL", (r["user_id"], r["node_id"], r["remote_port"]))
+
+
+def available_ports_for_assignment(conn: sqlite3.Connection, node_id: int, limit: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT p.port
+        FROM ports p
+        LEFT JOIN tunnels t
+          ON t.node_id=p.node_id
+         AND t.remote_port=p.port
+         AND t.proxy_type IN ('tcp','udp')
+        WHERE p.node_id=? AND p.user_id IS NULL AND t.id IS NULL
+        ORDER BY p.port
+        LIMIT ?
+        """,
+        (node_id, limit),
+    ).fetchall()
 
 
 def create_user(username: str, password: str, max_ports: int, expires_days: int, node_id: int) -> tuple[bool, str]:
@@ -557,7 +583,7 @@ def create_user(username: str, password: str, max_ports: int, expires_days: int,
         node = conn.execute("SELECT * FROM nodes WHERE id=? AND active=1", (node_id,)).fetchone()
         if not node:
             return False, "地区节点不存在或已停用"
-        free_ports = conn.execute("SELECT port FROM ports WHERE node_id=? AND user_id IS NULL ORDER BY port LIMIT ?", (node_id, max_ports)).fetchall()
+        free_ports = available_ports_for_assignment(conn, node_id, max_ports)
         if len(free_ports) < max_ports:
             return False, f"端口池不足，只剩 {len(free_ports)} 个可用端口"
         try:
@@ -723,7 +749,7 @@ def register_with_invite(username: str, password: str, invite_key: str, node_id:
         if not node:
             return False, "请选择有效的地区节点"
         max_ports = int(key_row["max_ports"])
-        free_ports = conn.execute("SELECT port FROM ports WHERE node_id=? AND user_id IS NULL ORDER BY port LIMIT ?", (node_id, max_ports)).fetchall()
+        free_ports = available_ports_for_assignment(conn, node_id, max_ports)
         if len(free_ports) < max_ports:
             return False, f"端口池不足，只剩 {len(free_ports)} 个可用端口"
         expires_days = int(key_row["user_expires_days"])
@@ -1444,6 +1470,8 @@ class Handler(BaseHTTPRequestHandler):
             with db() as conn:
                 t = conn.execute("SELECT * FROM tunnels WHERE id=? AND user_id=?", (tid, user["id"])).fetchone()
                 conn.execute("DELETE FROM tunnels WHERE id=? AND user_id=?", (tid, user["id"]))
+                if t and user["role"] == "admin" and t["proxy_type"] in REMOTE_PORT_PROXY_TYPES and t["remote_port"]:
+                    conn.execute("UPDATE ports SET user_id=NULL WHERE node_id=? AND port=? AND user_id=?", (t["node_id"], t["remote_port"], user["id"]))
             if t: audit("tunnel_delete", user, t["node_id"], t["remote_port"], t["proxy_type"], t["name"])
             self.send_json({"ok": True})
         elif path == "/api/admin/users/create":
@@ -1521,13 +1549,16 @@ class Handler(BaseHTTPRequestHandler):
                         if not owned:
                             raise ValueError("这个公网端口不属于当前账号")
                     else:
-                        # Admin: check port is in node range and not already tunneled
-                        in_range = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND port=?", (user["node_id"], remote_port)).fetchone()
-                        if not in_range:
+                        # Admin: check port is in node range, not assigned to another user, and not already tunneled.
+                        port_row = conn.execute("SELECT user_id FROM ports WHERE node_id=? AND port=?", (user["node_id"], remote_port)).fetchone()
+                        if not port_row:
                             raise ValueError("端口不在当前节点的端口池范围内")
+                        if port_row["user_id"] is not None and port_row["user_id"] != user["id"]:
+                            raise ValueError("该端口已分配给其他用户")
                         used = conn.execute("SELECT 1 FROM tunnels WHERE node_id=? AND remote_port=? AND proxy_type IN ('tcp','udp')", (user["node_id"], remote_port)).fetchone()
                         if used:
                             raise ValueError("该端口已被其他隧道使用")
+                        conn.execute("UPDATE ports SET user_id=? WHERE node_id=? AND port=? AND user_id IS NULL", (user["id"], user["node_id"], remote_port))
                 conn.execute(
                     "INSERT INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (user["node_id"], user["id"], name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, now()),
