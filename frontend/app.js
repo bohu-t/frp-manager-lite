@@ -152,7 +152,7 @@ function setNav(){
     <button class="secondary" onclick="loadAdmin('settings')">设置</button>
   ` : '';
   nav.innerHTML = `
-    ${licenseRequired && isAdmin ? '<button class="secondary" onclick="renderLicenseActivate()">软件授权</button>' : (licenseRequired ? '' : '<button class="secondary" onclick="loadDashboard()">概览</button>')}
+    ${licenseRequired && isAdmin ? '<button class="secondary" onclick="renderLicenseActivate()">软件授权</button>' : (licenseRequired ? '' : (isAdmin ? '<button class="secondary" onclick="loadAdminDashboard()">仪表盘</button>' : '<button class="secondary" onclick="loadDashboard()">概览</button>'))}
     ${adminNav}
     ${licenseRequired ? '' : '<a class="btn" href="/config/frpc.toml">frpc 配置</a>'}
     ${themeBtn}
@@ -333,9 +333,9 @@ async function loadDashboard(){
     show(err.message, true); return;
   }
   currentUser = data.user; softwareLicense = data.software_license || softwareLicense; setNav();
+  if(data.user.role === 'admin'){ loadAdminDashboard(); return; }
   const used = new Set(data.tunnels.map(t => t.remote_port));
   const ps = data.port_stats || {};
-  const isAdmin = data.user.role === 'admin';
   
   // Port summary — show all known ports only when under 200; otherwise summary card
   let portsHtml;
@@ -358,13 +358,13 @@ async function loadDashboard(){
   const portOptions = data.ports.map(p => `<option value="${p}">${p}${used.has(p) ? '（已用）' : ''}</option>`).join('');
   // Dropdown only for non-admin with reasonable port count; admin or huge lists get number input
   const portCount = ps.total || data.ports.length;
-  const remotePortField = (isAdmin || portCount > 500)
+  const remotePortField = (portCount > 500)
     ? `<input name="remote_port" type="number" min="1" max="65535" placeholder="输入端口号">`
     : `<select name="remote_port">${portOptions}</select>`;
   const proxyTypeOptions = (data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux']).map(t => `<option value="${t}">${t}</option>`).join('');
   app.innerHTML = `
     <div class="grid">
-      <section class="card stat"><div class="label">当前账号</div><div class="num">${esc(data.user.username)}</div><p>地区节点：<b>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</b></p><p>端口上限：${esc(data.user.max_ports)} · 到期：<b>${esc(data.user.expires_text)}</b></p><p class="muted small">Token：<code>${esc(data.user.token)}</code></p><p class="muted small">授权码：<code>${esc(data.user.license_key)}</code></p><p class="muted small">绑定机器：${data.user.machine_id ? `<code>${esc(data.user.machine_id)}</code>` : '首次 frpc 鉴权时绑定'}</p></section>
+      <section class="card stat"><div class="label">当前账号</div><div class="num">${esc(data.user.username)}</div><p>地区节点：<b>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</b></p><p>端口上限：${esc(data.user.max_ports)} · 到期：<b>${esc(data.user.expires_text)}</b></p></section>
       <section class="card stat"><div class="label">FRPS 接入点</div><div class="num" style="font-size:20px">${esc(data.frps.addr)}</div><p>端口：<code>${esc(data.frps.port)}</code></p><p><a class="btn" href="/config/frpc.toml">下载 frpc.toml</a></p><p class="muted small">全协议：${(data.allowed_proxy_types || []).join(' / ')}</p></section>
     </div>
     ${isAdmin ? '' : `<section class="card"><div class="section-title"><h2>已分配端口</h2><p>绿色表示已经创建隧道</p></div><div class="ports">${portsHtml}</div></section>`}
@@ -671,5 +671,37 @@ function editNode(n){
 }
 async function nodeToggle(id){ await api('/api/admin/nodes/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
 async function nodeDelete(id){ if(confirm('删除节点会删除空端口池；节点下有用户/隧道时会被拒绝。确定？')) await api('/api/admin/nodes/delete', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
+
+async function loadAdminDashboard(){
+  hideFlash();
+  let data;
+  try{ data = await api('/api/admin/dashboard'); }
+  catch(err){
+    if(err.message === 'unauthorized') return renderLogin();
+    show(err.message, true); return;
+  }
+  setNav();
+  const portStats = data.port_stats || {};
+  const userStats = data.user_stats || {};
+  const usedPorts = portStats.used || 0;
+  const totalPorts = portStats.total || 0;
+  const freePorts = portStats.free || 0;
+  const portUsage = totalPorts > 0 ? ((usedPorts / totalPorts) * 100).toFixed(1) : '0.0';
+  const nodeRows = (data.nodes || []).map(n => `
+    <tr>
+      <td>${esc(n.name)}</td><td>${esc(n.region)}</td><td>${esc(n.server_addr)}</td>
+      <td>${n.active ? '<span class="ok">active</span>' : '<span class="bad">inactive</span>'}</td>
+      <td>${n.free_count}/${n.port_count}</td>
+    </tr>`).join('') || emptyRow(5, '暂无节点');
+  app.innerHTML = `
+    <div class="grid">
+      <section class="card stat"><div class="label">版本号</div><div class="num">${esc(data.version || '-')}</div><div class="sub">frp-manager-lite</div></section>
+      <section class="card stat"><div class="label">活跃节点</div><div class="num">${data.active_node_count}/${data.node_count}</div><div class="sub">活跃节点数 / 总节点数</div></section>
+      <section class="card stat"><div class="label">端口使用率</div><div class="num">${portUsage}%</div><div class="sub">已用 ${usedPorts} / 总数 ${totalPorts}</div></section>
+      <section class="card stat"><div class="label">用户</div><div class="num">${userStats.active}/${userStats.total}</div><div class="sub">活跃用户数 / 总用户数</div></section>
+    </div>
+    <section class="card"><div class="section-title"><h2>节点列表</h2></div><table><thead><tr><th>节点名称</th><th>地区</th><th>地址</th><th>状态</th><th>端口使用（空闲/总数）</th></tr></thead><tbody>${nodeRows}</tbody></table></section>
+    <section class="card"><div class="section-title"><h2>快速管理</h2></div><div class="row" style="gap:8px"><button class="secondary" onclick="loadAdmin('users')">用户管理</button><button class="secondary" onclick="loadAdmin('keys')">密钥管理</button><button class="secondary" onclick="loadAdmin('nodes')">节点管理</button></div></section>`;
+}
 
 loadMe();
