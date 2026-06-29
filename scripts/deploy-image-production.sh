@@ -51,31 +51,50 @@ random_secret() {
   fi
 }
 
+has_tty() {
+  [[ -r /dev/tty && -w /dev/tty ]] && { : </dev/tty; } 2>/dev/null
+}
+
 prompt_value() {
   local var_name="$1" prompt="$2" default_value="${3:-}"
   local current="${!var_name:-}"
-  if [[ -n "${current}" ]]; then return 0; fi
-  if [[ ! -t 0 ]]; then printf -v "${var_name}" '%s' "${default_value}"; return 0; fi
+  local effective_default="${current:-${default_value}}"
   local input
-  if [[ -n "${default_value}" ]]; then
-    read -r -p "${prompt} [${default_value}]: " input
-    printf -v "${var_name}" '%s' "${input:-${default_value}}"
+
+  # curl | sudo bash 时 stdin 是脚本内容，不是终端；必须显式从 /dev/tty 读取。
+  if has_tty; then
+    if [[ -n "${effective_default}" ]]; then
+      read -r -p "${prompt} [${effective_default}]: " input < /dev/tty
+      printf -v "${var_name}" '%s' "${input:-${effective_default}}"
+    else
+      read -r -p "${prompt}: " input < /dev/tty
+      printf -v "${var_name}" '%s' "${input}"
+    fi
   else
-    read -r -p "${prompt}: " input
-    printf -v "${var_name}" '%s' "${input}"
+    printf -v "${var_name}" '%s' "${effective_default}"
   fi
 }
 
 prompt_secret() {
   local var_name="$1" prompt="$2"
   local current="${!var_name:-}"
-  if [[ -n "${current}" ]]; then return 0; fi
   local generated input
   generated="$(random_secret)"
-  if [[ ! -t 0 ]]; then printf -v "${var_name}" '%s' "${generated}"; return 0; fi
-  read -r -s -p "${prompt} [直接回车自动生成]: " input
-  printf '\n'
-  printf -v "${var_name}" '%s' "${input:-${generated}}"
+
+  # 有旧值时，回车保留；首次安装时，回车自动生成。
+  if has_tty; then
+    if [[ -n "${current}" ]]; then
+      read -r -s -p "${prompt} [直接回车保留当前值]: " input < /dev/tty
+      printf '\n' > /dev/tty
+      printf -v "${var_name}" '%s' "${input:-${current}}"
+    else
+      read -r -s -p "${prompt} [直接回车自动生成]: " input < /dev/tty
+      printf '\n' > /dev/tty
+      printf -v "${var_name}" '%s' "${input:-${generated}}"
+    fi
+  else
+    printf -v "${var_name}" '%s' "${current:-${generated}}"
+  fi
 }
 
 valid_port() {
@@ -569,7 +588,7 @@ print_summary() {
   echo ''
   echo '【常用命令】'
   echo "  改配置：    nano ${ENV_FILE}"
-  echo "  应用配置：  sudo -E bash <(curl -fsSL https://raw.githubusercontent.com/bohu-t/frp-manager-lite/main/scripts/deploy-image-production.sh)"
+  echo "  重新部署：  curl -fsSL https://raw.githubusercontent.com/bohu-t/frp-manager-lite/main/scripts/deploy-image-production.sh | sudo bash"
   echo "  面板升级：  cd ${APP_DIR} && docker compose pull && docker compose up -d"
   echo "  面板日志：  cd ${APP_DIR} && docker compose logs -f"
   echo "  frps 日志： journalctl -u frps -f"
