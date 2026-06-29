@@ -1877,34 +1877,51 @@ class Handler(BaseHTTPRequestHandler):
     def frp_plugin(self) -> None:
         try:
             payload = self.read_json()
-            print("=" * 80)
-            print(json.dumps(payload, indent=2, ensure_ascii=False))
-            print("=" * 80)
-            op = payload.get("op") or payload.get("Op") or ""
+            op = str(payload.get("op") or payload.get("Op") or "")
             content = payload.get("content") or payload.get("Content") or payload
-            user_name = content.get("user") or content.get("User") or content.get("clientUser") or ""
-            metas = content.get("metas") or content.get("metadatas") or content.get("Metas") or {}
-            panel_token = metas.get("panelToken") or metas.get("panel_token") or content.get("panelToken") or ""
+            if not isinstance(content, dict):
+                raise ValueError("invalid plugin content")
+
+            # frp 0.66 server plugin payloads differ by op:
+            # - Login:    content.user is a string, content.metas contains global metadata.
+            # - NewProxy: content.user is an object: { user, metas, run_id }, and content.metas is proxy metadata.
+            raw_user = content.get("user") or content.get("User") or content.get("clientUser") or ""
+            user_block = raw_user if isinstance(raw_user, dict) else {}
+            user_name = str(
+                user_block.get("user")
+                or user_block.get("User")
+                or raw_user
+                or ""
+            )
+
+            metas = user_block.get("metas") or user_block.get("metadatas") or user_block.get("Metas")
+            if not isinstance(metas, dict):
+                metas = content.get("metas") or content.get("metadatas") or content.get("Metas") or {}
+            if not isinstance(metas, dict):
+                metas = {}
+
+            panel_token = str(metas.get("panelToken") or metas.get("panel_token") or content.get("panelToken") or "")
+            license_key = str(metas.get("licenseKey") or metas.get("license_key") or content.get("licenseKey") or "")
             reject = False
             reason = ""
-            license_key = metas.get("licenseKey") or metas.get("license_key") or content.get("licenseKey") or ""
+
             with db() as conn:
                 user = conn.execute("SELECT * FROM users WHERE username=? AND active=1 AND (expires_at=0 OR expires_at>?)", (user_name, now())).fetchone()
                 if not user:
                     reject, reason = True, "unknown, disabled or expired user"
-                elif panel_token and not hmac.compare_digest(panel_token, user["token"]):
+                elif not panel_token or not hmac.compare_digest(panel_token, user["token"]):
                     reject, reason = True, "invalid panel token"
-                elif not license_key or not hmac.compare_digest(str(license_key), row_val(user, "license_key")):
+                elif not license_key or not hmac.compare_digest(license_key, row_val(user, "license_key")):
                     reject, reason = True, "invalid license key"
-                else:
-                    if op.lower() == "newproxy":
-                        remote_port = content.get("remote_port") or content.get("remotePort") or content.get("RemotePort")
-                        proxy_type = str(content.get("type") or content.get("proxy_type") or content.get("ProxyType") or "").lower()
-                        if remote_port is not None and proxy_type in ("", "tcp", "udp"):
-                            owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (user["node_id"], user["id"], int(remote_port))).fetchone()
-                            if not owned:
-                                reject, reason = True, "remote port is not assigned to this user"
-            self.send_json({"reject": reject, "reject_reason": reason})
+                elif op.lower() == "newproxy":
+                    remote_port = content.get("remote_port") or content.get("remotePort") or content.get("RemotePort")
+                    proxy_type = str(content.get("proxy_type") or content.get("type") or content.get("ProxyType") or "").lower()
+                    if remote_port is not None and proxy_type in ("", "tcp", "udp"):
+                        owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (user["node_id"], user["id"], int(remote_port))).fetchone()
+                        if not owned:
+                            reject, reason = True, "remote port is not assigned to this user"
+
+            self.send_json({"reject": reject, "reject_reason": reason, "unchange": not reject})
         except Exception as e:
             self.send_json({"reject": True, "reject_reason": f"plugin error: {e}"})
 
