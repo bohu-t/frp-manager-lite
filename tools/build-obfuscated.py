@@ -66,23 +66,34 @@ def write_dockerfile():
     """Generate Dockerfile for obfuscated build."""
     dockerfile = DIST / "Dockerfile"
     dockerfile.write_text(f'''# Production Dockerfile — obfuscated build
-FROM python:3.11-slim
+ARG PYTHON_IMAGE=python:3.13.5-slim-bookworm
+FROM ${{PYTHON_IMAGE}}
 
-RUN pip install --no-cache-dir flask 2>/dev/null || true
-RUN mkdir -p /data /host
+ENV PYTHONDONTWRITEBYTECODE=1 \\
+    PYTHONUNBUFFERED=1 \\
+    FML_HOST=0.0.0.0 \\
+    FML_PORT=8080 \\
+    FML_DB=/data/data.sqlite3
+
 WORKDIR /app
 
-COPY app.py /app/app.py
-COPY frontend/ /app/frontend/
+RUN addgroup --system --gid 10001 fml \\
+    && adduser --system --uid 10001 --ingroup fml --home /app --no-create-home fml \\
+    && mkdir -p /data \\
+    && chown -R fml:fml /data /app
 
-ENV FML_HOST=0.0.0.0
-ENV FML_PORT=8080
-ENV FML_DB=/data/data.sqlite3
+COPY --chown=fml:fml app.py /app/app.py
+COPY --chown=fml:fml frontend/ /app/frontend/
 
-VOLUME ["/data"]
+USER fml
+
 EXPOSE 8080
+VOLUME ["/data"]
 
-CMD ["python3", "app.py"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \\
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/nodes', timeout=3).read()" || exit 1
+
+CMD ["python", "app.py"]
 ''')
     print(f"  generated: {dockerfile}")
 

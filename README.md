@@ -6,6 +6,28 @@
 
 ## 快速开始
 
+### 推荐：预构建 Docker 镜像部署（不在用户服务器构建源码）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bohu-t/frp-manager-lite/main/scripts/install-image.sh | sudo bash
+```
+
+默认部署到 `/opt/frp-manager-lite`，镜像来自：
+
+```text
+ghcr.io/bohu-t/frp-manager-lite:latest
+```
+
+升级：
+
+```bash
+cd /opt/frp-manager-lite
+sudo docker compose pull
+sudo docker compose up -d
+```
+
+### 源码部署/开发部署
+
 ```bash
 git clone https://github.com/bohu-t/frp-manager-lite.git
 cd frp-manager-lite
@@ -36,7 +58,7 @@ frp-manager-lite/
 
 ## 特性
 
-- ✅ 一键部署（Docker Compose）
+- ✅ 一键部署（预构建 Docker 镜像 / Docker Compose）
 - ✅ 多地区 frps 节点管理 + 一键添加
 - ✅ 邀请码注册 + 端口配额
 - ✅ 用户到期自动停用（所有节点即时生效）
