@@ -6,7 +6,17 @@
 
 ## 快速开始
 
-### 推荐：预构建 Docker 镜像部署（不在用户服务器构建源码）
+### 推荐：镜像版一键生产部署（面板 + frps + Nginx/HTTPS）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bohu-t/frp-manager-lite/main/scripts/deploy-image-production.sh | sudo bash
+```
+
+这个脚本会安装 Docker、拉取预构建面板镜像、安装 frps 0.66、可选配置 Nginx 和 Let's Encrypt HTTPS。用户服务器不需要源码，也不需要本地构建镜像。
+
+### 仅部署面板镜像
+
+如果只需要部署面板，不安装 frps / Nginx：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bohu-t/frp-manager-lite/main/scripts/install-image.sh | sudo bash
@@ -48,8 +58,10 @@ frp-manager-lite/
 ├── app.py              # 主服务（无依赖，纯标准库）
 ├── frontend/           # 前端（SaaS 风格 UI）
 ├── scripts/
-│   ├── deploy-production.sh   # 一键部署脚本
-│   └── add-frps-node.sh       # 一键添加 frps 节点
+│   ├── deploy-image-production.sh # 镜像版一键生产部署
+│   ├── install-image.sh           # 仅部署面板镜像
+│   ├── deploy-production.sh       # 源码/本地构建部署脚本
+│   └── add-frps-node.sh           # 一键添加 frps 节点
 ├── tools/
 │   └── build-obfuscated.py    # 代码编译加密工具
 ├── license-authority/  # 独立鉴权服务（可选）
