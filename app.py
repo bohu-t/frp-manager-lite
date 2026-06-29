@@ -276,10 +276,14 @@ def ensure_default_node(conn: sqlite3.Connection) -> int:
         conn.execute("ALTER TABLE nodes ADD COLUMN web_port INTEGER NOT NULL DEFAULT 0")
     row = conn.execute("SELECT * FROM nodes ORDER BY id LIMIT 1").fetchone()
     if row:
-        # 如果默认节点还是占位符，同步 env 里的 FRP_SERVER_ADDR
+        # 如果默认节点还是占位符，同步 env
         if row["server_addr"] == "YOUR_FRPS_IP_OR_DOMAIN":
             conn.execute("UPDATE nodes SET server_addr=? WHERE id=?", (FRP_SERVER_ADDR, row["id"]))
             print(f"INFO: default node server_addr synced from FRP_SERVER_ADDR ({FRP_SERVER_ADDR})")
+        # 如果默认节点 auth_token 是占位符或不匹配 env，同步
+        if row["auth_token"] == "CHANGE_ME_SHARED_FRPS_TOKEN" or row["auth_token"] != FRP_AUTH_TOKEN:
+            conn.execute("UPDATE nodes SET auth_token=? WHERE id=?", (FRP_AUTH_TOKEN, row["id"]))
+            print(f"INFO: default node auth_token synced from FRP_AUTH_TOKEN")
         return int(row["id"])
     cur = conn.execute(
         "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
