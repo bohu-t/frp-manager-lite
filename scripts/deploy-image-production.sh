@@ -29,6 +29,7 @@ FRPS_WEB_PORT="${FRPS_WEB_PORT:-7500}"
 
 PANEL_DOMAIN="${PANEL_DOMAIN:-}"
 FRPS_DOMAIN="${FRPS_DOMAIN:-}"
+PANEL_HTTPS_PORT="${PANEL_HTTPS_PORT:-443}"
 INSTALL_NGINX="${INSTALL_NGINX:-auto}"      # auto|0|1
 ENABLE_HTTPS="${ENABLE_HTTPS:-auto}"        # auto|0|1
 ENABLE_UFW="${ENABLE_UFW:-0}"               # 默认关闭，避免锁 SSH
@@ -298,6 +299,78 @@ SERVICE
   log "frps 服务已启动：$(systemctl is-active frps)"
 }
 
+write_nginx_http_config() {
+  mkdir -p /var/www/certbot
+  cat > /etc/nginx/sites-available/frp-manager-lite <<NGINX
+server {
+    listen 80;
+    server_name ${PANEL_DOMAIN};
+
+    client_max_body_size 100m;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type "text/plain";
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:${FML_PUBLISH_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+NGINX
+}
+
+write_nginx_https_config() {
+  local redirect_target="https://\$host\$request_uri"
+  if [[ "${PANEL_HTTPS_PORT}" != "443" ]]; then
+    redirect_target="https://\$host:${PANEL_HTTPS_PORT}\$request_uri"
+  fi
+
+  cat > /etc/nginx/sites-available/frp-manager-lite <<NGINX
+server {
+    listen 80;
+    server_name ${PANEL_DOMAIN};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 ${redirect_target};
+    }
+}
+
+server {
+    listen ${PANEL_HTTPS_PORT} ssl http2;
+    server_name ${PANEL_DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/${PANEL_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${PANEL_DOMAIN}/privkey.pem;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+
+    client_max_body_size 100m;
+
+    location / {
+        proxy_pass http://127.0.0.1:${FML_PUBLISH_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
+NGINX
+}
+
 install_nginx_if_requested() {
   local do_nginx="${INSTALL_NGINX}"
   if [[ "${do_nginx}" == "auto" ]]; then
@@ -314,36 +387,27 @@ install_nginx_if_requested() {
   if [[ -f /etc/nginx/sites-available/frp-manager-lite ]]; then
     cp -a /etc/nginx/sites-available/frp-manager-lite "/etc/nginx/sites-available/frp-manager-lite.bak.$(date +%Y%m%d-%H%M%S)"
   fi
-  cat > /etc/nginx/sites-available/frp-manager-lite <<NGINX
-server {
-    listen 80;
-    server_name ${PANEL_DOMAIN};
 
-    client_max_body_size 100m;
-
-    location / {
-        proxy_pass http://127.0.0.1:${FML_PUBLISH_PORT};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-NGINX
+  write_nginx_http_config
   ln -sfn /etc/nginx/sites-available/frp-manager-lite /etc/nginx/sites-enabled/frp-manager-lite
   nginx -t
   systemctl enable --now nginx
   systemctl reload nginx
-  log "Nginx 反向代理已配置 → ${PANEL_DOMAIN}"
+  log "Nginx HTTP 反向代理已配置 → http://${PANEL_DOMAIN}"
 
   local do_https="${ENABLE_HTTPS}"
   if [[ "${do_https}" == "auto" ]]; then do_https="1"; fi
   if [[ "${do_https}" == "1" ]]; then
-    apt-get install -y certbot python3-certbot-nginx
-    log "正在为 ${PANEL_DOMAIN} 申请 Let's Encrypt 证书…"
-    certbot --nginx -d "${PANEL_DOMAIN}" --non-interactive --agree-tos -m "admin@${PANEL_DOMAIN}" --redirect || \
-      warn "证书申请失败，请确认 DNS 已指向本服务器，然后手动执行：certbot --nginx -d ${PANEL_DOMAIN}"
+    apt-get install -y certbot
+    log "正在为 ${PANEL_DOMAIN} 申请 Let's Encrypt 证书（80 端口验证，HTTPS 监听 ${PANEL_HTTPS_PORT}）…"
+    if certbot certonly --webroot -w /var/www/certbot -d "${PANEL_DOMAIN}" --non-interactive --agree-tos -m "admin@${PANEL_DOMAIN}"; then
+      write_nginx_https_config
+      nginx -t
+      systemctl reload nginx
+      log "Nginx HTTPS 已配置 → https://${PANEL_DOMAIN}$([[ "${PANEL_HTTPS_PORT}" == "443" ]] || printf ':%s' "${PANEL_HTTPS_PORT}")"
+    else
+      warn "证书申请失败，保留 HTTP 配置。请确认 DNS 和 80 端口后重试。"
+    fi
   fi
 }
 
@@ -353,7 +417,9 @@ configure_ufw_if_requested() {
   apt-get install -y ufw
   ufw allow OpenSSH || true
   ufw allow 80/tcp
-  ufw allow 443/tcp
+  if [[ -n "${PANEL_DOMAIN}" ]]; then
+    ufw allow "${PANEL_HTTPS_PORT}/tcp"
+  fi
   ufw allow "${FRPS_BIND_PORT}/tcp"
   ufw allow "${FRPS_PORT_START}:${FRPS_PORT_END}/tcp"
   ufw allow "${FRPS_PORT_START}:${FRPS_PORT_END}/udp"
@@ -373,7 +439,11 @@ print_summary() {
   echo "  管理员账号：${FML_ADMIN_USER}"
   echo "  本机访问：  http://127.0.0.1:${FML_PUBLISH_PORT}"
   if [[ -n "${PANEL_DOMAIN}" ]]; then
-    echo "  公网访问：  https://${PANEL_DOMAIN}"
+    if [[ "${PANEL_HTTPS_PORT}" == "443" ]]; then
+      echo "  公网访问：  https://${PANEL_DOMAIN}"
+    else
+      echo "  公网访问：  https://${PANEL_DOMAIN}:${PANEL_HTTPS_PORT}"
+    fi
   elif [[ "${FML_PUBLISH_BIND}" == "0.0.0.0" ]]; then
     local pub_ip
     pub_ip="$(hostname -I 2>/dev/null | awk '{print $1}' || hostname -f)"
@@ -397,7 +467,8 @@ print_summary() {
   echo "  ${FRPS_PORT_START}-${FRPS_PORT_END}/tcp"
   echo "  ${FRPS_PORT_START}-${FRPS_PORT_END}/udp"
   if [[ -n "${PANEL_DOMAIN}" ]]; then
-    echo "  80/tcp + 443/tcp"
+    echo "  80/tcp"
+    echo "  ${PANEL_HTTPS_PORT}/tcp"
   else
     echo "  ${FML_PUBLISH_PORT}/tcp"
   fi
@@ -420,6 +491,9 @@ main() {
     detected_frps_domain="${PANEL_DOMAIN:-$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || hostname -f 2>/dev/null || hostname)}"
   fi
   prompt_value FRPS_DOMAIN "② frps 域名或 IP（用户 frpc 连接地址）" "${detected_frps_domain}"
+  if [[ -n "${PANEL_DOMAIN}" ]]; then
+    prompt_value PANEL_HTTPS_PORT "③ 面板 HTTPS 端口（443 被占用可填 8443 等）" "${PANEL_HTTPS_PORT}"
+  fi
 
   if [[ -z "${FML_PUBLISH_BIND}" ]]; then
     if [[ -z "${PANEL_DOMAIN}" ]]; then FML_PUBLISH_BIND="0.0.0.0"; else FML_PUBLISH_BIND="127.0.0.1"; fi
@@ -427,9 +501,9 @@ main() {
 
   echo ''
   echo '密码输入时不会回显。直接回车会自动生成。'
-  prompt_secret FML_ADMIN_PASSWORD "③ 面板管理员密码"
-  prompt_secret FRP_AUTH_TOKEN "④ frps token"
-  prompt_secret FRPS_WEB_PASSWORD "⑤ frps 仪表盘密码"
+  prompt_secret FML_ADMIN_PASSWORD "④ 面板管理员密码"
+  prompt_secret FRP_AUTH_TOKEN "⑤ frps token"
+  prompt_secret FRPS_WEB_PASSWORD "⑥ frps 仪表盘密码"
   echo ''
 
   log "开始安装基础依赖…"
