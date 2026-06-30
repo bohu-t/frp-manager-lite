@@ -141,24 +141,42 @@ function fmtTs(ts){
 }
 
 function setNav(){
-  const themeBtn = `<button class="secondary" onclick="toggleColorMode()">${colorMode === 'dark' ? '浅色' : '深色'}模式</button>`;
+  const themeBtn = `<button type="button" class="secondary" data-nav="theme">${colorMode === 'dark' ? '浅色' : '深色'}模式</button>`;
   if(!currentUser){ nav.innerHTML = themeBtn; return; }
   const licenseRequired = !!(softwareLicense && softwareLicense.required && !softwareLicense.licensed);
   const isAdmin = currentUser.role === 'admin';
+  const activeCls = (name) => currentAdminSection === name ? ' primary' : '';
   const adminNav = isAdmin && !licenseRequired ? `
-    <button class="secondary" onclick="loadAdmin('users')">用户</button>
-    <button class="secondary" onclick="loadAdmin('keys')">密钥</button>
-    <button class="secondary" onclick="loadAdmin('nodes')">节点</button>
-    <button class="secondary" onclick="loadAdmin('risk')">风控</button>
+    <button type="button" class="secondary${activeCls('users')}" data-nav="admin" data-section="users">用户</button>
+    <button type="button" class="secondary${activeCls('keys')}" data-nav="admin" data-section="keys">密钥</button>
+    <button type="button" class="secondary${activeCls('nodes')}" data-nav="admin" data-section="nodes">节点</button>
+    <button type="button" class="secondary${activeCls('risk')}" data-nav="admin" data-section="risk">风控</button>
   ` : '';
   nav.innerHTML = `
-    ${licenseRequired && isAdmin ? '<button class="secondary" onclick="renderLicenseActivate()">软件授权</button>' : (licenseRequired ? '' : (isAdmin ? '<button class="secondary" onclick="loadAdminDashboard()">仪表盘</button>' : '<button class="secondary" onclick="loadDashboard()">概览</button>'))}
+    ${licenseRequired && isAdmin ? '<button type="button" class="secondary" data-nav="license">软件授权</button>' : (licenseRequired ? '' : (isAdmin ? '<button type="button" class="secondary" data-nav="admin-dashboard">仪表盘</button>' : '<button type="button" class="secondary" data-nav="dashboard">概览</button>'))}
     ${adminNav}
     ${licenseRequired ? '' : '<a class="btn" href="/config/frpc.toml">frpc 配置</a>'}
     ${themeBtn}
-    <button onclick="logout()" class="danger">退出</button>
+    <button type="button" data-nav="logout" class="danger">退出</button>
   `;
 }
+
+nav.addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-nav]');
+  if(!el) return;
+  e.preventDefault();
+  const action = el.dataset.nav;
+  try{
+    if(action === 'theme') return toggleColorMode();
+    if(action === 'logout') return logout();
+    if(action === 'license') return renderLicenseActivate();
+    if(action === 'dashboard') return loadDashboard();
+    if(action === 'admin-dashboard') return loadAdminDashboard();
+    if(action === 'admin') return loadAdmin(el.dataset.section || 'users');
+  }catch(err){
+    show(err.message || '操作失败', true);
+  }
+});
 
 async function renderLogin(){
   clearAdminDashboardTimer();
