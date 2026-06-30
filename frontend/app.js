@@ -140,39 +140,57 @@ function fmtTs(ts){
   return new Date(ts * 1000).toLocaleString();
 }
 
+function navButton(label, action, cls='secondary', section=''){
+  const active = section && currentAdminSection === section ? ' primary' : '';
+  const sectionAttr = section ? ` data-section="${section}"` : '';
+  return `<button type="button" class="${cls}${active}" data-nav="${action}"${sectionAttr}>${label}</button>`;
+}
+
 function setNav(){
-  const themeBtn = `<button type="button" class="secondary" data-nav="theme">${colorMode === 'dark' ? '浅色' : '深色'}模式</button>`;
+  const themeBtn = navButton(`${colorMode === 'dark' ? '浅色' : '深色'}模式`, 'theme');
   if(!currentUser){ nav.innerHTML = themeBtn; return; }
   const licenseRequired = !!(softwareLicense && softwareLicense.required && !softwareLicense.licensed);
   const isAdmin = currentUser.role === 'admin';
-  const activeCls = (name) => currentAdminSection === name ? ' primary' : '';
-  const adminNav = isAdmin && !licenseRequired ? `
-    <button type="button" class="secondary${activeCls('users')}" data-nav="admin" data-section="users">用户</button>
-    <button type="button" class="secondary${activeCls('keys')}" data-nav="admin" data-section="keys">密钥</button>
-    <button type="button" class="secondary${activeCls('nodes')}" data-nav="admin" data-section="nodes">节点</button>
-    <button type="button" class="secondary${activeCls('risk')}" data-nav="admin" data-section="risk">风控</button>
-  ` : '';
+  const adminNav = isAdmin && !licenseRequired ? [
+    navButton('用户', 'admin', 'secondary', 'users'),
+    navButton('密钥', 'admin', 'secondary', 'keys'),
+    navButton('节点', 'admin', 'secondary', 'nodes'),
+    navButton('风控', 'admin', 'secondary', 'risk'),
+  ].join('') : '';
+  const mainNav = licenseRequired && isAdmin ? navButton('软件授权', 'license') : (
+    licenseRequired ? '' : (isAdmin ? navButton('仪表盘', 'admin-dashboard') : navButton('概览', 'dashboard'))
+  );
   nav.innerHTML = `
-    ${licenseRequired && isAdmin ? '<button type="button" class="secondary" data-nav="license">软件授权</button>' : (licenseRequired ? '' : (isAdmin ? '<button type="button" class="secondary" data-nav="admin-dashboard">仪表盘</button>' : '<button type="button" class="secondary" data-nav="dashboard">概览</button>'))}
+    ${mainNav}
     ${adminNav}
     ${licenseRequired ? '' : '<a class="btn" href="/config/frpc.toml">frpc 配置</a>'}
     ${themeBtn}
-    <button type="button" data-nav="logout" class="danger">退出</button>
+    ${navButton('退出', 'logout', 'danger')}
   `;
 }
 
+function closestNavElement(target){
+  let el = target;
+  while(el && el !== nav){
+    if(el.getAttribute && el.getAttribute('data-nav')) return el;
+    el = el.parentNode;
+  }
+  return null;
+}
+
 nav.addEventListener('click', async (e) => {
-  const el = e.target.closest('[data-nav]');
+  const el = closestNavElement(e.target);
   if(!el) return;
   e.preventDefault();
-  const action = el.dataset.nav;
+  const action = el.getAttribute('data-nav');
+  const section = el.getAttribute('data-section') || 'users';
   try{
     if(action === 'theme') return toggleColorMode();
     if(action === 'logout') return logout();
     if(action === 'license') return renderLicenseActivate();
     if(action === 'dashboard') return loadDashboard();
     if(action === 'admin-dashboard') return loadAdminDashboard();
-    if(action === 'admin') return loadAdmin(el.dataset.section || 'users');
+    if(action === 'admin') return loadAdmin(section);
   }catch(err){
     show(err.message || '操作失败', true);
   }
