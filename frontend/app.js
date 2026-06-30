@@ -7,6 +7,9 @@ let currentAdminSection = 'users';
 let adminDashboardTimer = null;
 let csrfToken = null;
 let colorMode = localStorage.getItem('fml_color_mode') || 'system';
+let adminPages = {users:1, keys:1, nodes:1, risk:1};
+let nodeHealthPage = 1;
+const ADMIN_PAGE_SIZE = 10;
 const systemDarkQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
 function resolvedColorMode(){
@@ -133,6 +136,45 @@ function authShell(title, subtitle, formHtml, footHtml='', nodes=[]){
 
 function emptyRow(cols, text){
   return `<tr><td colspan="${cols}" class="empty-state">${esc(text)}</td></tr>`;
+}
+
+function clampPage(page, total, pageSize){
+  const pages = Math.max(1, Math.ceil(Number(total || 0) / pageSize));
+  return Math.min(Math.max(1, Number(page || 1)), pages);
+}
+
+function pageItems(items, page, pageSize){
+  const p = clampPage(page, items.length, pageSize);
+  return items.slice((p - 1) * pageSize, p * pageSize);
+}
+
+function paginationHtml(target, page, total, pageSize){
+  const pages = Math.max(1, Math.ceil(Number(total || 0) / pageSize));
+  if(total <= pageSize) return `<div class="pager muted small">共 ${total} 条</div>`;
+  const current = clampPage(page, total, pageSize);
+  return `
+    <div class="pager">
+      <button class="secondary" ${current <= 1 ? 'disabled' : ''} onclick="setPage('${target}', ${current - 1})">上一页</button>
+      <span class="muted small">第 ${current} / ${pages} 页 · 共 ${total} 条</span>
+      <button class="secondary" ${current >= pages ? 'disabled' : ''} onclick="setPage('${target}', ${current + 1})">下一页</button>
+    </div>`;
+}
+
+function setPage(target, page){
+  if(target === 'health'){
+    nodeHealthPage = page;
+    return loadAdminDashboard();
+  }
+  adminPages[target] = page;
+  return loadAdmin(target);
+}
+
+function nodeHealthPageSize(){
+  const h = window.innerHeight || 760;
+  if(h >= 1050) return 12;
+  if(h >= 860) return 9;
+  if(h >= 700) return 7;
+  return 5;
 }
 
 function fmtTs(ts){
@@ -453,7 +495,17 @@ async function loadAdmin(section=currentAdminSection){
   catch(err){ show(err.message, true); return; }
   softwareLicense = data.software_license || softwareLicense;
   setNav();
-  const rows = data.users.map(u => `
+  adminPages[currentAdminSection] = adminPages[currentAdminSection] || 1;
+  const usersPage = clampPage(adminPages.users, (data.users || []).length, ADMIN_PAGE_SIZE);
+  const keysPage = clampPage(adminPages.keys, (data.invite_keys || []).length, ADMIN_PAGE_SIZE);
+  const nodesPage = clampPage(adminPages.nodes, (data.nodes || []).length, ADMIN_PAGE_SIZE);
+  const riskPage = clampPage(adminPages.risk, (data.logs || []).length, ADMIN_PAGE_SIZE);
+  adminPages.users = usersPage; adminPages.keys = keysPage; adminPages.nodes = nodesPage; adminPages.risk = riskPage;
+  const usersSlice = pageItems(data.users || [], usersPage, ADMIN_PAGE_SIZE);
+  const keysSlice = pageItems(data.invite_keys || [], keysPage, ADMIN_PAGE_SIZE);
+  const nodesSlice = pageItems(data.nodes || [], nodesPage, ADMIN_PAGE_SIZE);
+  const logsSlice = pageItems(data.logs || [], riskPage, ADMIN_PAGE_SIZE);
+  const rows = usersSlice.map(u => `
     <tr>
       <td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${esc(u.node_region || '-')} / ${esc(u.node_name || '-')}</td><td>${u.port_count}/${u.max_ports}</td><td>${u.tunnel_count}</td>
       <td>${esc(u.expires_text)} ${u.expired ? '<span class="bad">已到期</span>' : ''}</td>
@@ -466,7 +518,7 @@ async function loadAdmin(section=currentAdminSection){
         <button class="danger" onclick="adminDelete(${u.id})">删除</button>
       </td>
     </tr>`).join('');
-  const nodeRows = (data.nodes || []).map(n => `
+  const nodeRows = nodesSlice.map(n => `
     <tr>
       <td>${n.id}</td><td>${esc(n.region)}</td><td>${esc(n.name)}</td><td>${esc(n.server_addr)}:${n.server_port}</td>
       <td>${n.port_start}-${n.port_end}</td><td>${n.free_count}/${n.port_count}</td>
@@ -474,7 +526,7 @@ async function loadAdmin(section=currentAdminSection){
       <td>${esc(n.note)}</td>
       <td class="actions"><button onclick='editNode(${JSON.stringify(n)})'>编辑</button><button onclick="nodeToggle(${n.id})">${n.active ? '停用' : '启用'}</button><a class="btn" href="/config/frps.example.toml?node_id=${n.id}">frps配置</a><button class="danger" onclick="nodeDelete(${n.id})">删除</button></td>
     </tr>`).join('') || emptyRow(9, '还没有节点');
-  const keyRows = (data.invite_keys || []).map(k => `
+  const keyRows = keysSlice.map(k => `
     <tr>
       <td>${k.id}</td>
       <td><code class="token" title="${esc(k.key)}">${esc(k.key)}</code></td>
@@ -486,7 +538,7 @@ async function loadAdmin(section=currentAdminSection){
       <td>${k.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
       <td class="actions"><button onclick="copyText('${k.key}')">复制</button><button onclick="inviteToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button class="danger" onclick="inviteDelete(${k.id})">删除</button></td>
     </tr>`).join('') || emptyRow(9, '还没有注册密钥');
-  const logRows = (data.logs || []).map(l => `
+  const logRows = logsSlice.map(l => `
     <tr><td>${l.id}</td><td>${esc(l.event)}</td><td>${esc(l.username || '-')}</td><td>${esc(l.remote_port || '-')}</td><td>${esc(l.proxy_type || '-')}</td><td>${esc(l.detail || '')}</td><td>${fmtTs(l.created_at)}</td></tr>
   `).join('') || emptyRow(7, '暂无审计日志');
   const softwareKeyRows = (data.software_license_keys || []).map(k => `
@@ -521,7 +573,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>备注</label><input name="note" placeholder="线路/机房说明"></div>
       <div style="align-self:end"><button>创建节点</button></div>
     </form></section>
-    <section class="card" id="nodes"><div class="section-title"><h2>地区节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>ID</th><th>地区</th><th>节点</th><th>frps</th><th>端口池</th><th>剩余</th><th>状态</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table></section>`;
+    <section class="card" id="nodes"><div class="section-title"><h2>地区节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>ID</th><th>地区</th><th>节点</th><th>frps</th><th>端口池</th><th>剩余</th><th>状态</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table>${paginationHtml('nodes', nodesPage, (data.nodes || []).length, ADMIN_PAGE_SIZE)}</section>`;
   const keysHtml = `
     <section class="card" id="keys"><div class="section-title"><h2>生成注册密钥</h2><p>注册密钥固定单次使用，适合批量发货</p></div><form id="inviteForm" class="grid">
       <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
@@ -532,7 +584,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>密钥有效期天数</label><input name="key_expires_days" type="number" value="30" min="0" max="3650"></div>
       <div style="align-self:end"><button>生成密钥</button></div>
     </form><p><a class="btn" href="/admin/export/invite-keys.csv">导出未使用可用密钥 CSV</a></p><p class="panel-note small">批量生成后会自动复制并下载本次生成的 txt。CSV 导出只包含未使用、启用中、未过期的密钥。</p></section>
-    <section class="card"><div class="section-title"><h2>注册密钥列表</h2><p>已使用密钥不会出现在 CSV 导出里</p></div><table><thead><tr><th>ID</th><th>密钥</th><th>备注</th><th>使用</th><th>端口</th><th>账号有效期</th><th>密钥到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table></section>
+    <section class="card"><div class="section-title"><h2>注册密钥列表</h2><p>已使用密钥不会出现在 CSV 导出里</p></div><table><thead><tr><th>ID</th><th>密钥</th><th>备注</th><th>使用</th><th>端口</th><th>账号有效期</th><th>密钥到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table>${paginationHtml('keys', keysPage, (data.invite_keys || []).length, ADMIN_PAGE_SIZE)}</section>
     ${data.software_license_authority ? `<section class="card" id="software-licenses"><div class="section-title"><h2>服务器软件授权码</h2><p>卖家后台使用：先批量生成授权码发给客户；客户输入授权码后自动绑定他的部署服务器。</p></div><form id="softwareLicenseForm" class="grid">
       <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
       <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
@@ -550,7 +602,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>有效期天数</label><input name="expires_days" type="number" value="30" min="0" max="3650"><span class="muted small">0 表示永不过期</span></div>
       <div style="align-self:end"><button>创建</button></div>
     </form></section>
-    <section class="card" id="users"><div class="section-title"><h2>用户列表</h2><p>管理状态、续期、注册密钥和删除账号</p></div><table><thead><tr><th>ID</th><th>用户</th><th>角色</th><th>地区节点</th><th>端口</th><th>隧道</th><th>到期</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></section>`;
+    <section class="card" id="users"><div class="section-title"><h2>用户列表</h2><p>管理状态、续期、注册密钥和删除账号</p></div><table><thead><tr><th>ID</th><th>用户</th><th>角色</th><th>地区节点</th><th>端口</th><th>隧道</th><th>到期</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, (data.users || []).length, ADMIN_PAGE_SIZE)}</section>`;
   const riskHtml = `
     <section class="card" id="risk"><div class="section-title"><h2>投诉处理 / 风控</h2><p>按端口定位用户并快速封禁</p></div>
       <form id="lookupPortForm" class="grid">
@@ -560,7 +612,7 @@ async function loadAdmin(section=currentAdminSection){
       </form>
       <div id="riskResult" class="risk-result"></div>
     </section>
-    <section class="card"><div class="section-title"><h2>审计日志</h2><p>最近 80 条关键操作和风控事件</p></div><table><thead><tr><th>ID</th><th>事件</th><th>用户</th><th>端口</th><th>协议</th><th>详情</th><th>时间</th></tr></thead><tbody>${logRows}</tbody></table></section>`;
+    <section class="card"><div class="section-title"><h2>审计日志</h2><p>最近 80 条关键操作和风控事件</p></div><table><thead><tr><th>ID</th><th>事件</th><th>用户</th><th>端口</th><th>协议</th><th>详情</th><th>时间</th></tr></thead><tbody>${logRows}</tbody></table>${paginationHtml('risk', riskPage, (data.logs || []).length, ADMIN_PAGE_SIZE)}</section>`;
   const sectionHtml = {users: usersHtml, keys: keysHtml, nodes: nodeHtml, risk: riskHtml}[currentAdminSection] || usersHtml;
   app.innerHTML = sectionHtml;
   const softwareLicenseForm = document.querySelector('#softwareLicenseForm');
@@ -757,10 +809,13 @@ async function loadAdminDashboard(auto=false){
   const totalPorts = Number(portStats.total || 0);
   const freePorts = Number(portStats.free || Math.max(0, totalPorts - usedPorts));
   const portUsage = totalPorts > 0 ? ((usedPorts / totalPorts) * 100).toFixed(1) : '0.0';
-  const nodeRows = (data.nodes || []).map(n => `
+  const healthPageSize = nodeHealthPageSize();
+  nodeHealthPage = clampPage(nodeHealthPage, (data.nodes || []).length, healthPageSize);
+  const healthNodes = pageItems(data.nodes || [], nodeHealthPage, healthPageSize);
+  const nodeRows = healthNodes.map(n => `
     <tr>
-      <td><b>${esc(n.name)}</b><br><span class="muted small">${esc(n.server_addr || '')}:${esc(n.server_port || '')}</span></td>
-      <td>${nodeStatusBadge(n)}<br><span class="muted small">${esc(n.auth_message || '')}</span></td>
+      <td><b>${esc(n.name)}</b><span class="muted small">${esc(n.server_addr || '')}:${esc(n.server_port || '')}</span></td>
+      <td>${nodeStatusBadge(n)}<span class="muted small">${esc(n.auth_message || '')}</span></td>
       <td>${Number(n.port_count || 0) - Number(n.free_count || 0)} / ${n.port_count || 0}</td>
     </tr>`).join('') || emptyRow(3, '暂无节点');
   const setupHtml = data.has_setup_key ? `
@@ -790,18 +845,18 @@ async function loadAdminDashboard(auto=false){
       <section class="card stat"><div class="label">内存</div><div class="num">${host.memory_percent == null ? '-' : `${host.memory_percent}%`}</div><div class="sub">${fmtBytes(host.memory_used)} / ${fmtBytes(host.memory_total)}</div></section>
     </div>
 
-    <div class="dashboard-layout">
-      <section class="card"><div class="section-title"><h2>节点健康</h2><p>检查 frps bind/auth 端口连通性</p></div>
-        <table><thead><tr><th>节点</th><th>状态</th><th>端口使用</th></tr></thead><tbody>${nodeRows}</tbody></table>
-      </section>
-      <section class="card"><div class="section-title"><h2>运维入口</h2><p>常用下载和备份操作</p></div>
-        <div class="ops-list">
-          ${setupHtml}
-          <div class="ops-item"><div class="label">配置与备份</div><p class="row"><a class="btn secondary" href="/config/frps.example.toml">下载 frps 配置</a><a class="btn" href="/admin/backup/full.zip">下载全量备份</a><button class="secondary" onclick="backupToR2()">备份到 R2</button></p></div>
-          <div class="ops-item"><div class="label">业务概况</div><p class="muted small">隧道 ${data.tunnel_count || 0} · 注册密钥 ${data.invite_key_count || 0} · 封禁记录 ${data.ban_count || 0}</p></div>
-        </div>
-      </section>
-    </div>
+    <section class="card"><div class="section-title"><h2>运维入口</h2><p>常用下载和备份操作</p></div>
+      <div class="ops-list ops-grid">
+        ${setupHtml}
+        <div class="ops-item"><div class="label">配置与备份</div><p class="row"><a class="btn secondary" href="/config/frps.example.toml">下载 frps 配置</a><a class="btn" href="/admin/backup/full.zip">下载全量备份</a><button class="secondary" onclick="backupToR2()">备份到 R2</button></p></div>
+        <div class="ops-item"><div class="label">业务概况</div><p class="muted small">隧道 ${data.tunnel_count || 0} · 注册密钥 ${data.invite_key_count || 0} · 封禁记录 ${data.ban_count || 0}</p></div>
+      </div>
+    </section>
+
+    <section class="card node-health-card"><div class="section-title"><h2>节点健康</h2><p>检查 frps bind/auth 端口连通性 · 每页 ${healthPageSize} 条</p></div>
+      <table class="compact-table"><thead><tr><th>节点</th><th>状态</th><th>端口使用</th></tr></thead><tbody>${nodeRows}</tbody></table>
+      ${paginationHtml('health', nodeHealthPage, (data.nodes || []).length, healthPageSize)}
+    </section>
 
     <section class="card"><div class="section-title"><h2>Cloudflare R2 备份配置</h2><p>${r2Status} · ${esc(r2Source)}</p></div>
       <form id="r2ConfigForm" class="grid r2-form">
