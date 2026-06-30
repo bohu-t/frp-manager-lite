@@ -700,6 +700,11 @@ def init_db() -> None:
                 last_check_at INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL DEFAULT 0
+            );
             """
         )
         default_node_id = ensure_default_node(conn)
@@ -1238,8 +1243,49 @@ def _sign(key: bytes, msg: str) -> bytes:
     return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
 
 
-def r2_configured() -> bool:
-    return bool(R2_ACCOUNT_ID and R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_BUCKET)
+def setting_get(conn: sqlite3.Connection, key: str, default: str = "") -> str:
+    row = conn.execute("SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
+    return str(row["value"]) if row else default
+
+
+def setting_set(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        "INSERT INTO app_settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+        (key, value, now()),
+    )
+
+
+def r2_config_from_db(conn: sqlite3.Connection) -> dict[str, str]:
+    # DB settings are primary; env vars are retained only as compatibility fallback.
+    return {
+        "account_id": setting_get(conn, "r2.account_id", R2_ACCOUNT_ID).strip(),
+        "access_key_id": setting_get(conn, "r2.access_key_id", R2_ACCESS_KEY_ID).strip(),
+        "secret_access_key": setting_get(conn, "r2.secret_access_key", R2_SECRET_ACCESS_KEY).strip(),
+        "bucket": setting_get(conn, "r2.bucket", R2_BUCKET).strip(),
+        "prefix": setting_get(conn, "r2.prefix", R2_PREFIX).strip(),
+    }
+
+
+def public_r2_config(conn: sqlite3.Connection) -> dict[str, Any]:
+    cfg = r2_config_from_db(conn)
+    db_has_values = any(setting_get(conn, f"r2.{k}", "").strip() for k in ["account_id", "access_key_id", "secret_access_key", "bucket", "prefix"])
+    env_has_values = any([R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET])
+    configured = bool(cfg["account_id"] and cfg["access_key_id"] and cfg["secret_access_key"] and cfg["bucket"])
+    return {
+        "configured": configured,
+        "source": "database" if db_has_values else ("env" if env_has_values else "empty"),
+        "account_id": cfg["account_id"],
+        "access_key_id": cfg["access_key_id"],
+        "secret_set": bool(cfg["secret_access_key"]),
+        "bucket": cfg["bucket"],
+        "prefix": cfg["prefix"],
+    }
+
+
+def r2_configured(cfg: dict[str, str] | None = None) -> bool:
+    if cfg is None:
+        return bool(R2_ACCOUNT_ID and R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_BUCKET)
+    return bool(cfg.get("account_id") and cfg.get("access_key_id") and cfg.get("secret_access_key") and cfg.get("bucket"))
 
 
 def static_content_type(path: Path) -> str:
@@ -1258,28 +1304,35 @@ def static_content_type(path: Path) -> str:
     return guessed
 
 
-def upload_to_r2(object_key: str, body: bytes, content_type: str = "application/zip") -> str:
-    if not r2_configured():
-        raise RuntimeError("R2 未配置，请设置 R2_ACCOUNT_ID/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/R2_BUCKET")
-    host = f"{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+def upload_to_r2(object_key: str, body: bytes, content_type: str = "application/zip", cfg: dict[str, str] | None = None) -> str:
+    cfg = cfg or {
+        "account_id": R2_ACCOUNT_ID,
+        "access_key_id": R2_ACCESS_KEY_ID,
+        "secret_access_key": R2_SECRET_ACCESS_KEY,
+        "bucket": R2_BUCKET,
+        "prefix": R2_PREFIX,
+    }
+    if not r2_configured(cfg):
+        raise RuntimeError("R2 未配置完整，请在仪表盘填写 Account ID、Access Key ID、Secret Access Key 和 Bucket")
+    host = f"{cfg['account_id']}.r2.cloudflarestorage.com"
     region = "auto"
     service = "s3"
     method = "PUT"
     encoded_key = "/" + "/".join(urllib.parse.quote(part, safe="") for part in object_key.split("/"))
-    url = f"https://{host}/{R2_BUCKET}{encoded_key}"
+    url = f"https://{host}/{cfg['bucket']}{encoded_key}"
     t = time.gmtime()
     amz_date = time.strftime("%Y%m%dT%H%M%SZ", t)
     date_stamp = time.strftime("%Y%m%d", t)
     payload_hash = hashlib.sha256(body).hexdigest()
-    canonical_uri = f"/{R2_BUCKET}{encoded_key}"
+    canonical_uri = f"/{cfg['bucket']}{encoded_key}"
     canonical_headers = f"content-type:{content_type}\nhost:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n"
     signed_headers = "content-type;host;x-amz-content-sha256;x-amz-date"
     canonical_request = "\n".join([method, canonical_uri, "", canonical_headers, signed_headers, payload_hash])
     credential_scope = f"{date_stamp}/{region}/{service}/aws4_request"
     string_to_sign = "\n".join(["AWS4-HMAC-SHA256", amz_date, credential_scope, hashlib.sha256(canonical_request.encode()).hexdigest()])
-    signing_key = _sign(_sign(_sign(_sign(("AWS4" + R2_SECRET_ACCESS_KEY).encode("utf-8"), date_stamp), region), service), "aws4_request")
+    signing_key = _sign(_sign(_sign(_sign(("AWS4" + cfg["secret_access_key"]).encode("utf-8"), date_stamp), region), service), "aws4_request")
     signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
-    auth = f"AWS4-HMAC-SHA256 Credential={R2_ACCESS_KEY_ID}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}"
+    auth = f"AWS4-HMAC-SHA256 Credential={cfg['access_key_id']}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}"
     req = urllib.request.Request(url, data=body, method="PUT", headers={
         "Content-Type": content_type,
         "Host": host,
@@ -1477,14 +1530,43 @@ class Handler(BaseHTTPRequestHandler):
         audit("backup_download", admin, None, None, "", f"full backup {stamp}")
         self.send_body(payload, 200, "application/zip", {"Content-Disposition": f'attachment; filename="frp-manager-lite-backup-{stamp}.zip"'})
 
+    def admin_r2_config_save(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        account_id = str(data.get("account_id", "")).strip()
+        access_key_id = str(data.get("access_key_id", "")).strip()
+        secret_access_key = str(data.get("secret_access_key", "")).strip()
+        bucket = str(data.get("bucket", "")).strip()
+        prefix = str(data.get("prefix", "frp-manager-lite/backups")).strip().strip("/")
+        if any(ch in bucket for ch in " /\\"):
+            self.send_json({"ok": False, "error": "Bucket 名称不能包含空格或斜杠"}, 400)
+            return
+        with db() as conn:
+            current = r2_config_from_db(conn)
+            if not secret_access_key:
+                secret_access_key = current.get("secret_access_key", "")
+            for key, value in {
+                "r2.account_id": account_id,
+                "r2.access_key_id": access_key_id,
+                "r2.secret_access_key": secret_access_key,
+                "r2.bucket": bucket,
+                "r2.prefix": prefix,
+            }.items():
+                setting_set(conn, key, value)
+            cfg = public_r2_config(conn)
+        audit("r2_config_update", admin, None, None, "", f"bucket={bucket}, prefix={prefix}")
+        self.send_json({"ok": True, "message": "R2 配置已保存", "r2": cfg})
+
     def admin_backup_r2(self, admin: sqlite3.Row) -> None:
         if not self.require_admin():
             return
         try:
+            with db() as conn:
+                cfg = r2_config_from_db(conn)
             stamp, payload = make_full_backup_zip(admin["username"])
-            prefix = R2_PREFIX.strip("/")
+            prefix = cfg.get("prefix", "").strip("/")
             object_key = f"{prefix}/frp-manager-lite-backup-{stamp}.zip" if prefix else f"frp-manager-lite-backup-{stamp}.zip"
-            upload_to_r2(object_key, payload)
+            upload_to_r2(object_key, payload, cfg=cfg)
             audit("backup_r2_upload", admin, None, None, "", object_key)
             self.send_json({"ok": True, "message": "已上传全量备份到 R2", "object_key": object_key, "size": len(payload)})
         except Exception as e:
@@ -1644,6 +1726,7 @@ class Handler(BaseHTTPRequestHandler):
                 tunnel_count = conn.execute("SELECT COUNT(*) c FROM tunnels").fetchone()["c"]
                 invite_key_count = conn.execute("SELECT COUNT(*) c FROM invite_keys").fetchone()["c"]
                 ban_count = conn.execute("SELECT COUNT(*) c FROM user_bans").fetchone()["c"]
+                r2_public = public_r2_config(conn)
             node_list = attach_node_auth_port_status([
                 {
                     "id": n["id"],
@@ -1672,7 +1755,8 @@ class Handler(BaseHTTPRequestHandler):
                 "nodes": node_list,
                 "setup_key": (FML_SETUP_KEY if FML_SETUP_KEY else ""),
                 "has_setup_key": bool(FML_SETUP_KEY),
-                "r2_configured": bool(R2_ACCOUNT_ID and R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_BUCKET),
+                "r2": r2_public,
+                "r2_configured": r2_public["configured"],
             })
             return
         self.send_json({"ok": False, "error": "not found"}, 404)
@@ -1794,6 +1878,8 @@ class Handler(BaseHTTPRequestHandler):
             self.admin_ban_user(user, data)
         elif path == "/api/admin/risk/lookup-port":
             self.admin_lookup_port(data)
+        elif path == "/api/admin/r2/config":
+            self.admin_r2_config_save(user, data)
         elif path == "/api/admin/backup/r2":
             self.admin_backup_r2(user)
         elif path == "/api/admin/software-licenses/create":

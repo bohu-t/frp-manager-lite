@@ -164,3 +164,12 @@ code{padding:2px 6px}pre{padding:14px;overflow:auto;white-space:pre-wrap}
 /* Table width fix: keep tables filling the card while allowing horizontal scroll on small screens. */
 .card > table, .risk-result table{width:100%;}
 @media(max-width:1100px){table{min-width:880px}}
+
+/* Admin dashboard refresh */
+.dashboard-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:22px 24px;background:linear-gradient(135deg,rgba(56,189,248,.18),rgba(15,23,42,.88) 48%,rgba(52,211,153,.10));overflow:hidden;position:relative}
+.dashboard-hero:after{content:"";position:absolute;right:-70px;top:-90px;width:240px;height:240px;border-radius:999px;background:rgba(56,189,248,.12);filter:blur(2px)}
+.dashboard-hero h2{font-size:26px;line-height:1.1;margin:4px 0 8px;letter-spacing:-.04em}.dashboard-hero p{margin:0;color:var(--muted);max-width:720px}.eyebrow{color:var(--accent);font-size:12px;font-weight:950;letter-spacing:.14em}.hero-actions{display:flex;gap:10px;flex-wrap:wrap;z-index:1}
+.metric-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px}.metric-grid .stat{margin:0;min-height:128px}.metric-grid .stat .num{font-size:30px}.dashboard-layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,.65fr);gap:14px;align-items:start}.ops-list{display:grid;gap:12px}.ops-item{border:1px solid var(--line);background:rgba(2,8,23,.24);border-radius:14px;padding:13px}.ops-item .token{max-width:100%;flex:1}.r2-form{align-items:end}.form-actions{align-self:end;display:flex;gap:10px;flex-wrap:wrap}.form-actions button{min-height:40px}
+:root[data-theme="light"] .dashboard-hero{background:linear-gradient(135deg,rgba(14,165,233,.14),rgba(255,255,255,.94) 48%,rgba(16,185,129,.10))}:root[data-theme="light"] .ops-item{background:rgba(248,250,252,.72);border-color:rgba(15,23,42,.1)}
+@media(max-width:1260px){.metric-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.dashboard-layout{grid-template-columns:1fr}}
+@media(max-width:760px){.dashboard-hero{align-items:flex-start;flex-direction:column}.metric-grid{grid-template-columns:1fr}.dashboard-hero h2{font-size:22px}.hero-actions,.hero-actions button,.hero-actions .btn,.form-actions,.form-actions button{width:100%}}

@@ -676,8 +676,18 @@ async function backupToR2(){
   if(!confirm('现在生成全量备份并上传到 Cloudflare R2？')) return;
   await api('/api/admin/backup/r2', {method:'POST', body:{}}).then(r=>{
     show(`${r.message}：${r.object_key}`);
-    loadAdmin();
+    loadAdminDashboard();
   }).catch(e=>show(e.message,true));
+}
+
+async function saveR2Config(e){
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  try{
+    const r = await api('/api/admin/r2/config', {method:'POST', body:Object.fromEntries(fd)});
+    show(r.message || 'R2 配置已保存');
+    await loadAdminDashboard();
+  }catch(err){ show(err.message, true); }
 }
 
 async function adminToggle(id){ await api('/api/admin/users/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
@@ -742,35 +752,70 @@ async function loadAdminDashboard(auto=false){
   const portStats = data.port_stats || {};
   const userStats = data.user_stats || {};
   const host = data.host || {};
-  const usedPorts = portStats.used || 0;
-  const totalPorts = portStats.total || 0;
+  const r2 = data.r2 || {};
+  const usedPorts = Number(portStats.used || 0);
+  const totalPorts = Number(portStats.total || 0);
+  const freePorts = Number(portStats.free || Math.max(0, totalPorts - usedPorts));
   const portUsage = totalPorts > 0 ? ((usedPorts / totalPorts) * 100).toFixed(1) : '0.0';
   const nodeRows = (data.nodes || []).map(n => `
     <tr>
-      <td><b>${esc(n.name)}</b></td>
+      <td><b>${esc(n.name)}</b><br><span class="muted small">${esc(n.server_addr || '')}:${esc(n.server_port || '')}</span></td>
       <td>${nodeStatusBadge(n)}<br><span class="muted small">${esc(n.auth_message || '')}</span></td>
-    </tr>`).join('') || emptyRow(2, '暂无节点');
+      <td>${Number(n.port_count || 0) - Number(n.free_count || 0)} / ${n.port_count || 0}</td>
+    </tr>`).join('') || emptyRow(3, '暂无节点');
   const setupHtml = data.has_setup_key ? `
-    <div><div class="label">🔑 一键添加节点密钥</div><div class="row" style="gap:8px;align-items:center"><code class="token" id="setupKeyValue" style="user-select:all;flex:1">${esc(data.setup_key)}</code><button class="secondary" onclick="copySetupKey()">📋 复制</button></div><p class="muted small">在新机器运行添加节点脚本时输入此密钥。</p></div>` :
-    '<div><div class="label">⚠️ 未设置 FML_SETUP_KEY</div><p class="muted small">在 .env 中添加 FML_SETUP_KEY=*** 即可启用一键添加节点功能。</p></div>';
+    <div class="ops-item"><div class="label">一键添加节点密钥</div><div class="row"><code class="token" id="setupKeyValue">${esc(data.setup_key)}</code><button class="secondary" onclick="copySetupKey()">复制</button></div><p class="muted small">在新机器运行添加节点脚本时输入此密钥。</p></div>` :
+    '<div class="ops-item"><div class="label">一键添加节点密钥</div><p class="muted small">未设置 FML_SETUP_KEY；需要一键添加节点时可在服务端配置。</p></div>';
+  const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
+  const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
   app.innerHTML = `
-    <div class="grid">
+    <section class="dashboard-hero card">
+      <div>
+        <div class="eyebrow">ADMIN DASHBOARD</div>
+        <h2>运行总览</h2>
+        <p>节点健康、主机资源、备份和运维入口集中在这里。最后检查：${esc(nowText)}</p>
+      </div>
+      <div class="hero-actions">
+        <button onclick="loadAdminDashboard()">立即刷新</button>
+        <button class="secondary" onclick="loadAdmin('nodes')">节点管理</button>
+      </div>
+    </section>
+
+    <div class="metric-grid">
       <section class="card stat"><div class="label">面板版本</div><div class="num">${esc(data.panel_version || data.version || '-')}</div><div class="sub">frp-manager-lite</div></section>
-      <section class="card stat"><div class="label">活跃节点</div><div class="num">${data.active_node_count}/${data.node_count}</div><div class="sub">认证端口每 ${refreshSeconds} 秒检查</div></section>
-      <section class="card stat"><div class="label">端口使用率</div><div class="num">${portUsage}%</div><div class="sub">已用 ${usedPorts} / 总数 ${totalPorts}</div></section>
-      <section class="card stat"><div class="label">用户</div><div class="num">${userStats.active}/${userStats.total}</div><div class="sub">活跃用户数 / 总用户数</div></section>
+      <section class="card stat"><div class="label">节点在线</div><div class="num">${data.active_node_count}/${data.node_count}</div><div class="sub">每 ${refreshSeconds} 秒自动检查认证端口</div></section>
+      <section class="card stat"><div class="label">端口使用率</div><div class="num">${portUsage}%</div><div class="sub">已用 ${usedPorts} · 空闲 ${freePorts} · 总数 ${totalPorts}</div></section>
+      <section class="card stat"><div class="label">用户</div><div class="num">${userStats.active}/${userStats.total}</div><div class="sub">活跃用户 / 总用户</div></section>
       <section class="card stat"><div class="label">CPU</div><div class="num">${host.cpu_percent == null ? '-' : `${host.cpu_percent}%`}</div><div class="sub">${host.cpu_count || 0} 核 · load ${esc(host.load1 ?? '-')} / ${esc(host.load5 ?? '-')} / ${esc(host.load15 ?? '-')}</div></section>
       <section class="card stat"><div class="label">内存</div><div class="num">${host.memory_percent == null ? '-' : `${host.memory_percent}%`}</div><div class="sub">${fmtBytes(host.memory_used)} / ${fmtBytes(host.memory_total)}</div></section>
     </div>
-    <section class="card"><div class="section-title"><h2>节点状态</h2><p>定期检查每个节点的 frps 认证端口是否正常。最后检查：${esc(nowText)}</p></div>
-      <table><thead><tr><th>节点名称</th><th>状态</th></tr></thead><tbody>${nodeRows}</tbody></table>
-      <p class="row" style="gap:8px"><button class="secondary" onclick="loadAdminDashboard()">立即检查</button><button class="secondary" onclick="loadAdmin('nodes')">节点管理</button></p>
-    </section>
-    <section class="card"><div class="section-title"><h2>运维入口</h2><p>原“设置”页功能已合并到仪表盘，避免重复导航。</p></div>
-      <div class="grid">${setupHtml}</div>
-      <p class="row"><a class="btn secondary" href="/config/frps.example.toml">下载默认 frps 配置</a><a class="btn" href="/admin/backup/full.zip">下载全量备份</a><button class="secondary" onclick="backupToR2()">备份到 R2</button></p>
-      <p class="muted small">隧道 ${data.tunnel_count || 0} · 注册密钥 ${data.invite_key_count || 0} · 封禁记录 ${data.ban_count || 0} · R2 ${data.r2_configured ? '已配置' : '未配置'}</p>
+
+    <div class="dashboard-layout">
+      <section class="card"><div class="section-title"><h2>节点健康</h2><p>检查 frps bind/auth 端口连通性</p></div>
+        <table><thead><tr><th>节点</th><th>状态</th><th>端口使用</th></tr></thead><tbody>${nodeRows}</tbody></table>
+      </section>
+      <section class="card"><div class="section-title"><h2>运维入口</h2><p>常用下载和备份操作</p></div>
+        <div class="ops-list">
+          ${setupHtml}
+          <div class="ops-item"><div class="label">配置与备份</div><p class="row"><a class="btn secondary" href="/config/frps.example.toml">下载 frps 配置</a><a class="btn" href="/admin/backup/full.zip">下载全量备份</a><button class="secondary" onclick="backupToR2()">备份到 R2</button></p></div>
+          <div class="ops-item"><div class="label">业务概况</div><p class="muted small">隧道 ${data.tunnel_count || 0} · 注册密钥 ${data.invite_key_count || 0} · 封禁记录 ${data.ban_count || 0}</p></div>
+        </div>
+      </section>
+    </div>
+
+    <section class="card"><div class="section-title"><h2>Cloudflare R2 备份配置</h2><p>${r2Status} · ${esc(r2Source)}</p></div>
+      <form id="r2ConfigForm" class="grid r2-form">
+        <div><label>Account ID</label><input name="account_id" value="${esc(r2.account_id || '')}" placeholder="Cloudflare Account ID"></div>
+        <div><label>Access Key ID</label><input name="access_key_id" value="${esc(r2.access_key_id || '')}" placeholder="R2 API Token Access Key ID"></div>
+        <div><label>Secret Access Key</label><input name="secret_access_key" type="password" placeholder="${r2.secret_set ? '已设置，留空则不修改' : 'R2 Secret Access Key'}"></div>
+        <div><label>Bucket</label><input name="bucket" value="${esc(r2.bucket || '')}" placeholder="bucket-name"></div>
+        <div><label>备份目录 Prefix</label><input name="prefix" value="${esc(r2.prefix || 'frp-manager-lite/backups')}" placeholder="frp-manager-lite/backups"></div>
+        <div class="form-actions"><button>保存 R2 配置</button><button type="button" class="secondary" onclick="backupToR2()">保存后上传备份</button></div>
+      </form>
+      <p class="muted small">配置保存在本面板数据库中；Secret 不会明文回显。已有环境变量配置仍可作为兼容兜底。</p>
     </section>`;
+  const r2Form = document.querySelector('#r2ConfigForm');
+  if(r2Form) r2Form.onsubmit = saveR2Config;
   adminDashboardTimer = setTimeout(() => loadAdminDashboard(true), refreshSeconds * 1000);
 }
 
