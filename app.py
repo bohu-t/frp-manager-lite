@@ -1242,6 +1242,22 @@ def r2_configured() -> bool:
     return bool(R2_ACCOUNT_ID and R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_BUCKET)
 
 
+def static_content_type(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix in {".html", ".htm"}:
+        return "text/html; charset=utf-8"
+    if suffix == ".js":
+        return "application/javascript; charset=utf-8"
+    if suffix == ".css":
+        return "text/css; charset=utf-8"
+    if suffix == ".svg":
+        return "image/svg+xml; charset=utf-8"
+    guessed = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+    if guessed.startswith("text/"):
+        return guessed + "; charset=utf-8"
+    return guessed
+
+
 def upload_to_r2(object_key: str, body: bytes, content_type: str = "application/zip") -> str:
     if not r2_configured():
         raise RuntimeError("R2 未配置，请设置 R2_ACCOUNT_ID/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/R2_BUCKET")
@@ -1497,8 +1513,7 @@ class Handler(BaseHTTPRequestHandler):
         target = (frontend_root / rel).resolve()
         if not str(target).startswith(str(frontend_root)) or not target.is_file():
             target = frontend_root / "index.html"
-        ctype = mimetypes.guess_type(str(target))[0] or "text/html; charset=utf-8"
-        self.send_body(target.read_bytes(), 200, ctype)
+        self.send_body(target.read_bytes(), 200, static_content_type(target))
 
     def api_get(self, path: str) -> None:
         if path == "/api/csrf":
