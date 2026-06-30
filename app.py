@@ -51,7 +51,7 @@ R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "")
 R2_BUCKET = os.getenv("R2_BUCKET", "")
 R2_PREFIX = os.getenv("R2_PREFIX", "frp-manager-lite/backups")
 SESSION_TTL = 7 * 24 * 3600
-MAX_BODY = 128 * 1024
+MAX_BODY = int(os.getenv("FML_MAX_BODY", str(32 * 1024 * 1024)))
 ALLOWED_PROXY_TYPES = {"tcp", "udp", "http", "https", "stcp", "xtcp", "tcpmux"}
 REMOTE_PORT_PROXY_TYPES = {"tcp", "udp"}
 DOMAIN_PROXY_TYPES = {"http", "https", "tcpmux"}
@@ -1239,6 +1239,55 @@ sudo systemctl start frp-manager-lite
         mem.close()
 
 
+def restore_full_backup_zip(admin_username: str, filename: str, content_base64: str) -> tuple[bool, str, dict[str, Any]]:
+    raw = content_base64.strip()
+    if raw.startswith("data:") and "," in raw:
+        raw = raw.split(",", 1)[1]
+    try:
+        payload = base64.b64decode(raw, validate=True)
+    except Exception as e:
+        return False, f"备份文件 base64 解析失败：{e}", {}
+    if not payload:
+        return False, "备份文件为空", {}
+    try:
+        with zipfile.ZipFile(io.BytesIO(payload), "r") as z:
+            names = set(z.namelist())
+            if "data.sqlite3" not in names:
+                return False, "备份 zip 中缺少 data.sqlite3", {}
+            db_bytes = z.read("data.sqlite3")
+            meta = json.loads(z.read("metadata.json").decode("utf-8")) if "metadata.json" in names else {}
+    except Exception as e:
+        return False, f"备份 zip 无效：{e}", {}
+    if meta and meta.get("app") != APP_NAME:
+        return False, "备份文件不是 frp-manager-lite 生成的", {}
+    mem = sqlite3.connect(":memory:")
+    try:
+        if not hasattr(mem, "deserialize"):
+            return False, "当前 Python sqlite3 不支持内存校验恢复", {}
+        mem.deserialize(db_bytes)
+        ok = mem.execute("PRAGMA integrity_check").fetchone()[0]
+        if ok != "ok":
+            return False, f"SQLite 完整性检查失败：{ok}", {}
+        required = {"users", "nodes", "ports", "tunnels", "invite_keys"}
+        tables = {r[0] for r in mem.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        missing = sorted(required - tables)
+        if missing:
+            return False, "备份数据库缺少必要表：" + ", ".join(missing), {}
+    finally:
+        mem.close()
+    backup_stamp, current_payload = make_full_backup_zip(admin_username)
+    restore_dir = DB_PATH.parent / "restore-backups"
+    restore_dir.mkdir(parents=True, exist_ok=True)
+    current_backup = restore_dir / f"before-restore-{backup_stamp}.zip"
+    current_backup.write_bytes(current_payload)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = DB_PATH.with_suffix(DB_PATH.suffix + ".restore.tmp")
+    tmp.write_bytes(db_bytes)
+    os.replace(tmp, DB_PATH)
+    init_db()
+    return True, "全量备份已恢复，当前数据库已替换", {"source_filename": filename, "pre_restore_backup": str(current_backup), "size": len(db_bytes), "metadata": meta}
+
+
 def _sign(key: bytes, msg: str) -> bytes:
     return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
 
@@ -1572,6 +1621,97 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json({"ok": False, "error": str(e)}, 400)
 
+    def admin_restore_backup(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        if str(data.get("confirm", "")).strip() != "RESTORE":
+            self.send_json({"ok": False, "error": "请输入确认词 RESTORE 后再恢复"}, 400)
+            return
+        ok, msg, info = restore_full_backup_zip(admin["username"], str(data.get("filename", "backup.zip")), str(data.get("content_base64", "")))
+        if ok:
+            audit("backup_restore", admin, None, None, "", f"{info.get('source_filename','')} pre={info.get('pre_restore_backup','')}")
+        self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "restore": info}, 200 if ok else 400)
+
+    def admin_frpc_config(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        user_id = int(data.get("user_id", 0))
+        with db() as conn:
+            target = conn.execute("SELECT * FROM users WHERE id=? AND role!='admin'", (user_id,)).fetchone()
+            if not target:
+                self.send_json({"ok": False, "error": "用户不存在"}, 404)
+                return
+            node = conn.execute("SELECT * FROM nodes WHERE id=?", (target["node_id"],)).fetchone()
+            tunnels = conn.execute("SELECT * FROM tunnels WHERE user_id=? ORDER BY id", (target["id"],)).fetchall()
+        if not node:
+            self.send_json({"ok": False, "error": "用户所属节点不存在"}, 400)
+            return
+        cfg = tunnel_config(target, node, tunnels)
+        audit("admin_frpc_config_download", admin, target["node_id"], None, "", f"target={target['username']}")
+        self.send_json({"ok": True, "filename": f"frpc-{target['username']}.toml", "config": cfg})
+
+    def admin_tunnel_create_for_user(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        user_id = int(data.get("user_id", 0))
+        try:
+            name = str(data.get("name", "")).strip()
+            proxy_type = str(data.get("proxy_type", "tcp")).lower()
+            local_ip = str(data.get("local_ip", "127.0.0.1")).strip()
+            local_port = int(data.get("local_port", 0))
+            remote_port = int(data.get("remote_port", 0) or 0)
+            custom_domains = ",".join([d.strip().lower() for d in str(data.get("custom_domains", "")).replace("\n", ",").split(",") if d.strip()])[:500]
+            secret_key = str(data.get("secret_key", "")).strip()[:120]
+            if not name or len(name) > 40 or not name.replace("_", "").replace("-", "").isalnum():
+                raise ValueError("隧道名称只能包含字母、数字、下划线、短横线，长度 1-40")
+            if proxy_type not in ALLOWED_PROXY_TYPES:
+                raise ValueError("协议不支持")
+            if not (1 <= local_port <= 65535):
+                raise ValueError("本地端口不合法")
+            if proxy_type not in REMOTE_PORT_PROXY_TYPES:
+                remote_port = 0
+            if proxy_type in DOMAIN_PROXY_TYPES and not custom_domains:
+                raise ValueError("HTTP/HTTPS/TCPMUX 必须填写自定义域名")
+            if proxy_type in SECRET_KEY_PROXY_TYPES and not secret_key:
+                secret_key = secrets.token_urlsafe(16)
+            with db() as conn:
+                target = conn.execute("SELECT * FROM users WHERE id=? AND role!='admin'", (user_id,)).fetchone()
+                if not target:
+                    raise ValueError("用户不存在")
+                if not target["active"] or is_expired(target):
+                    raise ValueError("用户已停用或已到期")
+                node = conn.execute("SELECT * FROM nodes WHERE id=?", (target["node_id"],)).fetchone()
+                if not node:
+                    raise ValueError("用户所属节点不存在")
+                if proxy_type in REMOTE_PORT_PROXY_TYPES:
+                    if remote_port:
+                        owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (target["node_id"], target["id"], remote_port)).fetchone()
+                        if not owned:
+                            raise ValueError("这个公网端口不属于该用户")
+                        used = conn.execute("SELECT 1 FROM tunnels WHERE node_id=? AND remote_port=? AND proxy_type IN ('tcp','udp')", (target["node_id"], remote_port)).fetchone()
+                        if used:
+                            raise ValueError("该端口已被其他隧道使用")
+                    else:
+                        row = conn.execute("""
+                            SELECT p.port FROM ports p
+                            LEFT JOIN tunnels t ON t.node_id=p.node_id AND t.remote_port=p.port AND t.proxy_type IN ('tcp','udp')
+                            WHERE p.node_id=? AND p.user_id=? AND t.id IS NULL
+                            ORDER BY p.port LIMIT 1
+                        """, (target["node_id"], target["id"])).fetchone()
+                        if not row:
+                            raise ValueError("该用户没有可用公网端口")
+                        remote_port = int(row["port"])
+                conn.execute(
+                    "INSERT INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (target["node_id"], target["id"], name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, now()),
+                )
+            audit("admin_tunnel_create", admin, target["node_id"], remote_port or None, proxy_type, f"target={target['username']} {name} -> {local_ip}:{local_port}")
+            self.send_json({"ok": True, "message": "隧道已创建", "remote_port": remote_port})
+        except sqlite3.IntegrityError:
+            self.send_json({"ok": False, "error": "隧道名称或公网端口已被使用"}, 400)
+        except Exception as e:
+            self.send_json({"ok": False, "error": str(e)}, 400)
+
     def export_invite_keys_csv(self) -> None:
         if not self.require_admin() or not self.require_software_license():
             return
@@ -1727,6 +1867,22 @@ class Handler(BaseHTTPRequestHandler):
                 invite_key_count = conn.execute("SELECT COUNT(*) c FROM invite_keys").fetchone()["c"]
                 ban_count = conn.execute("SELECT COUNT(*) c FROM user_bans").fetchone()["c"]
                 r2_public = public_r2_config(conn)
+                frpc_users = []
+                for u in conn.execute("""
+                    SELECT u.id, u.username, u.active, u.expires_at, u.node_id, n.name AS node_name, n.region AS node_region,
+                           COUNT(DISTINCT p.id) AS port_count, COUNT(DISTINCT t.id) AS tunnel_count
+                    FROM users u
+                    LEFT JOIN nodes n ON n.id=u.node_id
+                    LEFT JOIN ports p ON p.user_id=u.id AND p.node_id=u.node_id
+                    LEFT JOIN tunnels t ON t.user_id=u.id
+                    WHERE u.role!='admin'
+                    GROUP BY u.id ORDER BY u.id
+                """):
+                    frpc_users.append({
+                        "id": u["id"], "username": u["username"], "active": bool(u["active"]), "expired": is_expired(u),
+                        "node_id": u["node_id"], "node_name": u["node_name"], "node_region": u["node_region"],
+                        "port_count": u["port_count"], "tunnel_count": u["tunnel_count"],
+                    })
             node_list = attach_node_auth_port_status([
                 {
                     "id": n["id"],
@@ -1757,6 +1913,8 @@ class Handler(BaseHTTPRequestHandler):
                 "has_setup_key": bool(FML_SETUP_KEY),
                 "r2": r2_public,
                 "r2_configured": r2_public["configured"],
+                "frpc_users": frpc_users,
+                "allowed_proxy_types": PROXY_TYPE_ORDER,
             })
             return
         self.send_json({"ok": False, "error": "not found"}, 404)
@@ -1882,6 +2040,12 @@ class Handler(BaseHTTPRequestHandler):
             self.admin_r2_config_save(user, data)
         elif path == "/api/admin/backup/r2":
             self.admin_backup_r2(user)
+        elif path == "/api/admin/backup/restore":
+            self.admin_restore_backup(user, data)
+        elif path == "/api/admin/tunnels/create-for-user":
+            self.admin_tunnel_create_for_user(user, data)
+        elif path == "/api/admin/frpc-config":
+            self.admin_frpc_config(user, data)
         elif path == "/api/admin/software-licenses/create":
             self.admin_software_license_create(data)
         elif path == "/api/admin/software-licenses/toggle":
@@ -2243,6 +2407,9 @@ class Handler(BaseHTTPRequestHandler):
     def download_frpc(self) -> None:
         user = self.require_user()
         if not user or not self.require_software_license():
+            return
+        if user["role"] == "admin":
+            self.send_json({"ok": False, "error": "管理员请在仪表盘下载模块为普通用户生成 frpc 配置"}, 403)
             return
         with db() as conn:
             node = conn.execute("SELECT * FROM nodes WHERE id=?", (user["node_id"],)).fetchone()

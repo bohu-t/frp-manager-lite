@@ -205,7 +205,7 @@ function setNav(){
   nav.innerHTML = `
     ${mainNav}
     ${adminNav}
-    ${licenseRequired ? '' : '<a class="btn" href="/config/frpc.toml">frpc 配置</a>'}
+    ${licenseRequired || isAdmin ? '' : '<a class="btn" href="/config/frpc.toml">frpc 配置</a>'}
     ${themeBtn}
     ${navButton('退出', 'logout', 'danger')}
   `;
@@ -627,7 +627,6 @@ async function loadAdmin(section=currentAdminSection){
         if(keys.length){
           const text = keys.join('\n');
           await copyText(text);
-          downloadText('software-license-keys.txt', text + '\n');
         }
         await loadAdmin();
       }catch(err){ show(err.message, true); }
@@ -681,7 +680,6 @@ async function loadAdmin(section=currentAdminSection){
         if(keys.length){
           const text = keys.join('\n');
           await copyText(text);
-          downloadText('invite-keys.txt', text + '\n');
         }
         await loadAdmin();
       }catch(err){ show(err.message, true); }
@@ -738,6 +736,66 @@ async function saveR2Config(e){
   try{
     const r = await api('/api/admin/r2/config', {method:'POST', body:Object.fromEntries(fd)});
     show(r.message || 'R2 配置已保存');
+    await loadAdminDashboard();
+  }catch(err){ show(err.message, true); }
+}
+
+
+function openAdminFrpcModal(){
+  const modal = document.querySelector('#adminFrpcModal');
+  if(modal) modal.classList.remove('hidden');
+}
+function closeAdminFrpcModal(){
+  const modal = document.querySelector('#adminFrpcModal');
+  if(modal) modal.classList.add('hidden');
+}
+function syncAdminFrpcFields(){
+  const form = document.querySelector('#adminFrpcForm');
+  if(!form) return;
+  const type = form.proxy_type.value;
+  form.querySelector('.admin-remote-port-field').classList.toggle('hidden', !['tcp','udp'].includes(type));
+  form.querySelector('.admin-domain-field').classList.toggle('hidden', !['http','https','tcpmux'].includes(type));
+  form.querySelector('.admin-secret-field').classList.toggle('hidden', !['stcp','xtcp'].includes(type));
+}
+async function downloadAdminFrpc(userId){
+  const r = await api('/api/admin/frpc-config', {method:'POST', body:{user_id:userId}});
+  downloadText(r.filename || 'frpc.toml', r.config || '');
+  show('frpc 配置已生成，请交给用户部署');
+}
+async function downloadAdminFrpcOnly(){
+  const form = document.querySelector('#adminFrpcForm');
+  if(!form) return;
+  await downloadAdminFrpc(Number(form.user_id.value || 0));
+}
+async function submitAdminFrpc(e){
+  e.preventDefault();
+  const form = e.target;
+  const body = Object.fromEntries(new FormData(form));
+  try{
+    const r = await api('/api/admin/tunnels/create-for-user', {method:'POST', body});
+    show(r.message || '隧道已创建');
+    await downloadAdminFrpc(Number(body.user_id || 0));
+    closeAdminFrpcModal();
+  }catch(err){ show(err.message, true); }
+}
+function fileToDataUrl(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('读取文件失败'));
+    reader.readAsDataURL(file);
+  });
+}
+async function restoreFullBackup(){
+  const input = document.querySelector('#restoreBackupFile');
+  const file = input && input.files && input.files[0];
+  if(!file){ show('请先选择全量备份 zip 文件', true); return; }
+  const confirmText = prompt('恢复会替换当前数据库。请输入 RESTORE 确认：');
+  if(confirmText !== 'RESTORE') return;
+  try{
+    const dataUrl = await fileToDataUrl(file);
+    const r = await api('/api/admin/backup/restore', {method:'POST', body:{filename:file.name, content_base64:dataUrl, confirm:'RESTORE'}});
+    show(`${r.message}；恢复前备份：${r.restore && r.restore.pre_restore_backup ? r.restore.pre_restore_backup : '已保存'}`);
     await loadAdminDashboard();
   }catch(err){ show(err.message, true); }
 }
@@ -823,6 +881,9 @@ async function loadAdminDashboard(auto=false){
     '<div class="ops-item"><div class="label">一键添加节点密钥</div><p class="muted small">未设置 FML_SETUP_KEY；需要一键添加节点时可在服务端配置。</p></div>';
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
   const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
+  const frpcUsers = data.frpc_users || [];
+  const frpcUserOptions = frpcUsers.map(u => `<option value="${u.id}">${esc(u.username)} · ${esc(u.node_region || '-')} / ${esc(u.node_name || '-')} · 隧道 ${u.tunnel_count || 0}</option>`).join('');
+  const proxyTypeOptions = (data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux']).map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
   app.innerHTML = `
     <section class="dashboard-hero card">
       <div>
@@ -848,9 +909,24 @@ async function loadAdminDashboard(auto=false){
     <section class="card"><div class="section-title"><h2>运维入口</h2><p>常用下载和备份操作</p></div>
       <div class="ops-list ops-grid">
         ${setupHtml}
-        <div class="ops-item"><div class="label">配置与备份</div><p class="row"><a class="btn secondary" href="/config/frps.example.toml">下载 frps 配置</a><a class="btn" href="/admin/backup/full.zip">下载全量备份</a><button class="secondary" onclick="backupToR2()">备份到 R2</button></p></div>
+        <div class="ops-item"><div class="label">下载模块</div><p class="row"><button onclick="openAdminFrpcModal()">下载 frpc 配置</button><a class="btn" href="/admin/backup/full.zip">下载全量备份</a></p><p class="muted small">管理员可先为普通用户配置隧道，再下载 frpc.toml 给用户。</p></div>
+        <div class="ops-item"><div class="label">恢复全量备份</div><p class="row"><input id="restoreBackupFile" type="file" accept=".zip,application/zip"><button class="danger" onclick="restoreFullBackup()">恢复备份</button></p><p class="muted small">会要求输入 RESTORE，并在恢复前自动保存当前备份。</p></div>
         <div class="ops-item"><div class="label">业务概况</div><p class="muted small">隧道 ${data.tunnel_count || 0} · 注册密钥 ${data.invite_key_count || 0} · 封禁记录 ${data.ban_count || 0}</p></div>
       </div>
+    </section>
+
+    <section id="adminFrpcModal" class="card admin-frpc-modal hidden"><div class="section-title"><h2>为用户配置并下载 frpc</h2><p>选择普通用户，填写本地服务；TCP/UDP 端口留空时自动使用该用户可用端口。</p></div>
+      ${frpcUserOptions ? `<form id="adminFrpcForm" class="grid">
+        <div><label>用户</label><select name="user_id" required>${frpcUserOptions}</select></div>
+        <div><label>隧道名称</label><input name="name" value="web" required></div>
+        <div><label>类型</label><select name="proxy_type" onchange="syncAdminFrpcFields()">${proxyTypeOptions}</select></div>
+        <div><label>本地 IP</label><input name="local_ip" value="127.0.0.1" required></div>
+        <div><label>本地端口</label><input name="local_port" type="number" min="1" max="65535" value="80" required></div>
+        <div class="admin-remote-port-field"><label>公网端口</label><input name="remote_port" type="number" min="1" max="65535" placeholder="留空自动分配"></div>
+        <div class="admin-domain-field hidden"><label>自定义域名</label><input name="custom_domains" placeholder="app.example.com"></div>
+        <div class="admin-secret-field hidden"><label>访问密钥</label><input name="secret_key" placeholder="留空自动生成"></div>
+        <div class="form-actions"><button>创建隧道并下载</button><button type="button" class="secondary" onclick="downloadAdminFrpcOnly()">只下载现有配置</button><button type="button" class="secondary" onclick="closeAdminFrpcModal()">取消</button></div>
+      </form>` : '<p class="muted">暂无普通用户，先创建用户后再下载 frpc 配置。</p>'}
     </section>
 
     <section class="card node-health-card"><div class="section-title"><h2>节点健康</h2><p>检查 frps bind/auth 端口连通性 · 每页 ${healthPageSize} 条</p></div>
@@ -871,6 +947,8 @@ async function loadAdminDashboard(auto=false){
     </section>`;
   const r2Form = document.querySelector('#r2ConfigForm');
   if(r2Form) r2Form.onsubmit = saveR2Config;
+  const adminFrpcForm = document.querySelector('#adminFrpcForm');
+  if(adminFrpcForm){ adminFrpcForm.onsubmit = submitAdminFrpc; syncAdminFrpcFields(); }
   adminDashboardTimer = setTimeout(() => loadAdminDashboard(true), refreshSeconds * 1000);
 }
 
