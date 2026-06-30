@@ -3,7 +3,8 @@ const nav = document.querySelector('#nav');
 const flash = document.querySelector('#flash');
 let currentUser = null;
 let softwareLicense = null;
-let currentAdminSection = 'settings';
+let currentAdminSection = 'users';
+let adminDashboardTimer = null;
 let csrfToken = null;
 let colorMode = localStorage.getItem('fml_color_mode') || 'system';
 const systemDarkQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
@@ -116,7 +117,7 @@ function authShell(title, subtitle, formHtml, footHtml='', nodes=[]){
         <div class="feature-grid">
           <div><b>高速线路</b><span>按地区节点接入</span></div>
           <div><b>全协议</b><span>覆盖 frp 常用代理类型</span></div>
-          <div><b>独立授权</b><span>一机一绑防滥用</span></div>
+          <div><b>服务器授权</b><span>安装时鉴权一次</span></div>
           <div><b>配置简单</b><span>一键下载 frpc</span></div>
         </div>
         <div class="hero-label">可选地区</div>
@@ -149,7 +150,6 @@ function setNav(){
     <button class="secondary" onclick="loadAdmin('keys')">密钥</button>
     <button class="secondary" onclick="loadAdmin('nodes')">节点</button>
     <button class="secondary" onclick="loadAdmin('risk')">风控</button>
-    <button class="secondary" onclick="loadAdmin('settings')">设置</button>
   ` : '';
   nav.innerHTML = `
     ${licenseRequired && isAdmin ? '<button class="secondary" onclick="renderLicenseActivate()">软件授权</button>' : (licenseRequired ? '' : (isAdmin ? '<button class="secondary" onclick="loadAdminDashboard()">仪表盘</button>' : '<button class="secondary" onclick="loadDashboard()">概览</button>'))}
@@ -161,6 +161,7 @@ function setNav(){
 }
 
 async function renderLogin(){
+  clearAdminDashboardTimer();
   currentUser = null; setNav(); hideFlash();
   let nodes = [];
   try { nodes = await loadNodes(); } catch(e) {}
@@ -189,6 +190,7 @@ async function renderLogin(){
 }
 
 async function renderRegister(){
+  clearAdminDashboardTimer();
   currentUser = null; setNav(); hideFlash();
   let nodes = [];
   try { nodes = await loadNodes(); } catch(e) { show('加载地区节点失败：' + e.message, true); }
@@ -248,11 +250,11 @@ function renderLicenseActivatePublic(){
       <section class="auth-hero card">
         <div class="brand-mark">🔑</div>
         <h2>需要软件授权激活</h2>
-        <p>请联系卖家获取<strong>鉴权服务器地址</strong>和<strong>软件授权码</strong>。激活后自动绑定当前服务器，一机一码。</p>
+        <p>请联系卖家获取<strong>鉴权服务器地址</strong>和<strong>服务器软件授权码</strong>。只在安装/首次部署时鉴权一次，成功后会在本机保存授权文件；重装后机器指纹一致会自动通过。</p>
         <div class="feature-grid">
-          <div><b>远程验证</b><span>授权码由卖家鉴权服务器签发</span></div>
-          <div><b>一机一绑</b><span>激活后授权码与服务器指纹绑定</span></div>
-          <div><b>防篡改</b><span>签名验证防止伪造授权</span></div>
+          <div><b>首次验证</b><span>安装时向鉴权服务器验证</span></div>
+          <div><b>本机授权文件</b><span>重装后自动读取校验</span></div>
+          <div><b>防篡改</b><span>签名与机器指纹校验</span></div>
         </div>
         <div class="hero-label">服务器指纹</div>
         <div class="hero-points"><span><code style="word-break:break-all">${esc(machineId)}</code></span></div>
@@ -262,7 +264,7 @@ function renderLicenseActivatePublic(){
         <form id="licenseActivateForm" class="stack-form">
           <label>鉴权服务器地址</label>
           <input name="server_url" placeholder="https://license.你的卖家域名.com" required>
-          <label>软件授权码</label>
+          <label>服务器软件授权码</label>
           <input name="license_key" placeholder="FMLD-..." required>
           <p class="row"><button class="wide">激活并绑定</button></p>
         </form>
@@ -285,20 +287,22 @@ function renderLicenseActivatePublic(){
 }
 
 function renderLicenseActivate(){
+  clearAdminDashboardTimer();
   hideFlash();
   setNav();
   const lic = softwareLicense || {};
   app.innerHTML = `
     <section class="card">
-      <div class="section-title"><h2>软件授权激活</h2><p>输入卖家给你的部署版授权码；系统会自动绑定当前服务器，无需手动生成机器码。</p></div>
+      <div class="section-title"><h2>软件授权激活</h2><p>输入卖家给你的服务器软件授权码；只在安装时鉴权一次，成功后生成本机授权文件，重装后自动读取并校验机器指纹。</p></div>
       <div class="grid">
         <div><div class="label">授权状态</div><p>${esc(lic.message || '待激活')}</p></div>
-        <div><div class="label">当前机器指纹</div><p><code class="token">${esc(lic.machine_id || '-')}</code></p><p class="muted small">仅用于自动绑定，客户不需要复制给卖家。</p></div>
+        <div><div class="label">当前机器指纹</div><p><code class="token">${esc(lic.machine_id || '-')}</code></p><p class="muted small">仅用于本机授权文件校验，客户不需要复制给卖家。</p></div>
+        <div><div class="label">授权文件</div><p><code class="token">${esc(lic.license_file || '-')}</code></p><p class="muted small">请随部署数据一起保留；机器指纹一致时重装无需重新鉴权。</p></div>
       </div>
       <form id="licenseActivateForm" class="stack-form">
         <label>鉴权服务器地址</label>
         <input name="server_url" placeholder="${esc(lic.server_url || 'https://license.你的卖家域名.com')}">
-        <label>软件授权码</label><input name="license_key" placeholder="FMLD-..." required>
+        <label>服务器软件授权码</label><input name="license_key" placeholder="FMLD-..." required>
         <p class="row"><button>激活授权</button><button type="button" class="secondary" onclick="loadMe()">刷新状态</button></p>
       </form>
     </section>`;
@@ -320,6 +324,7 @@ async function logout(){
 }
 
 async function loadDashboard(){
+  clearAdminDashboardTimer();
   hideFlash();
   let data;
   try{ data = await api('/api/dashboard'); }
@@ -403,8 +408,9 @@ async function toggleTunnel(id){ await api('/api/tunnels/toggle', {method:'POST'
 async function deleteTunnel(id){ if(confirm('删除这个隧道？')) await api('/api/tunnels/delete', {method:'POST', body:{id}}).then(loadDashboard).catch(e=>show(e.message,true)); }
 
 async function loadAdmin(section=currentAdminSection){
+  clearAdminDashboardTimer();
   hideFlash();
-  currentAdminSection = ['settings','users','keys','nodes','risk'].includes(section) ? section : currentAdminSection;
+  currentAdminSection = ['users','keys','nodes','risk'].includes(section) ? section : currentAdminSection;
   setNav();
   let data;
   try{ data = await api('/api/admin/overview'); }
@@ -416,13 +422,11 @@ async function loadAdmin(section=currentAdminSection){
       <td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${esc(u.node_region || '-')} / ${esc(u.node_name || '-')}</td><td>${u.port_count}/${u.max_ports}</td><td>${u.tunnel_count}</td>
       <td>${esc(u.expires_text)} ${u.expired ? '<span class="bad">已到期</span>' : ''}</td>
       <td>${u.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
-      <td><code class="token" title="${esc(u.license_key || '')}">${esc(u.license_key || '-')}</code><br><span class="muted small">${u.machine_id ? `已绑：${esc(u.machine_id)}` : '未绑定'}</span></td>
+      <td><code class="token" title="${esc(u.invite_key_used || '')}">${esc(u.invite_key_used || '后台创建')}</code></td>
       <td class="actions">
         <button onclick="adminToggle(${u.id})">${u.active ? '停用' : '启用'}</button>
         <button onclick="adminExtend(${u.id})">续30天</button>
         <button onclick="adminReset(${u.id})">重置密码</button>
-        <button onclick="adminUnbind(${u.id})">解绑机器</button>
-        <button onclick="adminResetLicense(${u.id})">重置授权</button>
         <button class="danger" onclick="adminDelete(${u.id})">删除</button>
       </td>
     </tr>`).join('');
@@ -458,81 +462,7 @@ async function loadAdmin(section=currentAdminSection){
       <td class="actions"><button onclick="copyText('${k.license_key}')">复制</button><button onclick="softwareLicenseToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button onclick="softwareLicenseUnbind(${k.id})">解绑</button></td>
     </tr>`).join('') || emptyRow(8, '还没有软件授权码');
   const adminNodeOptions = nodeOptions((data.nodes || []).filter(n => n.active));
-  const summaryHtml = `
-    <div class="grid">
-      <section class="card stat"><div class="label">端口池</div><div class="num">${data.stats.free_ports}</div><div class="sub">剩余 / 总数 ${data.stats.total_ports} · 默认范围 ${data.stats.port_start}-${data.stats.port_end}</div></section>
-      <section class="card stat"><div class="label">隧道</div><div class="num">${data.stats.tunnel_count}</div><div class="sub">已登记隧道</div><p><a class="btn secondary" href="/config/frps.example.toml">下载默认 frps 配置</a></p></section>
-      <section class="card stat"><div class="label">注册密钥</div><div class="num">${data.stats.invite_key_count || 0}</div><div class="sub">封禁记录 ${data.stats.ban_count || 0} · 用户注册必须持有效密钥</div><p class="row"><a class="btn secondary" href="/admin/backup/full.zip">下载全量备份</a><button class="secondary" onclick="backupToR2()">备份到 R2</button></p></section>
-    </div>`;
-  const nodeHtml = `
-    <section class="card hidden" id="editNodeCard"><div class="section-title"><h2>编辑地区节点</h2><p>建议使用稳定域名，方便后期更换 VPS</p></div><form id="editNodeForm" class="grid">
-      <input type="hidden" name="id">
-      <div><label>地区</label><input name="region" required></div>
-      <div><label>节点名</label><input name="name" required></div>
-      <div><label>frps 域名/地址</label><input name="server_addr" required></div>
-      <div><label>frps bindPort</label><input name="server_port" type="number" min="1" max="65535"></div>
-      <div><label>frps token</label><input name="auth_token" required></div>
-      <div><label>状态</label><select name="active"><option value="1">启用</option><option value="0">停用</option></select></div>
-      <div><label>备注</label><input name="note"></div>
-      <div style="align-self:end"><button>保存修改</button><button type="button" class="secondary" onclick="document.querySelector('#editNodeCard').classList.add('hidden')">取消</button></div>
-    </form><p class="muted small">建议 frps 地址填写域名，例如 <code>hk.example.com</code>。后期更换 VPS 时优先改 DNS，用户的 frpc 配置可保持不变。</p></section>
-    <section class="card"><div class="section-title"><h2>新增地区节点</h2><p>每个节点独立端口池和 token</p></div><form id="nodeForm" class="grid">
-      <div><label>地区</label><input name="region" placeholder="香港 / 日本 / 美国" required></div>
-      <div><label>节点名</label><input name="name" placeholder="hk-1" required></div>
-      <div><label>frps 域名/地址</label><input name="server_addr" placeholder="hk.example.com" required></div>
-      <div><label>frps bindPort</label><input name="server_port" type="number" value="7000" min="1" max="65535"></div>
-      <div><label>frps token</label><input name="auth_token" placeholder="CHANGE_ME" required></div>
-      <div><label>端口起始</label><input name="port_start" type="number" value="20000" min="1" max="65535"></div>
-      <div><label>端口结束</label><input name="port_end" type="number" value="20199" min="1" max="65535"></div>
-      <div><label>备注</label><input name="note" placeholder="线路/机房说明"></div>
-      <div style="align-self:end"><button>创建节点</button></div>
-    </form></section>
-    <section class="card" id="nodes"><div class="section-title"><h2>地区节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>ID</th><th>地区</th><th>节点</th><th>frps</th><th>端口池</th><th>剩余</th><th>状态</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table></section>`;
-  const keysHtml = `
-    <section class="card" id="keys"><div class="section-title"><h2>生成注册密钥</h2><p>适合批量发货，一次最多 500 枚</p></div><form id="inviteForm" class="grid">
-      <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
-      <div><label>备注</label><input name="note" placeholder="闲鱼订单号/套餐名"></div>
-      <div><label>每枚可用次数</label><input name="max_uses" type="number" value="1" min="1" max="10000"></div>
-      <div><label>注册后端口数</label><input name="max_ports" type="number" value="5" min="1" max="100"></div>
-      <div><label>注册后账号有效期天数</label><input name="user_expires_days" type="number" value="30" min="0" max="3650"></div>
-      <div><label>密钥有效期天数</label><input name="key_expires_days" type="number" value="30" min="0" max="3650"></div>
-      <div style="align-self:end"><button>生成密钥</button></div>
-    </form><p><a class="btn" href="/admin/export/invite-keys.csv">导出未使用可用密钥 CSV</a></p><p class="panel-note small">批量生成后会自动复制并下载本次生成的 txt。CSV 导出只包含未使用、启用中、未过期的密钥。</p></section>
-    <section class="card"><div class="section-title"><h2>注册密钥列表</h2><p>已使用密钥不会出现在 CSV 导出里</p></div><table><thead><tr><th>ID</th><th>密钥</th><th>备注</th><th>使用</th><th>端口</th><th>账号有效期</th><th>密钥到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table></section>
-    ${data.software_license_authority ? `<section class="card" id="software-licenses"><div class="section-title"><h2>部署版软件授权码</h2><p>卖家后台使用：先批量生成授权码发给客户；客户输入授权码后自动绑定他的部署服务器。</p></div><form id="softwareLicenseForm" class="grid">
-      <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
-      <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
-      <div><label>套餐</label><input name="plan" value="deploy"></div>
-      <div><label>有效期天数</label><input name="expires_days" type="number" value="0" min="0" max="3650"><span class="muted small">0 表示永不过期</span></div>
-      <div style="align-self:end"><button>生成软件授权码</button></div>
-    </form><p class="panel-note small">客户不需要提供机器码；首次激活时授权服务器会自动绑定机器。批量生成后会自动复制并下载 txt。</p>
-    <table><thead><tr><th>ID</th><th>授权码</th><th>备注</th><th>套餐</th><th>绑定机器</th><th>到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${softwareKeyRows}</tbody></table></section>` : ''}`;
-  const usersHtml = `
-    <section class="card"><div class="section-title"><h2>创建用户</h2><p>管理员直开账号，可指定地区节点</p></div><form id="createUserForm" class="grid">
-      <div><label>用户名</label><input name="username" required></div>
-      <div><label>初始密码</label><input name="password" type="password" required></div>
-      <div><label>地区节点</label><select name="node_id" required>${adminNodeOptions}</select></div>
-      <div><label>端口数量</label><input name="max_ports" type="number" value="5" min="1" max="100"></div>
-      <div><label>有效期天数</label><input name="expires_days" type="number" value="30" min="0" max="3650"><span class="muted small">0 表示永不过期</span></div>
-      <div style="align-self:end"><button>创建</button></div>
-    </form></section>
-    <section class="card" id="users"><div class="section-title"><h2>用户列表</h2><p>管理状态、续期、授权码、机器绑定和删除账号</p></div><table><thead><tr><th>ID</th><th>用户</th><th>角色</th><th>地区节点</th><th>端口</th><th>隧道</th><th>到期</th><th>状态</th><th>授权/机器</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></section>`;
-  const riskHtml = `
-    <section class="card" id="risk"><div class="section-title"><h2>投诉处理 / 风控</h2><p>按端口定位用户并快速封禁</p></div>
-      <form id="lookupPortForm" class="grid">
-        <div><label>被投诉端口</label><input name="remote_port" type="number" min="1" max="65535" placeholder="例如 20088" required></div>
-        <div><label>节点（可选）</label><select name="node_id"><option value="0">全部节点</option>${nodeOptions(data.nodes || [])}</select></div>
-        <div style="align-self:end"><button>查询</button></div>
-      </form>
-      <div id="riskResult" class="risk-result"></div>
-    </section>
-    <section class="card"><div class="section-title"><h2>审计日志</h2><p>最近 80 条关键操作和风控事件</p></div><table><thead><tr><th>ID</th><th>事件</th><th>用户</th><th>端口</th><th>协议</th><th>详情</th><th>时间</th></tr></thead><tbody>${logRows}</tbody></table></section>`;
-  const settingsHtml = summaryHtml + `
-    <section class="card"><div class="section-title"><h2>管理设置</h2><p>常用运维入口和系统概览。用户、密钥、节点、风控已拆到顶部独立导航。</p></div>
-      ${data.has_setup_key ? `<div class="grid"><div><div class="label">🔑 一键添加节点密钥</div><div class="row" style="gap:8px;align-items:center"><code class="token" style="user-select:all;flex:1">${esc(data.setup_key)}</code><button class="secondary" onclick="navigator.clipboard.writeText('${esc(data.setup_key).replace(/'/g, "\\\"")}');show('已复制！')">📋 复制</button></div><p class="muted small">在新机器运行添加节点脚本时输入此密钥。</p></div></div>` : '<div class="grid"><div><div class="label">⚠️ 未设置 FML_SETUP_KEY</div><p class="muted small">在 .env 中添加 FML_SETUP_KEY=*** 即可启用一键添加节点功能。</p></div></div>'}
-      <p class="row"><a class="btn secondary" href="/config/frps.example.toml">下载默认 frps 配置</a><a class="btn" href="/admin/backup/full.zip">下载全量备份</a><button class="secondary" onclick="backupToR2()">备份到 R2</button></p>
-    </section>`;
-  const sectionHtml = {settings: settingsHtml, users: usersHtml, keys: keysHtml, nodes: nodeHtml, risk: riskHtml}[currentAdminSection] || settingsHtml;
+  const sectionHtml = {users: usersHtml, keys: keysHtml, nodes: nodeHtml, risk: riskHtml}[currentAdminSection] || usersHtml;
   app.innerHTML = sectionHtml;
   const softwareLicenseForm = document.querySelector('#softwareLicenseForm');
   if(softwareLicenseForm){
@@ -654,8 +584,6 @@ async function backupToR2(){
 async function adminToggle(id){ await api('/api/admin/users/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
 async function adminExtend(id){ await api('/api/admin/users/extend', {method:'POST', body:{id, days:30}}).then(r=>{show(r.message||'已续期'); loadAdmin();}).catch(e=>show(e.message,true)); }
 async function adminReset(id){ if(confirm('重置该用户密码？')) await api('/api/admin/users/reset-password', {method:'POST', body:{id}}).then(r=>{show(r.message); loadAdmin();}).catch(e=>show(e.message,true)); }
-async function adminResetLicense(id){ if(confirm('重置授权码会同时解绑机器，旧授权立即失效，确定？')) await api('/api/admin/users/reset-license', {method:'POST', body:{id}}).then(r=>{show(r.message); if(r.license_key) copyText(r.license_key); loadAdmin();}).catch(e=>show(e.message,true)); }
-async function adminUnbind(id){ if(confirm('解绑后该授权会在下一台机器首次连接时重新绑定，确定？')) await api('/api/admin/users/unbind-machine', {method:'POST', body:{id}}).then(r=>{show(r.message || '已解绑'); loadAdmin();}).catch(e=>show(e.message,true)); }
 async function adminDelete(id){ if(confirm('删除用户会释放端口并删除隧道，确定？')) await api('/api/admin/users/delete', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
 async function inviteToggle(id){ await api('/api/admin/invite-keys/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
 async function inviteDelete(id){ if(confirm('删除这个注册密钥？')) await api('/api/admin/invite-keys/delete', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
@@ -672,36 +600,72 @@ function editNode(n){
 async function nodeToggle(id){ await api('/api/admin/nodes/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
 async function nodeDelete(id){ if(confirm('删除节点会删除空端口池；节点下有用户/隧道时会被拒绝。确定？')) await api('/api/admin/nodes/delete', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
 
-async function loadAdminDashboard(){
+function clearAdminDashboardTimer(){
+  if(adminDashboardTimer){ clearTimeout(adminDashboardTimer); adminDashboardTimer = null; }
+}
+
+function fmtBytes(bytes){
+  bytes = Number(bytes || 0);
+  if(!bytes) return '-';
+  const units = ['B','KB','MB','GB','TB'];
+  let i = 0;
+  while(bytes >= 1024 && i < units.length - 1){ bytes /= 1024; i++; }
+  return `${bytes.toFixed(i ? 1 : 0)} ${units[i]}`;
+}
+
+function nodeStatusBadge(n){
+  if(!n.active) return '<span class="muted">已停用</span>';
+  if(n.auth_status === 'online') return '<span class="ok">正常</span>';
+  if(n.auth_status === 'checking') return '<span class="muted">检查中…</span>';
+  return '<span class="bad">异常</span>';
+}
+
+async function loadAdminDashboard(auto=false){
   hideFlash();
+  clearAdminDashboardTimer();
   let data;
   try{ data = await api('/api/admin/dashboard'); }
   catch(err){
     if(err.message === 'unauthorized') return renderLogin();
-    show(err.message, true); return;
+    if(!auto) show(err.message, true);
+    return;
   }
   setNav();
+  const refreshSeconds = Math.max(10, Number(data.refresh_seconds || 30));
+  const nowText = new Date().toLocaleTimeString();
   const portStats = data.port_stats || {};
   const userStats = data.user_stats || {};
+  const host = data.host || {};
   const usedPorts = portStats.used || 0;
   const totalPorts = portStats.total || 0;
-  const freePorts = portStats.free || 0;
   const portUsage = totalPorts > 0 ? ((usedPorts / totalPorts) * 100).toFixed(1) : '0.0';
   const nodeRows = (data.nodes || []).map(n => `
     <tr>
-      <td>${esc(n.name)}</td><td>${esc(n.region)}</td><td>${esc(n.server_addr)}</td>
-      <td>${n.active ? '<span class="ok">active</span>' : '<span class="bad">inactive</span>'}</td>
-      <td>${n.free_count}/${n.port_count}</td>
-    </tr>`).join('') || emptyRow(5, '暂无节点');
+      <td><b>${esc(n.name)}</b></td>
+      <td>${nodeStatusBadge(n)}<br><span class="muted small">${esc(n.auth_message || '')}</span></td>
+    </tr>`).join('') || emptyRow(2, '暂无节点');
+  const setupHtml = data.has_setup_key ? `
+    <div><div class="label">🔑 一键添加节点密钥</div><div class="row" style="gap:8px;align-items:center"><code class="token" style="user-select:all;flex:1">${esc(data.setup_key)}</code><button class="secondary" onclick="navigator.clipboard.writeText('${esc(data.setup_key).replace(/'/g, "\"")}');show('已复制！')">📋 复制</button></div><p class="muted small">在新机器运行添加节点脚本时输入此密钥。</p></div>` :
+    '<div><div class="label">⚠️ 未设置 FML_SETUP_KEY</div><p class="muted small">在 .env 中添加 FML_SETUP_KEY=*** 即可启用一键添加节点功能。</p></div>';
   app.innerHTML = `
     <div class="grid">
-      <section class="card stat"><div class="label">版本号</div><div class="num">${esc(data.version || '-')}</div><div class="sub">frp-manager-lite</div></section>
-      <section class="card stat"><div class="label">活跃节点</div><div class="num">${data.active_node_count}/${data.node_count}</div><div class="sub">活跃节点数 / 总节点数</div></section>
+      <section class="card stat"><div class="label">面板版本</div><div class="num">${esc(data.panel_version || data.version || '-')}</div><div class="sub">frp-manager-lite</div></section>
+      <section class="card stat"><div class="label">活跃节点</div><div class="num">${data.active_node_count}/${data.node_count}</div><div class="sub">认证端口每 ${refreshSeconds} 秒检查</div></section>
       <section class="card stat"><div class="label">端口使用率</div><div class="num">${portUsage}%</div><div class="sub">已用 ${usedPorts} / 总数 ${totalPorts}</div></section>
       <section class="card stat"><div class="label">用户</div><div class="num">${userStats.active}/${userStats.total}</div><div class="sub">活跃用户数 / 总用户数</div></section>
+      <section class="card stat"><div class="label">CPU</div><div class="num">${host.cpu_percent == null ? '-' : `${host.cpu_percent}%`}</div><div class="sub">${host.cpu_count || 0} 核 · load ${esc(host.load1 ?? '-')} / ${esc(host.load5 ?? '-')} / ${esc(host.load15 ?? '-')}</div></section>
+      <section class="card stat"><div class="label">内存</div><div class="num">${host.memory_percent == null ? '-' : `${host.memory_percent}%`}</div><div class="sub">${fmtBytes(host.memory_used)} / ${fmtBytes(host.memory_total)}</div></section>
     </div>
-    <section class="card"><div class="section-title"><h2>节点列表</h2></div><table><thead><tr><th>节点名称</th><th>地区</th><th>地址</th><th>状态</th><th>端口使用（空闲/总数）</th></tr></thead><tbody>${nodeRows}</tbody></table></section>
-    <section class="card"><div class="section-title"><h2>快速管理</h2></div><div class="row" style="gap:8px"><button class="secondary" onclick="loadAdmin('users')">用户管理</button><button class="secondary" onclick="loadAdmin('keys')">密钥管理</button><button class="secondary" onclick="loadAdmin('nodes')">节点管理</button></div></section>`;
+    <section class="card"><div class="section-title"><h2>节点状态</h2><p>定期检查每个节点的 frps 认证端口是否正常。最后检查：${esc(nowText)}</p></div>
+      <table><thead><tr><th>节点名称</th><th>状态</th></tr></thead><tbody>${nodeRows}</tbody></table>
+      <p class="row" style="gap:8px"><button class="secondary" onclick="loadAdminDashboard()">立即检查</button><button class="secondary" onclick="loadAdmin('nodes')">节点管理</button></p>
+    </section>
+    <section class="card"><div class="section-title"><h2>运维入口</h2><p>原“设置”页功能已合并到仪表盘，避免重复导航。</p></div>
+      <div class="grid">${setupHtml}</div>
+      <p class="row"><a class="btn secondary" href="/config/frps.example.toml">下载默认 frps 配置</a><a class="btn" href="/admin/backup/full.zip">下载全量备份</a><button class="secondary" onclick="backupToR2()">备份到 R2</button></p>
+      <p class="muted small">隧道 ${data.tunnel_count || 0} · 注册密钥 ${data.invite_key_count || 0} · 封禁记录 ${data.ban_count || 0} · R2 ${data.r2_configured ? '已配置' : '未配置'}</p>
+    </section>`;
+  adminDashboardTimer = setTimeout(() => loadAdminDashboard(true), refreshSeconds * 1000);
 }
 
 loadMe();

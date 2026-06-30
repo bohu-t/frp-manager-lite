@@ -51,6 +51,31 @@ random_secret() {
   fi
 }
 
+url_encode() {
+  python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
+}
+
+resolve_panel_plugin_path() {
+  local node_id encoded_token
+  node_id="$(curl -fsS --connect-timeout 5 "http://127.0.0.1:${FML_PUBLISH_PORT}/api/nodes" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    nodes = data.get("nodes") or []
+    default = next((n for n in nodes if n.get("name") == "default"), nodes[0] if nodes else {})
+    print(default.get("id", ""))
+except Exception:
+    print("")
+' 2>/dev/null || true)"
+  encoded_token="$(url_encode "${FRP_AUTH_TOKEN}")"
+  if [[ -n "${node_id}" ]]; then
+    printf '/frp-plugin?node_id=%s&node_token=%s' "${node_id}" "${encoded_token}"
+  else
+    warn "未能从面板读取默认节点 ID，frps 插件路径暂用 /frp-plugin；单节点可用，多节点前请到面板下载对应 frps 配置替换"
+    printf '/frp-plugin'
+  fi
+}
+
 has_tty() {
   [[ -r /dev/tty && -w /dev/tty ]] && { : </dev/tty; } 2>/dev/null
 }
@@ -249,7 +274,7 @@ collect_env_file() {
 apt_install_base() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y ca-certificates curl tar gzip openssl lsb-release
+  apt-get install -y ca-certificates curl tar gzip openssl lsb-release python3
 }
 
 install_docker() {
@@ -370,6 +395,9 @@ write_frps_config() {
     log "已备份原有 /etc/frp/frps.toml"
   fi
 
+  local plugin_path
+  plugin_path="$(resolve_panel_plugin_path)"
+
   cat > /etc/frp/frps.toml <<TOML
 # 由 ${ENV_FILE} 生成于 $(date '+%Y-%m-%d %H:%M:%S')
 # frp ${FRP_VERSION}
@@ -395,7 +423,7 @@ enablePrometheus = true
 [[httpPlugins]]
 name = "frp-manager-lite-auth"
 addr = "${PANEL_PLUGIN_ADDR}"
-path = "/frp-plugin"
+path = "${plugin_path}"
 ops = ["Login", "NewProxy"]
 TOML
   chmod 600 /etc/frp/frps.toml

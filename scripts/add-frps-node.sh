@@ -26,6 +26,10 @@ log()  { echo -e "${GREEN}✅${NC} $*"; }
 warn() { echo -e "${YELLOW}⚠️${NC}  $*"; }
 err()  { echo -e "${RED}❌${NC} $*"; exit 1; }
 
+url_encode() {
+  python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
+}
+
 # ── 交互式引导 ──────────────────────────────────────────────
 
 echo ''
@@ -40,7 +44,7 @@ echo '    ③ 配置 systemd 开机自启'
 echo ''
 echo '  需要提前准备：'
 echo '    · 面板地址（如 https://panel.example.com）'
-echo '    · 面板后台 → 设置页 → FML_SETUP_KEY'
+echo '    · 面板后台 → 仪表盘 → 运维入口 → FML_SETUP_KEY'
 echo '    · 本机公网 IP 已开放对应端口（防火墙 / 安全组）'
 echo ''
 
@@ -58,7 +62,7 @@ done
 if [[ "$PANEL_URL" =~ /$ ]]; then PANEL_URL="${PANEL_URL%/}"; fi
 
 while [[ -z "$SETUP_KEY" ]]; do
-  read -r -s -p "  FML_SETUP_KEY（在面板后台 → 设置页查看，不回显）：" SETUP_KEY
+  read -r -s -p "  FML_SETUP_KEY（在面板后台 → 仪表盘 → 运维入口查看，不回显）：" SETUP_KEY
   echo
   SETUP_KEY="$(echo "$SETUP_KEY" | tr -d '[:space:]')"
   if [[ ${#SETUP_KEY} -lt 8 ]]; then
@@ -167,7 +171,8 @@ API_RESP="$(set +e; curl -sS --connect-timeout 10 -X POST "${PANEL_URL}/api/setu
   -d "${PAYLOAD}")"
 
 if echo "$API_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('ok') else 1)" 2>/dev/null; then
-  log "面板注册成功！"
+  NODE_ID="$(echo "$API_RESP" | python3 -c "import json,sys; print(json.load(sys.stdin).get('node_id',''))")"
+  log "面板注册成功！节点 ID：${NODE_ID}"
 else
   echo ''
   err "面板返回：${API_RESP}"
@@ -211,6 +216,7 @@ fi
 # 从面板地址提取域名用于 httpPlugins
 PANEL_HOST="${PANEL_URL#https://}"
 PANEL_HOST="${PANEL_HOST#http://}"
+NODE_TOKEN_QUERY="$(url_encode "${FRPS_TOKEN}")"
 
 cat > "${FRPS_DIR}/frps.toml" << EOF
 # ───────────────────────────────────
@@ -231,11 +237,11 @@ auth.token = "${FRPS_TOKEN}"
 transport.tcpMux = true
 transport.maxPoolCount = 5
 
-# 回调面板验权
+# 回调面板验权：带上节点身份，面板会校验账号、节点和端口归属。
 [[httpPlugins]]
 name = "frp-manager-lite-auth"
 addr = "${PANEL_HOST}"
-path = "/frp-plugin"
+path = "/frp-plugin?node_id=${NODE_ID}&node_token=${NODE_TOKEN_QUERY}"
 ops = ["Login", "NewProxy"]
 
 # 仪表盘（仅建议内网访问）
