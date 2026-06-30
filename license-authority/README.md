@@ -83,6 +83,7 @@ server {
 
 ```bash
 FML_SOFTWARE_LICENSE_REQUIRED=1
-FML_SOFTWARE_LICENSE_SERVER_URL=https://license.example.com
+FML_LICENSE_SERVER_URL=https://license.example.com
+# FML_LICENSE_FILE=/var/lib/frp-manager-lite/software-license.json
 FML_SOFTWARE_LICENSE_SECRET=与 LCA_LICENSE_SECRET 一致
 ```

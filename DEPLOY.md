@@ -72,7 +72,7 @@ bash add-frps-node.sh
 ```
 
 **需要准备**：
-1. 从面板后台 → 设置页 → 复制 `FML_SETUP_KEY`
+1. 从面板后台 → 仪表盘 → 运维入口 → 复制 `FML_SETUP_KEY`
 2. 新 VPS 已开放对应端口（防火墙 / 安全组）
 
 脚本自动完成：
@@ -85,7 +85,7 @@ bash add-frps-node.sh
 
 ### 3.1 激活软件授权（首次）
 
-部署后访问面板，输入卖家给你的鉴权地址和授权码。只激活一次，之后永久免检。
+部署后访问面板，输入卖家给你的鉴权服务器地址和服务器软件授权码。程序只在安装/首次部署时向鉴权服务器验证一次；成功后会在部署机器上生成本地授权文件（默认随数据目录保存，或由 `FML_LICENSE_FILE` 指定）。以后重装时程序读取这个授权文件并与当前机器指纹校验，一致就不需要重新鉴权。
 
 ### 3.2 创建注册密钥
 
@@ -137,7 +137,6 @@ serverPort = 7000
 auth.token = "VGp..."
 user = "myuser"
 metadatas.panelToken = "dHNR..."
-metadatas.licenseKey = "LIC-..."
 
 [[proxies]]
 name = "my_web"
@@ -149,7 +148,7 @@ remotePort = 20000
 
 ## 五、鉴权服务（可选）
 
-如果你需要卖部署版授权码给其他卖家，部署独立的鉴权服务：
+如果你需要给部署服务器签发软件授权码，部署独立的鉴权服务：
 
 ```bash
 cd license-authority
@@ -162,7 +161,9 @@ python3 server.py
 然后在面板 `.env` 中配置：
 
 ```bash
-FML_SOFTWARE_LICENSE_SERVER_URL=https://license.example.com
+FML_LICENSE_SERVER_URL=https://license.example.com
+# 可选：指定本地授权文件位置，建议放到持久化数据目录
+FML_LICENSE_FILE=/var/lib/frp-manager-lite/software-license.json
 ```
 
 ## 六、常用命令

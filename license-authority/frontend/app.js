@@ -195,7 +195,7 @@ function renderSettings() {
         <div>
           <div class="label">客户 .env 配置</div>
           <p>客户部署时在激活页填入本服务的 HTTPS 地址 + 授权码，或在 <code>.env</code> 预设：<br>
-             <code>FML_SOFTWARE_LICENSE_SERVER_URL=https://license.你的域名.com</code><br>
+             <code>FML_LICENSE_SERVER_URL=https://license.你的域名.com</code><br>
              <code>FML_SOFTWARE_LICENSE_SECRET=与 LCA_LICENSE_SECRET 一致</code></p>
         </div>
       </div>
