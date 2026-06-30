@@ -498,6 +498,69 @@ async function loadAdmin(section=currentAdminSection){
       <td class="actions"><button onclick="copyText('${k.license_key}')">复制</button><button onclick="softwareLicenseToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button onclick="softwareLicenseUnbind(${k.id})">解绑</button></td>
     </tr>`).join('') || emptyRow(8, '还没有软件授权码');
   const adminNodeOptions = nodeOptions((data.nodes || []).filter(n => n.active));
+  const nodeHtml = `
+    <section class="card hidden" id="editNodeCard"><div class="section-title"><h2>编辑地区节点</h2><p>建议使用稳定域名，方便后期更换 VPS</p></div><form id="editNodeForm" class="grid">
+      <input type="hidden" name="id">
+      <div><label>地区</label><input name="region" required></div>
+      <div><label>节点名</label><input name="name" required></div>
+      <div><label>frps 域名/地址</label><input name="server_addr" required></div>
+      <div><label>frps bindPort</label><input name="server_port" type="number" min="1" max="65535"></div>
+      <div><label>frps token</label><input name="auth_token" required></div>
+      <div><label>状态</label><select name="active"><option value="1">启用</option><option value="0">停用</option></select></div>
+      <div><label>备注</label><input name="note"></div>
+      <div style="align-self:end"><button>保存修改</button><button type="button" class="secondary" onclick="document.querySelector('#editNodeCard').classList.add('hidden')">取消</button></div>
+    </form><p class="muted small">建议 frps 地址填写域名，例如 <code>hk.example.com</code>。后期更换 VPS 时优先改 DNS，用户的 frpc 配置可保持不变。</p></section>
+    <section class="card"><div class="section-title"><h2>新增地区节点</h2><p>每个节点独立端口池和 token</p></div><form id="nodeForm" class="grid">
+      <div><label>地区</label><input name="region" placeholder="香港 / 日本 / 美国" required></div>
+      <div><label>节点名</label><input name="name" placeholder="hk-1" required></div>
+      <div><label>frps 域名/地址</label><input name="server_addr" placeholder="hk.example.com" required></div>
+      <div><label>frps bindPort</label><input name="server_port" type="number" value="7000" min="1" max="65535"></div>
+      <div><label>frps token</label><input name="auth_token" placeholder="CHANGE_ME" required></div>
+      <div><label>端口起始</label><input name="port_start" type="number" value="20000" min="1" max="65535"></div>
+      <div><label>端口结束</label><input name="port_end" type="number" value="20199" min="1" max="65535"></div>
+      <div><label>备注</label><input name="note" placeholder="线路/机房说明"></div>
+      <div style="align-self:end"><button>创建节点</button></div>
+    </form></section>
+    <section class="card" id="nodes"><div class="section-title"><h2>地区节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>ID</th><th>地区</th><th>节点</th><th>frps</th><th>端口池</th><th>剩余</th><th>状态</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table></section>`;
+  const keysHtml = `
+    <section class="card" id="keys"><div class="section-title"><h2>生成注册密钥</h2><p>注册密钥固定单次使用，适合批量发货</p></div><form id="inviteForm" class="grid">
+      <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
+      <div><label>备注</label><input name="note" placeholder="订单号/套餐名"></div>
+      <div><label>每枚可用次数</label><input name="max_uses" type="number" value="1" min="1" max="1" disabled><span class="muted small">固定 1 次</span></div>
+      <div><label>注册后端口数</label><input name="max_ports" type="number" value="5" min="1" max="100"></div>
+      <div><label>注册后账号有效期天数</label><input name="user_expires_days" type="number" value="30" min="0" max="3650"></div>
+      <div><label>密钥有效期天数</label><input name="key_expires_days" type="number" value="30" min="0" max="3650"></div>
+      <div style="align-self:end"><button>生成密钥</button></div>
+    </form><p><a class="btn" href="/admin/export/invite-keys.csv">导出未使用可用密钥 CSV</a></p><p class="panel-note small">批量生成后会自动复制并下载本次生成的 txt。CSV 导出只包含未使用、启用中、未过期的密钥。</p></section>
+    <section class="card"><div class="section-title"><h2>注册密钥列表</h2><p>已使用密钥不会出现在 CSV 导出里</p></div><table><thead><tr><th>ID</th><th>密钥</th><th>备注</th><th>使用</th><th>端口</th><th>账号有效期</th><th>密钥到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table></section>
+    ${data.software_license_authority ? `<section class="card" id="software-licenses"><div class="section-title"><h2>服务器软件授权码</h2><p>卖家后台使用：先批量生成授权码发给客户；客户输入授权码后自动绑定他的部署服务器。</p></div><form id="softwareLicenseForm" class="grid">
+      <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
+      <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
+      <div><label>套餐</label><input name="plan" value="deploy"></div>
+      <div><label>有效期天数</label><input name="expires_days" type="number" value="0" min="0" max="3650"><span class="muted small">0 表示永不过期</span></div>
+      <div style="align-self:end"><button>生成软件授权码</button></div>
+    </form><p class="panel-note small">客户不需要提供机器码；首次激活时授权服务器会自动绑定机器。批量生成后会自动复制并下载 txt。</p>
+    <table><thead><tr><th>ID</th><th>授权码</th><th>备注</th><th>套餐</th><th>绑定机器</th><th>到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${softwareKeyRows}</tbody></table></section>` : ''}`;
+  const usersHtml = `
+    <section class="card"><div class="section-title"><h2>创建用户</h2><p>管理员直开账号，可指定地区节点</p></div><form id="createUserForm" class="grid">
+      <div><label>用户名</label><input name="username" required></div>
+      <div><label>初始密码</label><input name="password" type="password" required></div>
+      <div><label>地区节点</label><select name="node_id" required>${adminNodeOptions}</select></div>
+      <div><label>端口数量</label><input name="max_ports" type="number" value="5" min="1" max="100"></div>
+      <div><label>有效期天数</label><input name="expires_days" type="number" value="30" min="0" max="3650"><span class="muted small">0 表示永不过期</span></div>
+      <div style="align-self:end"><button>创建</button></div>
+    </form></section>
+    <section class="card" id="users"><div class="section-title"><h2>用户列表</h2><p>管理状态、续期、注册密钥和删除账号</p></div><table><thead><tr><th>ID</th><th>用户</th><th>角色</th><th>地区节点</th><th>端口</th><th>隧道</th><th>到期</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></section>`;
+  const riskHtml = `
+    <section class="card" id="risk"><div class="section-title"><h2>投诉处理 / 风控</h2><p>按端口定位用户并快速封禁</p></div>
+      <form id="lookupPortForm" class="grid">
+        <div><label>被投诉端口</label><input name="remote_port" type="number" min="1" max="65535" placeholder="例如 20088" required></div>
+        <div><label>节点（可选）</label><select name="node_id"><option value="0">全部节点</option>${nodeOptions(data.nodes || [])}</select></div>
+        <div style="align-self:end"><button>查询</button></div>
+      </form>
+      <div id="riskResult" class="risk-result"></div>
+    </section>
+    <section class="card"><div class="section-title"><h2>审计日志</h2><p>最近 80 条关键操作和风控事件</p></div><table><thead><tr><th>ID</th><th>事件</th><th>用户</th><th>端口</th><th>协议</th><th>详情</th><th>时间</th></tr></thead><tbody>${logRows}</tbody></table></section>`;
   const sectionHtml = {users: usersHtml, keys: keysHtml, nodes: nodeHtml, risk: riskHtml}[currentAdminSection] || usersHtml;
   app.innerHTML = sectionHtml;
   const softwareLicenseForm = document.querySelector('#softwareLicenseForm');
