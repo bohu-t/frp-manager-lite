@@ -36,9 +36,9 @@ function toggleColorMode(){
 }
 
 if(systemDarkQuery){
-  systemDarkQuery.addEventListener('change', () => {
-    if(colorMode === 'system') applyColorMode('system');
-  });
+  const onSystemThemeChange = () => { if(colorMode === 'system') applyColorMode('system'); };
+  if(systemDarkQuery.addEventListener) systemDarkQuery.addEventListener('change', onSystemThemeChange);
+  else if(systemDarkQuery.addListener) systemDarkQuery.addListener(onSystemThemeChange);
 }
 
 applyColorMode(colorMode);
@@ -620,6 +620,13 @@ function nodeStatusBadge(n){
   return '<span class="bad">异常</span>';
 }
 
+
+function copySetupKey(){
+  const el = document.querySelector('#setupKeyValue');
+  if(!el){ show('没有可复制的密钥', true); return; }
+  copyText(el.textContent || '');
+}
+
 async function loadAdminDashboard(auto=false){
   hideFlash();
   clearAdminDashboardTimer();
@@ -645,7 +652,7 @@ async function loadAdminDashboard(auto=false){
       <td>${nodeStatusBadge(n)}<br><span class="muted small">${esc(n.auth_message || '')}</span></td>
     </tr>`).join('') || emptyRow(2, '暂无节点');
   const setupHtml = data.has_setup_key ? `
-    <div><div class="label">🔑 一键添加节点密钥</div><div class="row" style="gap:8px;align-items:center"><code class="token" style="user-select:all;flex:1">${esc(data.setup_key)}</code><button class="secondary" onclick="navigator.clipboard.writeText('${esc(data.setup_key).replace(/'/g, "\"")}');show('已复制！')">📋 复制</button></div><p class="muted small">在新机器运行添加节点脚本时输入此密钥。</p></div>` :
+    <div><div class="label">🔑 一键添加节点密钥</div><div class="row" style="gap:8px;align-items:center"><code class="token" id="setupKeyValue" style="user-select:all;flex:1">${esc(data.setup_key)}</code><button class="secondary" onclick="copySetupKey()">📋 复制</button></div><p class="muted small">在新机器运行添加节点脚本时输入此密钥。</p></div>` :
     '<div><div class="label">⚠️ 未设置 FML_SETUP_KEY</div><p class="muted small">在 .env 中添加 FML_SETUP_KEY=*** 即可启用一键添加节点功能。</p></div>';
   app.innerHTML = `
     <div class="grid">
