@@ -95,6 +95,12 @@ code{padding:2px 6px}pre{padding:14px;overflow:auto;white-space:pre-wrap}
 .panel-note{border:1px dashed var(--line2);background:rgba(56,189,248,.06);border-radius:14px;padding:12px;color:var(--soft)}
 @media(max-width:760px){.wrap{padding:18px 12px 36px}header{margin:-18px -12px 18px;padding:14px 12px;align-items:flex-start;flex-direction:column}nav{width:100%}button,.btn{width:auto}.grid{grid-template-columns:1fr}.card{padding:14px}.login{margin:26px auto}th,td{padding:9px}}
 
+/* In-page modal pages */
+.modal-backdrop{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-start;justify-content:center;padding:84px 18px 28px;background:rgba(2,8,23,.68);backdrop-filter:blur(10px);overflow:auto}
+.modal-page{width:min(920px,100%);margin:0;box-shadow:0 24px 80px rgba(0,0,0,.48)}
+.modal-title{align-items:flex-start;margin-top:0}.modal-close{white-space:nowrap}.tunnel-config-entry p{margin-bottom:0}
+@media(max-width:760px){.modal-backdrop{padding:74px 12px 24px}.modal-title{flex-direction:column}.modal-close{width:100%}}
+
 /* Product UI polish */
 .auth-layout{display:grid;grid-template-columns:minmax(300px,.95fr) minmax(360px,1.05fr);gap:18px;max-width:1040px;margin:52px auto}
 .auth-hero{min-height:440px;display:flex;flex-direction:column;justify-content:flex-end;position:relative;overflow:hidden;padding:28px;background:linear-gradient(135deg,rgba(14,165,233,.24),rgba(15,23,42,.9) 52%,rgba(52,211,153,.12))}

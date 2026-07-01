@@ -451,16 +451,23 @@ async function loadDashboard(){
       <section class="card stat"><div class="label">FRPS 接入点</div><div class="num" style="font-size:20px">${esc(data.frps.addr)}</div><p>端口：<code>${esc(data.frps.port)}</code></p><p><a class="btn" href="/config/frpc.toml">下载 frpc.toml</a></p><p class="muted small">全协议：${(data.allowed_proxy_types || []).join(' / ')}</p></section>
     </div>
     ${isAdmin ? '' : `<section class="card"><div class="section-title"><h2>已分配端口</h2><p>绿色表示已经创建隧道</p></div><div class="ports">${portsHtml}</div></section>`}
-    <section class="card"><div class="section-title"><h2>新建隧道</h2><p>TCP/UDP 使用分配端口；HTTP/HTTPS/TCPMUX 使用自定义域名；STCP/XTCP 使用密钥。</p></div><form id="tunnelForm" class="grid">
-      <div><label>名称</label><input name="name" placeholder="web" required></div>
-      <div><label>类型</label><select name="proxy_type" id="proxyTypeSelect">${proxyTypeOptions}</select></div>
-      <div><label>本地 IP</label><input name="local_ip" value="127.0.0.1" required></div>
-      <div><label>本地端口</label><input name="local_port" type="number" min="1" max="65535" value="80" required></div>
-      <div class="remote-port-field"><label>公网端口</label>${remotePortField}</div>
-      <div class="domain-field hidden"><label>自定义域名</label><input name="custom_domains" placeholder="app.example.com,api.example.com"></div>
-      <div class="secret-field hidden"><label>访问密钥</label><input name="secret_key" placeholder="留空自动生成"></div>
-      <div style="align-self:end"><button>创建</button></div>
-    </form><p class="muted small">HTTP/HTTPS/TCPMUX 需要 frps 已配置 vhostHTTPPort / vhostHTTPSPort / tcpmuxHTTPConnectPort 等对应能力。</p></section>
+    <section class="card tunnel-config-entry"><div class="section-title"><h2>隧道配置</h2><p>在页面内弹出配置页，填写后创建新隧道。</p></div><button onclick="openTunnelModal()">新建隧道</button><p class="muted small">TCP/UDP 使用分配端口；HTTP/HTTPS/TCPMUX 使用自定义域名；STCP/XTCP 使用密钥。</p></section>
+    <div id="tunnelModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="tunnelModalTitle">
+      <section class="modal-page card">
+        <div class="section-title modal-title"><div><h2 id="tunnelModalTitle">新建隧道</h2><p>填写本地服务和公网访问方式。</p></div><button type="button" class="secondary modal-close" onclick="closeTunnelModal()" aria-label="关闭隧道配置">关闭 ×</button></div>
+        <form id="tunnelForm" class="grid">
+          <div><label>名称</label><input name="name" placeholder="web" required></div>
+          <div><label>类型</label><select name="proxy_type" id="proxyTypeSelect">${proxyTypeOptions}</select></div>
+          <div><label>本地 IP</label><input name="local_ip" value="127.0.0.1" required></div>
+          <div><label>本地端口</label><input name="local_port" type="number" min="1" max="65535" value="80" required></div>
+          <div class="remote-port-field"><label>公网端口</label>${remotePortField}</div>
+          <div class="domain-field hidden"><label>自定义域名</label><input name="custom_domains" placeholder="app.example.com,api.example.com"></div>
+          <div class="secret-field hidden"><label>访问密钥</label><input name="secret_key" placeholder="留空自动生成"></div>
+          <div class="form-actions"><button>创建</button><button type="button" class="secondary" onclick="closeTunnelModal()">关闭</button></div>
+        </form>
+        <p class="muted small">HTTP/HTTPS/TCPMUX 需要 frps 已配置 vhostHTTPPort / vhostHTTPSPort / tcpmuxHTTPConnectPort 等对应能力。</p>
+      </section>
+    </div>
     <section class="card"><div class="section-title"><h2>隧道列表</h2><p>修改后请重新下载 frpc.toml</p></div><table><thead><tr><th>名称</th><th>类型</th><th>本地服务</th><th>公网端口/域名/密钥</th><th>状态</th><th>操作</th></tr></thead><tbody>${tunnelRows}</tbody></table></section>`;
   const proxyTypeSelect = document.querySelector('#proxyTypeSelect');
   const syncProxyFields = () => {
@@ -476,10 +483,20 @@ async function loadDashboard(){
     const fd = new FormData(e.target);
     try{
       await api('/api/tunnels/create', {method:'POST', body:Object.fromEntries(fd)});
+      closeTunnelModal();
       show('隧道已创建，重新下载 frpc.toml 后重启 frpc 生效');
       await loadDashboard();
     }catch(err){ show(err.message, true); }
   };
+}
+
+function openTunnelModal(){
+  const modal = document.querySelector('#tunnelModal');
+  if(modal) modal.classList.remove('hidden');
+}
+function closeTunnelModal(){
+  const modal = document.querySelector('#tunnelModal');
+  if(modal) modal.classList.add('hidden');
 }
 
 async function toggleTunnel(id){ await api('/api/tunnels/toggle', {method:'POST', body:{id}}).then(loadDashboard).catch(e=>show(e.message,true)); }
@@ -915,19 +932,22 @@ async function loadAdminDashboard(auto=false){
       </div>
     </section>
 
-    <section id="adminFrpcModal" class="card admin-frpc-modal hidden"><div class="section-title"><h2>为用户配置并下载 frpc</h2><p>选择普通用户，填写本地服务；TCP/UDP 端口留空时自动使用该用户可用端口。</p></div>
-      ${frpcUserOptions ? `<form id="adminFrpcForm" class="grid">
-        <div><label>用户</label><select name="user_id" required>${frpcUserOptions}</select></div>
-        <div><label>隧道名称</label><input name="name" value="web" required></div>
-        <div><label>类型</label><select name="proxy_type" onchange="syncAdminFrpcFields()">${proxyTypeOptions}</select></div>
-        <div><label>本地 IP</label><input name="local_ip" value="127.0.0.1" required></div>
-        <div><label>本地端口</label><input name="local_port" type="number" min="1" max="65535" value="80" required></div>
-        <div class="admin-remote-port-field"><label>公网端口</label><input name="remote_port" type="number" min="1" max="65535" placeholder="留空自动分配"></div>
-        <div class="admin-domain-field hidden"><label>自定义域名</label><input name="custom_domains" placeholder="app.example.com"></div>
-        <div class="admin-secret-field hidden"><label>访问密钥</label><input name="secret_key" placeholder="留空自动生成"></div>
-        <div class="form-actions"><button>创建隧道并下载</button><button type="button" class="secondary" onclick="downloadAdminFrpcOnly()">只下载现有配置</button><button type="button" class="secondary" onclick="closeAdminFrpcModal()">取消</button></div>
-      </form>` : '<p class="muted">暂无普通用户，先创建用户后再下载 frpc 配置。</p>'}
-    </section>
+    <div id="adminFrpcModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="adminFrpcModalTitle">
+      <section class="modal-page card admin-frpc-modal">
+        <div class="section-title modal-title"><div><h2 id="adminFrpcModalTitle">为用户配置并下载 frpc</h2><p>选择普通用户，填写本地服务；TCP/UDP 端口留空时自动使用该用户可用端口。</p></div><button type="button" class="secondary modal-close" onclick="closeAdminFrpcModal()" aria-label="关闭 frpc 配置">关闭 ×</button></div>
+        ${frpcUserOptions ? `<form id="adminFrpcForm" class="grid">
+          <div><label>用户</label><select name="user_id" required>${frpcUserOptions}</select></div>
+          <div><label>隧道名称</label><input name="name" value="web" required></div>
+          <div><label>类型</label><select name="proxy_type" onchange="syncAdminFrpcFields()">${proxyTypeOptions}</select></div>
+          <div><label>本地 IP</label><input name="local_ip" value="127.0.0.1" required></div>
+          <div><label>本地端口</label><input name="local_port" type="number" min="1" max="65535" value="80" required></div>
+          <div class="admin-remote-port-field"><label>公网端口</label><input name="remote_port" type="number" min="1" max="65535" placeholder="留空自动分配"></div>
+          <div class="admin-domain-field hidden"><label>自定义域名</label><input name="custom_domains" placeholder="app.example.com"></div>
+          <div class="admin-secret-field hidden"><label>访问密钥</label><input name="secret_key" placeholder="留空自动生成"></div>
+          <div class="form-actions"><button>创建隧道并下载</button><button type="button" class="secondary" onclick="downloadAdminFrpcOnly()">只下载现有配置</button><button type="button" class="secondary" onclick="closeAdminFrpcModal()">关闭</button></div>
+        </form>` : '<p class="muted">暂无普通用户，先创建用户后再下载 frpc 配置。</p>'}
+      </section>
+    </div>
 
     <section class="card node-health-card"><div class="section-title"><h2>节点健康</h2><p>检查 frps bind/auth 端口连通性 · 每页 ${healthPageSize} 条</p></div>
       <table class="compact-table"><thead><tr><th>节点</th><th>状态</th><th>端口使用</th></tr></thead><tbody>${nodeRows}</tbody></table>
