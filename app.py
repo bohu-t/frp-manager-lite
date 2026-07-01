@@ -1007,10 +1007,16 @@ def int_or_none(value: Any) -> int | None:
 
 
 def plugin_node_from_query(path: str) -> tuple[int | None, str]:
+    # frps appends plugin metadata as `?op=Login&version=...` to the configured
+    # httpPlugins.path. If the configured path already contains query params,
+    # current frp versions may produce `/frp-plugin?node_id=1&node_token=x?op=...`.
+    # Treat the second `?` as the start of frps metadata so node_token remains `x`.
     parsed = urlparse(path)
     qs = urllib.parse.parse_qs(parsed.query)
     node_id = int_or_none((qs.get("node_id") or qs.get("node") or [None])[0])
     node_token = str((qs.get("node_token") or qs.get("node_auth") or qs.get("token") or [""])[0])
+    if "?" in node_token:
+        node_token = node_token.split("?", 1)[0]
     return node_id, node_token
 
 
