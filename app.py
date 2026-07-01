@@ -926,7 +926,16 @@ def call_license_server(license_key: str, machine_id: str, override_url: str = "
     if not server_url:
         return local_license_authority_activate(license_key, machine_id)
     body = json.dumps({"license_key": license_key, "machine_id": machine_id, "app": APP_NAME}).encode("utf-8")
-    req = urllib.request.Request(f"{server_url}/api/license/activate", data=body, method="POST", headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(
+        f"{server_url}/api/license/activate",
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "frp-manager-lite-license-client/1.0",
+        },
+    )
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             data = json.loads(resp.read().decode("utf-8"))
