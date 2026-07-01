@@ -1655,25 +1655,40 @@ class Handler(BaseHTTPRequestHandler):
             return
         user_id = int(data.get("user_id", 0))
         try:
-            name = str(data.get("name", "")).strip()
-            proxy_type = str(data.get("proxy_type", "tcp")).lower()
-            local_ip = str(data.get("local_ip", "127.0.0.1")).strip()
-            local_port = int(data.get("local_port", 0))
-            remote_port = int(data.get("remote_port", 0) or 0)
-            custom_domains = ",".join([d.strip().lower() for d in str(data.get("custom_domains", "")).replace("\n", ",").split(",") if d.strip()])[:500]
-            secret_key = str(data.get("secret_key", "")).strip()[:120]
-            if not name or len(name) > 40 or not name.replace("_", "").replace("-", "").isalnum():
-                raise ValueError("隧道名称只能包含字母、数字、下划线、短横线，长度 1-40")
-            if proxy_type not in ALLOWED_PROXY_TYPES:
-                raise ValueError("协议不支持")
-            if not (1 <= local_port <= 65535):
-                raise ValueError("本地端口不合法")
-            if proxy_type not in REMOTE_PORT_PROXY_TYPES:
-                remote_port = 0
-            if proxy_type in DOMAIN_PROXY_TYPES and not custom_domains:
-                raise ValueError("HTTP/HTTPS/TCPMUX 必须填写自定义域名")
-            if proxy_type in SECRET_KEY_PROXY_TYPES and not secret_key:
-                secret_key = secrets.token_urlsafe(16)
+            raw_items = data.get("tunnels")
+            if isinstance(raw_items, list):
+                items = [x for x in raw_items if isinstance(x, dict)]
+            else:
+                items = [data]
+            if not items:
+                raise ValueError("请至少添加一个隧道")
+            if len(items) > 20:
+                raise ValueError("一次最多创建 20 个隧道")
+
+            parsed: list[dict[str, Any]] = []
+            for item in items:
+                name = str(item.get("name", "")).strip()
+                proxy_type = str(item.get("proxy_type", "tcp")).lower()
+                local_ip = str(item.get("local_ip", "127.0.0.1")).strip()
+                local_port = int(item.get("local_port", 0))
+                remote_port = int(item.get("remote_port", 0) or 0)
+                custom_domains = ",".join([d.strip().lower() for d in str(item.get("custom_domains", "")).replace("\n", ",").split(",") if d.strip()])[:500]
+                secret_key = str(item.get("secret_key", "")).strip()[:120]
+                if not name or len(name) > 40 or not name.replace("_", "").replace("-", "").isalnum():
+                    raise ValueError("隧道名称只能包含字母、数字、下划线、短横线，长度 1-40")
+                if proxy_type not in ALLOWED_PROXY_TYPES:
+                    raise ValueError("协议不支持")
+                if not (1 <= local_port <= 65535):
+                    raise ValueError("本地端口不合法")
+                if proxy_type not in REMOTE_PORT_PROXY_TYPES:
+                    remote_port = 0
+                if proxy_type in DOMAIN_PROXY_TYPES and not custom_domains:
+                    raise ValueError("HTTP/HTTPS/TCPMUX 必须填写自定义域名")
+                if proxy_type in SECRET_KEY_PROXY_TYPES and not secret_key:
+                    secret_key = secrets.token_urlsafe(16)
+                parsed.append({"name": name, "proxy_type": proxy_type, "local_ip": local_ip, "local_port": local_port, "remote_port": remote_port, "custom_domains": custom_domains, "secret_key": secret_key})
+
+            created: list[dict[str, Any]] = []
             with db() as conn:
                 target = conn.execute("SELECT * FROM users WHERE id=? AND role!='admin'", (user_id,)).fetchone()
                 if not target:
@@ -1683,30 +1698,44 @@ class Handler(BaseHTTPRequestHandler):
                 node = conn.execute("SELECT * FROM nodes WHERE id=?", (target["node_id"],)).fetchone()
                 if not node:
                     raise ValueError("用户所属节点不存在")
-                if proxy_type in REMOTE_PORT_PROXY_TYPES:
-                    if remote_port:
-                        owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (target["node_id"], target["id"], remote_port)).fetchone()
-                        if not owned:
-                            raise ValueError("这个公网端口不属于该用户")
-                        used = conn.execute("SELECT 1 FROM tunnels WHERE node_id=? AND remote_port=? AND proxy_type IN ('tcp','udp')", (target["node_id"], remote_port)).fetchone()
-                        if used:
-                            raise ValueError("该端口已被其他隧道使用")
-                    else:
-                        row = conn.execute("""
-                            SELECT p.port FROM ports p
-                            LEFT JOIN tunnels t ON t.node_id=p.node_id AND t.remote_port=p.port AND t.proxy_type IN ('tcp','udp')
-                            WHERE p.node_id=? AND p.user_id=? AND t.id IS NULL
-                            ORDER BY p.port LIMIT 1
-                        """, (target["node_id"], target["id"])).fetchone()
-                        if not row:
-                            raise ValueError("该用户没有可用公网端口")
-                        remote_port = int(row["port"])
-                conn.execute(
-                    "INSERT INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (target["node_id"], target["id"], name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, now()),
-                )
-            audit("admin_tunnel_create", admin, target["node_id"], remote_port or None, proxy_type, f"target={target['username']} {name} -> {local_ip}:{local_port}")
-            self.send_json({"ok": True, "message": "隧道已创建", "remote_port": remote_port})
+                reserved_ports: set[int] = set()
+                for item in parsed:
+                    remote_port = int(item["remote_port"] or 0)
+                    proxy_type = str(item["proxy_type"])
+                    if proxy_type in REMOTE_PORT_PROXY_TYPES:
+                        if remote_port:
+                            if remote_port in reserved_ports:
+                                raise ValueError(f"公网端口 {remote_port} 在本次配置中重复")
+                            owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (target["node_id"], target["id"], remote_port)).fetchone()
+                            if not owned:
+                                raise ValueError(f"公网端口 {remote_port} 不属于该用户")
+                            used = conn.execute("SELECT 1 FROM tunnels WHERE node_id=? AND remote_port=? AND proxy_type IN ('tcp','udp')", (target["node_id"], remote_port)).fetchone()
+                            if used:
+                                raise ValueError(f"公网端口 {remote_port} 已被其他隧道使用")
+                        else:
+                            row = conn.execute("""
+                                SELECT p.port FROM ports p
+                                LEFT JOIN tunnels t ON t.node_id=p.node_id AND t.remote_port=p.port AND t.proxy_type IN ('tcp','udp')
+                                WHERE p.node_id=? AND p.user_id=? AND t.id IS NULL
+                                ORDER BY p.port
+                            """, (target["node_id"], target["id"])).fetchall()
+                            available = [int(r["port"]) for r in row if int(r["port"]) not in reserved_ports]
+                            if not available:
+                                raise ValueError("该用户没有可用公网端口")
+                            remote_port = available[0]
+                        reserved_ports.add(remote_port)
+                        item["remote_port"] = remote_port
+                    conn.execute(
+                        "INSERT INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        (target["node_id"], target["id"], item["name"], proxy_type, item["local_ip"], item["local_port"], remote_port, item["custom_domains"], item["secret_key"], now()),
+                    )
+                    created.append({"name": item["name"], "proxy_type": proxy_type, "remote_port": remote_port, "local_ip": item["local_ip"], "local_port": item["local_port"]})
+                tunnels = conn.execute("SELECT * FROM tunnels WHERE user_id=? ORDER BY id", (target["id"],)).fetchall()
+                cfg = tunnel_config(target, node, tunnels)
+            for item in created:
+                audit("admin_tunnel_create", admin, target["node_id"], item["remote_port"] or None, item["proxy_type"], f"target={target['username']} {item['name']} -> {item['local_ip']}:{item['local_port']}")
+            audit("admin_frpc_config_download", admin, target["node_id"], None, "", f"target={target['username']} after_create={len(created)}")
+            self.send_json({"ok": True, "message": f"已创建 {len(created)} 个隧道并生成 frpc 配置", "created": created, "filename": f"frpc-{target['username']}.toml", "config": cfg})
         except sqlite3.IntegrityError:
             self.send_json({"ok": False, "error": "隧道名称或公网端口已被使用"}, 400)
         except Exception as e:
@@ -1878,10 +1907,16 @@ class Handler(BaseHTTPRequestHandler):
                     WHERE u.role!='admin'
                     GROUP BY u.id ORDER BY u.id
                 """):
+                    assigned_ports = [int(r["port"]) for r in conn.execute("SELECT port FROM ports WHERE node_id=? AND user_id=? ORDER BY port", (u["node_id"], u["id"]))]
+                    used_remote_ports = [int(r["remote_port"]) for r in conn.execute("SELECT remote_port FROM tunnels WHERE node_id=? AND user_id=? AND proxy_type IN ('tcp','udp') AND remote_port>0 ORDER BY remote_port", (u["node_id"], u["id"]))]
+                    used_set = set(used_remote_ports)
                     frpc_users.append({
                         "id": u["id"], "username": u["username"], "active": bool(u["active"]), "expired": is_expired(u),
                         "node_id": u["node_id"], "node_name": u["node_name"], "node_region": u["node_region"],
                         "port_count": u["port_count"], "tunnel_count": u["tunnel_count"],
+                        "assigned_ports": assigned_ports,
+                        "used_remote_ports": used_remote_ports,
+                        "available_ports": [p for p in assigned_ports if p not in used_set],
                     })
             node_list = attach_node_auth_port_status([
                 {
