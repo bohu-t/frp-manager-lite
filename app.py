@@ -69,6 +69,8 @@ CSRF_TTL = 2 * 3600
 NODE_CHECK_TIMEOUT = float(os.getenv("FML_NODE_CHECK_TIMEOUT", "1.5"))
 NODE_CHECK_MAX_WORKERS = int(os.getenv("FML_NODE_CHECK_MAX_WORKERS", "16"))
 NODE_DASHBOARD_REFRESH_SECONDS = int(os.getenv("FML_NODE_DASHBOARD_REFRESH_SECONDS", "30"))
+TUNNEL_STATUS_TTL = int(os.getenv("FML_TUNNEL_STATUS_TTL", "120"))
+TUNNEL_CONNECT_TIMEOUT = float(os.getenv("FML_TUNNEL_CONNECT_TIMEOUT", "1.5"))
 
 
 def now() -> int:
@@ -431,6 +433,8 @@ def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int) -> None
             conn.execute("ALTER TABLE tunnels ADD COLUMN custom_domains TEXT NOT NULL DEFAULT ''")
         if "secret_key" not in tunnel_cols:
             conn.execute("ALTER TABLE tunnels ADD COLUMN secret_key TEXT NOT NULL DEFAULT ''")
+        if "last_proxy_at" not in tunnel_cols:
+            conn.execute("ALTER TABLE tunnels ADD COLUMN last_proxy_at INTEGER NOT NULL DEFAULT 0")
         schema = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tunnels'").fetchone()["sql"] or ""
         if "UNIQUE(node_id, remote_port)" in schema:
             conn.execute("ALTER TABLE tunnels RENAME TO tunnels_old")
@@ -577,6 +581,43 @@ def attach_node_auth_port_status(nodes: list[dict[str, Any]]) -> list[dict[str, 
         for fut in as_completed(futures):
             futures[fut].update(fut.result())
     return nodes
+
+
+def check_tunnel_public_port(tunnel: dict[str, Any]) -> dict[str, Any]:
+    """Best-effort user-facing mapping check for TCP tunnels."""
+    if not tunnel.get("enabled"):
+        return {"mapping_status": "disabled", "mapping_message": "隧道已停用"}
+    if tunnel.get("proxy_type") != "tcp" or not tunnel.get("remote_port"):
+        if tunnel.get("last_proxy_at"):
+            age = max(0, now() - int(tunnel.get("last_proxy_at") or 0))
+            if age <= TUNNEL_STATUS_TTL:
+                return {"mapping_status": "registered", "mapping_message": f"frpc 已注册（{age} 秒前）"}
+        return {"mapping_status": "unknown", "mapping_message": "此协议无法用端口探测，请以客户端日志或访问域名为准"}
+    host = str(tunnel.get("server_addr") or "")
+    port = int(tunnel.get("remote_port") or 0)
+    if not host or not (1 <= port <= 65535):
+        return {"mapping_status": "unknown", "mapping_message": "公网地址或端口无效"}
+    try:
+        with socket.create_connection((host, port), timeout=TUNNEL_CONNECT_TIMEOUT):
+            msg = "公网端口可连接"
+            if tunnel.get("last_proxy_at"):
+                msg += f"；frpc 最近注册于 {fmt_time(int(tunnel['last_proxy_at']))}"
+            return {"mapping_status": "online", "mapping_message": msg}
+    except Exception as e:
+        if tunnel.get("last_proxy_at") and now() - int(tunnel.get("last_proxy_at") or 0) <= TUNNEL_STATUS_TTL:
+            return {"mapping_status": "registered", "mapping_message": f"frpc 已注册，但端口探测暂不可达：{e.__class__.__name__}"}
+        return {"mapping_status": "offline", "mapping_message": f"公网端口暂不可连接：{e.__class__.__name__}"}
+
+
+def attach_tunnel_mapping_status(tunnels: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not tunnels:
+        return tunnels
+    max_workers = max(1, min(NODE_CHECK_MAX_WORKERS, len(tunnels)))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(check_tunnel_public_port, t): t for t in tunnels}
+        for fut in as_completed(futures):
+            futures[fut].update(fut.result())
+    return tunnels
 
 
 def init_db() -> None:
@@ -1809,7 +1850,13 @@ class Handler(BaseHTTPRequestHandler):
                     ports = []
                     port_count = conn.execute("SELECT MAX(port)-MIN(port)+1 FROM ports WHERE node_id=?", (user["node_id"],)).fetchone()
                     port_count = (port_count[0] or 0) if port_count else 0
-                tunnel_rows = [row_dict(r) for r in conn.execute("SELECT * FROM tunnels WHERE user_id=? ORDER BY id DESC", (user["id"],))]
+                tunnel_rows = [row_dict(r) for r in conn.execute("""
+                    SELECT t.*, n.server_addr, n.server_port
+                    FROM tunnels t
+                    LEFT JOIN nodes n ON n.id=t.node_id
+                    WHERE t.user_id=? ORDER BY t.id DESC
+                """, (user["id"],))]
+                tunnel_rows = attach_tunnel_mapping_status(tunnel_rows)
                 port_count = len(ports)
                 used_ports = [t["remote_port"] for t in tunnel_rows if t["remote_port"]]
                 # Cap: only send first 200 for rendering, too many would freeze the browser
@@ -2561,6 +2608,8 @@ class Handler(BaseHTTPRequestHandler):
                         requested_secret = str(first_nested_value(content, {"sk", "secret_key", "secretKey", "SecretKey"}) or "")
                         if str(tunnel["secret_key"] or "") and requested_secret != str(tunnel["secret_key"] or ""):
                             reject, reason = True, "secret key does not match panel tunnel"
+                    if not reject and tunnel:
+                        conn.execute("UPDATE tunnels SET last_proxy_at=? WHERE id=?", (now(), tunnel["id"]))
 
             self.send_json({"reject": reject, "reject_reason": reason, "unchange": not reject})
         except Exception as e:
