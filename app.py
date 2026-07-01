@@ -2527,6 +2527,9 @@ class Handler(BaseHTTPRequestHandler):
                     proxy_name = str(first_nested_value(content, {"proxy_name", "proxyName", "ProxyName", "name", "Name"}) or "")
                     expected_prefix = f"{user['username']}."
                     tunnel_name = proxy_name[len(expected_prefix):] if proxy_name.startswith(expected_prefix) else proxy_name
+                    legacy_prefix = f"{user['username']}_"
+                    if tunnel_name.startswith(legacy_prefix):
+                        tunnel_name = tunnel_name[len(legacy_prefix):]
                     remote_port = int_or_none(first_nested_value(content, {"remote_port", "remotePort", "RemotePort"}))
                     proxy_type = str(first_nested_value(content, {"proxy_type", "proxyType", "ProxyType", "type", "Type"}) or "").lower()
                     domains_raw = first_nested_value(content, {"custom_domains", "customDomains", "CustomDomains"})
