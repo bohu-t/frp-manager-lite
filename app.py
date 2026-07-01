@@ -1113,7 +1113,7 @@ def tunnel_config(user: sqlite3.Row, node: sqlite3.Row, tunnels: list[sqlite3.Ro
         lines.extend(
             [
                 "[[proxies]]",
-                f'name = "{user["username"]}_{t["name"]}"',
+                f'name = {json.dumps(str(t["name"]), ensure_ascii=False)}',
                 f'type = "{proxy_type}"',
                 f'localIP = "{t["local_ip"]}"',
                 f'localPort = {t["local_port"]}',
@@ -1121,6 +1121,8 @@ def tunnel_config(user: sqlite3.Row, node: sqlite3.Row, tunnels: list[sqlite3.Ro
         )
         if proxy_type in REMOTE_PORT_PROXY_TYPES:
             lines.append(f'remotePort = {t["remote_port"]}')
+        if proxy_type == "tcpmux":
+            lines.append('multiplexer = "httpconnect"')
         if proxy_type in DOMAIN_PROXY_TYPES and t["custom_domains"]:
             domains = [d.strip() for d in str(t["custom_domains"]).split(",") if d.strip()]
             lines.append("customDomains = [" + ", ".join(json.dumps(d, ensure_ascii=False) for d in domains) + "]")
@@ -2522,15 +2524,34 @@ class Handler(BaseHTTPRequestHandler):
 
                 if not reject and op.lower() == "newproxy":
                     actual_node_id = callback_node_id or user["node_id"]
+                    proxy_name = str(first_nested_value(content, {"proxy_name", "proxyName", "ProxyName", "name", "Name"}) or "")
+                    expected_prefix = f"{user['username']}."
+                    tunnel_name = proxy_name[len(expected_prefix):] if proxy_name.startswith(expected_prefix) else proxy_name
                     remote_port = int_or_none(first_nested_value(content, {"remote_port", "remotePort", "RemotePort"}))
                     proxy_type = str(first_nested_value(content, {"proxy_type", "proxyType", "ProxyType", "type", "Type"}) or "").lower()
-                    if proxy_type in ("", "tcp", "udp"):
+                    domains_raw = first_nested_value(content, {"custom_domains", "customDomains", "CustomDomains"})
+                    if isinstance(domains_raw, list):
+                        requested_domains = sorted([str(d).strip().lower() for d in domains_raw if str(d).strip()])
+                    else:
+                        requested_domains = sorted([d.strip().lower() for d in str(domains_raw or "").replace("\n", ",").split(",") if d.strip()])
+                    tunnel = conn.execute("SELECT * FROM tunnels WHERE node_id=? AND user_id=? AND name=? AND enabled=1", (actual_node_id, user["id"], tunnel_name)).fetchone()
+                    if not tunnel:
+                        reject, reason = True, "proxy is not configured or disabled in panel"
+                    elif proxy_type != str(tunnel["proxy_type"]):
+                        reject, reason = True, "proxy type does not match panel tunnel"
+                    elif proxy_type in REMOTE_PORT_PROXY_TYPES:
                         if remote_port is None:
                             reject, reason = True, "remote port missing"
-                        else:
-                            owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (actual_node_id, user["id"], remote_port)).fetchone()
-                            if not owned:
-                                reject, reason = True, "remote port is not assigned to this user on this node"
+                        elif int(tunnel["remote_port"] or 0) != int(remote_port):
+                            reject, reason = True, "remote port does not match panel tunnel"
+                    elif proxy_type in DOMAIN_PROXY_TYPES:
+                        expected_domains = sorted([d.strip().lower() for d in str(tunnel["custom_domains"] or "").split(",") if d.strip()])
+                        if requested_domains != expected_domains:
+                            reject, reason = True, "custom domains do not match panel tunnel"
+                    elif proxy_type in SECRET_KEY_PROXY_TYPES:
+                        requested_secret = str(first_nested_value(content, {"sk", "secret_key", "secretKey", "SecretKey"}) or "")
+                        if str(tunnel["secret_key"] or "") and requested_secret != str(tunnel["secret_key"] or ""):
+                            reject, reason = True, "secret key does not match panel tunnel"
 
             self.send_json({"reject": reject, "reject_reason": reason, "unchange": not reject})
         except Exception as e:
