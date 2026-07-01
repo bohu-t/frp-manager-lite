@@ -368,7 +368,7 @@ function renderLicenseActivatePublic(){
       <section class="auth-hero card">
         <div class="brand-mark">🔑</div>
         <h2>需要软件授权激活</h2>
-        <p>请联系卖家获取<strong>鉴权服务器地址</strong>和<strong>服务器软件授权码</strong>。只在安装/首次部署时鉴权一次，成功后会在本机保存授权文件；重装后机器指纹一致会自动通过。</p>
+        <p>请联系卖家获取<strong>鉴权密钥</strong>。只在安装/首次部署时鉴权一次，成功后会在本机保存授权文件；重装后机器指纹一致会自动通过。</p>
         <div class="feature-grid">
           <div><b>首次验证</b><span>安装时向鉴权服务器验证</span></div>
           <div><b>本机授权文件</b><span>重装后自动读取校验</span></div>
@@ -380,9 +380,7 @@ function renderLicenseActivatePublic(){
       <section class="auth-card card">
         <div class="section-title"><h2>激活授权</h2><p>${esc(lic.message || '请填写卖家提供的以下信息')}</p></div>
         <form id="licenseActivateForm" class="stack-form">
-          <label>鉴权服务器地址</label>
-          <input name="server_url" placeholder="https://license.你的卖家域名.com" required>
-          <label>服务器软件授权码</label>
+          <label>鉴权密钥</label>
           <input name="license_key" placeholder="FMLD-..." required>
           <p class="row"><button class="wide">激活并绑定</button></p>
         </form>
@@ -411,16 +409,14 @@ function renderLicenseActivate(){
   const lic = softwareLicense || {};
   app.innerHTML = `
     <section class="card">
-      <div class="section-title"><h2>软件授权激活</h2><p>输入卖家给你的服务器软件授权码；只在安装时鉴权一次，成功后生成本机授权文件，重装后自动读取并校验机器指纹。</p></div>
+      <div class="section-title"><h2>软件授权激活</h2><p>输入卖家给你的鉴权密钥；只在安装时鉴权一次，成功后生成本机授权文件，重装后自动读取并校验机器指纹。</p></div>
       <div class="grid">
         <div><div class="label">授权状态</div><p>${esc(lic.message || '待激活')}</p></div>
         <div><div class="label">当前机器指纹</div><p><code class="token">${esc(lic.machine_id || '-')}</code></p><p class="muted small">仅用于本机授权文件校验，客户不需要复制给卖家。</p></div>
         <div><div class="label">授权文件</div><p><code class="token">${esc(lic.license_file || '-')}</code></p><p class="muted small">请随部署数据一起保留；机器指纹一致时重装无需重新鉴权。</p></div>
       </div>
       <form id="licenseActivateForm" class="stack-form">
-        <label>鉴权服务器地址</label>
-        <input name="server_url" placeholder="${esc(lic.server_url || 'https://license.你的卖家域名.com')}">
-        <label>服务器软件授权码</label><input name="license_key" placeholder="FMLD-..." required>
+        <label>鉴权密钥</label><input name="license_key" placeholder="FMLD-..." required>
         <p class="row"><button>激活授权</button><button type="button" class="secondary" onclick="loadMe()">刷新状态</button></p>
       </form>
     </section>`;
