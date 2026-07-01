@@ -416,7 +416,8 @@ async function loadDashboard(){
     show(err.message, true); return;
   }
   currentUser = data.user; softwareLicense = data.software_license || softwareLicense; setNav();
-  if(data.user.role === 'admin'){ loadAdminDashboard(); return; }
+  const isAdmin = data.user.role === 'admin';
+  if(isAdmin){ loadAdminDashboard(); return; }
   const used = new Set(data.tunnels.map(t => t.remote_port));
   const ps = data.port_stats || {};
   
@@ -463,7 +464,7 @@ async function loadDashboard(){
           <div class="remote-port-field"><label>公网端口</label>${remotePortField}</div>
           <div class="domain-field hidden"><label>自定义域名</label><input name="custom_domains" placeholder="app.example.com,api.example.com"></div>
           <div class="secret-field hidden"><label>访问密钥</label><input name="secret_key" placeholder="留空自动生成"></div>
-          <div class="form-actions"><button>创建</button><button type="button" class="secondary" onclick="closeTunnelModal()">关闭</button></div>
+          <div class="form-actions"><button>创建</button></div>
         </form>
         <p class="muted small">HTTP/HTTPS/TCPMUX 需要 frps 已配置 vhostHTTPPort / vhostHTTPSPort / tcpmuxHTTPConnectPort 等对应能力。</p>
       </section>
@@ -944,7 +945,7 @@ async function loadAdminDashboard(auto=false){
           <div class="admin-remote-port-field"><label>公网端口</label><input name="remote_port" type="number" min="1" max="65535" placeholder="留空自动分配"></div>
           <div class="admin-domain-field hidden"><label>自定义域名</label><input name="custom_domains" placeholder="app.example.com"></div>
           <div class="admin-secret-field hidden"><label>访问密钥</label><input name="secret_key" placeholder="留空自动生成"></div>
-          <div class="form-actions"><button>创建隧道并下载</button><button type="button" class="secondary" onclick="downloadAdminFrpcOnly()">只下载现有配置</button><button type="button" class="secondary" onclick="closeAdminFrpcModal()">关闭</button></div>
+          <div class="form-actions"><button>创建隧道并下载</button><button type="button" class="secondary" onclick="downloadAdminFrpcOnly()">只下载现有配置</button></div>
         </form>` : '<p class="muted">暂无普通用户，先创建用户后再下载 frpc 配置。</p>'}
       </section>
     </div>
