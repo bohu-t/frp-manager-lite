@@ -31,6 +31,7 @@ import urllib.parse
 
 APP_NAME = "frp-manager-lite"
 APP_VERSION = os.getenv("FML_PANEL_VERSION", "1.0.0")  # 面板版本，不是 frp 版本
+FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0.66.0"))
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 DB_PATH = Path(os.getenv("FML_DB", BASE_DIR / "data.sqlite3"))
@@ -1261,6 +1262,151 @@ def tunnel_config(user: sqlite3.Row, node: sqlite3.Row, tunnels: list[sqlite3.Ro
     return "\n".join(lines)
 
 
+def frpc_deploy_script(config: str, frp_version: str = FRP_CLIENT_VERSION) -> str:
+    cfg_b64 = base64.b64encode(config.encode("utf-8")).decode("ascii")
+    return f'''#!/usr/bin/env bash
+set -euo pipefail
+
+FRP_VERSION="{frp_version}"
+SERVICE_NAME="frpc"
+DEFAULT_CONFIG="/etc/frp/frpc.toml"
+CONFIG_B64='{cfg_b64}'
+
+log() {{ printf '\\033[1;32m[frpc-deploy]\\033[0m %s\\n' "$*"; }}
+warn() {{ printf '\\033[1;33m[frpc-deploy] WARN:\\033[0m %s\\n' "$*"; }}
+fail() {{ printf '\\033[1;31m[frpc-deploy] ERROR:\\033[0m %s\\n' "$*" >&2; exit 1; }}
+
+[ "$(id -u)" = "0" ] || fail "请用 root 执行：sudo bash deploy-frpc.sh"
+
+need_cmd() {{ command -v "$1" >/dev/null 2>&1; }}
+
+arch="$(uname -m)"
+case "$arch" in
+  x86_64|amd64) FRP_ARCH="amd64" ;;
+  aarch64|arm64) FRP_ARCH="arm64" ;;
+  armv7l|armv7*) FRP_ARCH="arm" ;;
+  armv6l|armv6*) FRP_ARCH="arm" ;;
+  i386|i686) FRP_ARCH="386" ;;
+  *) fail "暂不支持的架构：$arch" ;;
+esac
+
+config_path="$DEFAULT_CONFIG"
+if need_cmd systemctl && systemctl list-unit-files 2>/dev/null | grep -q '^frpc\.service'; then
+  detected="$(systemctl cat frpc 2>/dev/null | sed -nE 's/.*[[:space:]]-c[[:space:]]+([^[:space:]]+).*/\\1/p' | tail -1 || true)"
+  [ -n "$detected" ] && config_path="$detected"
+elif [ -f /etc/init.d/frpc ]; then
+  detected="$(grep -Eo -- '-c[[:space:]]+[^[:space:]]+' /etc/init.d/frpc 2>/dev/null | awk '{{print $2}}' | tail -1 || true)"
+  [ -n "$detected" ] && config_path="$detected"
+fi
+
+install_dir="/usr/local/bin"
+frpc_bin="$install_dir/frpc"
+mkdir -p "$(dirname "$config_path")" "$install_dir"
+
+if [ -f "$config_path" ]; then
+  cp -a "$config_path" "$config_path.bak.$(date +%Y%m%d-%H%M%S)"
+  log "已备份旧配置：$config_path.bak.*"
+fi
+
+if need_cmd base64; then
+  printf '%s' "$CONFIG_B64" | base64 -d > "$config_path"
+else
+  python3 - <<PY > "$config_path"
+import base64
+print(base64.b64decode("$CONFIG_B64").decode(), end="")
+PY
+fi
+chmod 600 "$config_path"
+log "已写入配置：$config_path"
+
+installed=0
+if need_cmd frpc; then
+  current="$(frpc --version 2>/dev/null || true)"
+  if [ "$current" = "$FRP_VERSION" ]; then installed=1; fi
+fi
+if [ -x "$frpc_bin" ]; then
+  current="$($frpc_bin --version 2>/dev/null || true)"
+  if [ "$current" = "$FRP_VERSION" ]; then installed=1; fi
+fi
+
+if [ "$installed" != "1" ]; then
+  need_cmd tar || fail "缺少 tar，请先安装 tar"
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  package="frp_${{FRP_VERSION}}_linux_${{FRP_ARCH}}"
+  url="https://github.com/fatedier/frp/releases/download/v${{FRP_VERSION}}/${{package}}.tar.gz"
+  log "下载 frpc $FRP_VERSION ($FRP_ARCH)"
+  if need_cmd curl; then
+    curl -fL --retry 3 -o "$tmp/frp.tgz" "$url"
+  elif need_cmd wget; then
+    wget -O "$tmp/frp.tgz" "$url"
+  else
+    fail "缺少 curl 或 wget，无法下载 frpc"
+  fi
+  tar -xzf "$tmp/frp.tgz" -C "$tmp"
+  install -m 0755 "$tmp/$package/frpc" "$frpc_bin"
+  log "已安装：$frpc_bin"
+else
+  log "检测到 frpc $FRP_VERSION，跳过下载"
+fi
+
+if need_cmd systemctl; then
+  cat > /etc/systemd/system/frpc.service <<EOF
+[Unit]
+Description=frp client
+Documentation=https://github.com/fatedier/frp
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=$frpc_bin -c $config_path
+Restart=always
+RestartSec=5s
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable frpc >/dev/null
+  systemctl restart frpc
+  sleep 1
+  systemctl --no-pager --full status frpc || true
+  log "frpc systemd 服务已启动"
+elif command -v rc-service >/dev/null 2>&1; then
+  cat > /etc/init.d/frpc <<EOF
+#!/sbin/openrc-run
+name="frpc"
+description="frp client"
+command="$frpc_bin"
+command_args="-c $config_path"
+command_background=true
+pidfile="/run/frpc.pid"
+start_stop_daemon_args="--background --make-pidfile"
+depend() {{ need net; }}
+EOF
+  chmod +x /etc/init.d/frpc
+  rc-update add frpc default >/dev/null 2>&1 || true
+  rc-service frpc restart
+  rc-service frpc status || true
+  log "frpc OpenRC 服务已启动"
+else
+  warn "未检测到 systemd/OpenRC，改用 nohup 后台启动；建议手动配置守护服务。"
+  pkill -f "frpc .* -c $config_path" 2>/dev/null || true
+  nohup "$frpc_bin" -c "$config_path" >/var/log/frpc.log 2>&1 &
+  log "frpc 已后台启动，日志：/var/log/frpc.log"
+fi
+
+log "完成。可用以下命令查看日志："
+if need_cmd journalctl; then
+  echo "  journalctl -u frpc -f"
+else
+  echo "  tail -f /var/log/frpc.log"
+fi
+'''
+
+
 def frps_example_config(node: sqlite3.Row) -> str:
     return f'''# frps.example.toml for {node["region"]} / {node["name"]}
 # frp 0.66+ 配置模板
@@ -1595,6 +1741,8 @@ class Handler(BaseHTTPRequestHandler):
             self.api_get(path)
         elif path == "/config/frpc.toml":
             self.download_frpc()
+        elif path == "/config/deploy-frpc.sh":
+            self.download_frpc_deploy_script()
         elif path == "/config/frps.example.toml":
             self.download_frps_example()
         elif path == "/admin/export/invite-keys.csv":
@@ -1778,8 +1926,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "error": "用户所属节点不存在"}, 400)
             return
         cfg = tunnel_config(target, node, tunnels)
+        script = frpc_deploy_script(cfg)
         audit("admin_frpc_config_download", admin, target["node_id"], None, "", f"target={target['username']}")
-        self.send_json({"ok": True, "filename": f"frpc-{target['username']}.toml", "config": cfg})
+        self.send_json({"ok": True, "filename": f"frpc-{target['username']}.toml", "config": cfg, "script_filename": f"deploy-frpc-{target['username']}.sh", "deploy_script": script})
 
     def admin_tunnel_create_for_user(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
         if not self.require_admin():
@@ -1866,7 +2015,8 @@ class Handler(BaseHTTPRequestHandler):
             for item in created:
                 audit("admin_tunnel_create", admin, target["node_id"], item["remote_port"] or None, item["proxy_type"], f"target={target['username']} {item['name']} -> {item['local_ip']}:{item['local_port']}")
             audit("admin_frpc_config_download", admin, target["node_id"], None, "", f"target={target['username']} after_create={len(created)}")
-            self.send_json({"ok": True, "message": f"已创建 {len(created)} 个隧道并生成 frpc 配置", "created": created, "filename": f"frpc-{target['username']}.toml", "config": cfg})
+            script = frpc_deploy_script(cfg)
+            self.send_json({"ok": True, "message": f"已创建 {len(created)} 个隧道并生成 frpc 配置和部署脚本", "created": created, "filename": f"frpc-{target['username']}.toml", "config": cfg, "script_filename": f"deploy-frpc-{target['username']}.sh", "deploy_script": script})
         except sqlite3.IntegrityError:
             self.send_json({"ok": False, "error": "隧道名称或公网端口已被使用"}, 400)
         except Exception as e:
@@ -2600,6 +2750,23 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "error": "用户所属节点不存在"}, 400)
             return
         self.send_body(tunnel_config(user, node, tunnels).encode(), 200, "application/toml; charset=utf-8", {"Content-Disposition": 'attachment; filename="frpc.toml"'})
+
+    def download_frpc_deploy_script(self) -> None:
+        user = self.require_user()
+        if not user or not self.require_software_license():
+            return
+        if user["role"] == "admin":
+            self.send_json({"ok": False, "error": "管理员请在仪表盘下载模块为普通用户生成部署脚本"}, 403)
+            return
+        with db() as conn:
+            node = conn.execute("SELECT * FROM nodes WHERE id=?", (user["node_id"],)).fetchone()
+            tunnels = conn.execute("SELECT * FROM tunnels WHERE user_id=? ORDER BY id", (user["id"],)).fetchall()
+        if not node:
+            self.send_json({"ok": False, "error": "用户所属节点不存在"}, 400)
+            return
+        cfg = tunnel_config(user, node, tunnels)
+        script = frpc_deploy_script(cfg)
+        self.send_body(script.encode(), 200, "application/x-sh; charset=utf-8", {"Content-Disposition": 'attachment; filename="deploy-frpc.sh"'})
 
     def download_frps_example(self) -> None:
         if not self.require_admin() or not self.require_software_license():

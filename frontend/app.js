@@ -244,7 +244,7 @@ function setNav(){
   nav.innerHTML = `
     ${mainNav}
     ${adminNav}
-    ${licenseRequired || isAdmin ? '' : '<a class="btn" href="/config/frpc.toml">frpc 配置</a>'}
+    ${licenseRequired || isAdmin ? '' : '<a class="btn" href="/config/frpc.toml">frpc 配置</a><a class="btn secondary" href="/config/deploy-frpc.sh">部署脚本</a>'}
     ${themeBtn}
     ${navButton('退出', 'logout', 'danger')}
   `;
@@ -486,7 +486,7 @@ async function loadDashboard(){
   app.innerHTML = `
     <div class="grid">
       <section class="card stat"><div class="label">当前账号</div><div class="num">${esc(data.user.username)}</div><p>地区节点：<b>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</b></p><p>端口上限：${esc(data.user.max_ports)} · 到期：<b>${esc(data.user.expires_text)}</b></p></section>
-      <section class="card stat"><div class="label">FRPS 接入点</div><div class="num" style="font-size:20px">${esc(data.frps.addr)}</div><p>端口：<code>${esc(data.frps.port)}</code></p><p><a class="btn" href="/config/frpc.toml">下载 frpc.toml</a></p><p class="muted small">全协议：${(data.allowed_proxy_types || []).join(' / ')}</p></section>
+      <section class="card stat"><div class="label">FRPS 接入点</div><div class="num" style="font-size:20px">${esc(data.frps.addr)}</div><p>端口：<code>${esc(data.frps.port)}</code></p><p class="row"><a class="btn" href="/config/frpc.toml">下载 frpc.toml</a><a class="btn secondary" href="/config/deploy-frpc.sh">下载部署脚本</a></p><p class="muted small">全协议：${(data.allowed_proxy_types || []).join(' / ')}</p></section>
     </div>
     ${isAdmin ? '' : userFrpsDashboardHtml(data.frps_user_dashboard)}
     ${isAdmin ? '' : `<section class="card"><div class="section-title"><h2>已分配端口</h2><p>绿色表示已经创建隧道</p></div><div class="ports">${portsHtml}</div></section>`}
@@ -946,7 +946,8 @@ function syncAdminFrpcFields(){
 async function downloadAdminFrpc(userId){
   const r = await api('/api/admin/frpc-config', {method:'POST', body:{user_id:userId}});
   downloadText(r.filename || 'frpc.toml', r.config || '');
-  show('frpc 配置已生成，请交给用户部署');
+  if(r.deploy_script) downloadText(r.script_filename || 'deploy-frpc.sh', r.deploy_script || '');
+  show('frpc 配置和部署脚本已生成，请交给用户部署');
 }
 async function downloadAdminFrpcOnly(){
   const form = document.querySelector('#adminFrpcForm');
@@ -961,7 +962,8 @@ async function submitAdminFrpc(e){
   try{
     const r = await api('/api/admin/tunnels/create-for-user', {method:'POST', body});
     if(r.config) downloadText(r.filename || 'frpc.toml', r.config || '');
-    show(r.message || '隧道已创建并下载 frpc 配置');
+    if(r.deploy_script) downloadText(r.script_filename || 'deploy-frpc.sh', r.deploy_script || '');
+    show(r.message || '隧道已创建并下载 frpc 配置和部署脚本');
     adminFrpcDraftRows = [{name:'web', proxy_type:'tcp', local_ip:'127.0.0.1', local_port:'80', remote_port:'', custom_domains:'', secret_key:''}];
     closeAdminFrpcModal();
     await loadAdminDashboard();
@@ -1100,7 +1102,7 @@ async function loadAdminDashboard(auto=false){
     <section class="card"><div class="section-title"><h2>运维入口</h2><p>常用下载和备份操作</p></div>
       <div class="ops-list ops-grid">
         ${setupHtml}
-        <div class="ops-item"><div class="label">下载模块</div><p class="row"><button onclick="openAdminFrpcModal()">下载 frpc 配置</button><a class="btn" href="/admin/backup/full.zip">下载全量备份</a></p><p class="muted small">管理员可先为普通用户配置隧道，再下载 frpc.toml 给用户。</p></div>
+        <div class="ops-item"><div class="label">下载模块</div><p class="row"><button onclick="openAdminFrpcModal()">下载 frpc 配置/部署脚本</button><a class="btn" href="/admin/backup/full.zip">下载全量备份</a></p><p class="muted small">管理员可先为普通用户配置隧道，再下载 frpc.toml 和 deploy-frpc.sh 给用户。</p></div>
         <div class="ops-item"><div class="label">恢复全量备份</div><p class="row"><input id="restoreBackupFile" type="file" accept=".zip,application/zip"><button class="danger" onclick="restoreFullBackup()">恢复备份</button></p><p class="muted small">会要求输入 RESTORE，并在恢复前自动保存当前备份。</p></div>
         <div class="ops-item"><div class="label">业务概况</div><p class="muted small">隧道 ${data.tunnel_count || 0} · 注册密钥 ${data.invite_key_count || 0} · 封禁记录 ${data.ban_count || 0}</p></div>
       </div>
