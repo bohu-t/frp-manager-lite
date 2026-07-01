@@ -8,6 +8,9 @@ let adminDashboardTimer = null;
 let csrfToken = null;
 let colorMode = localStorage.getItem('fml_color_mode') || 'system';
 let adminPages = {users:1, keys:1, nodes:1, risk:1};
+let adminProxyPage = 1;
+let adminProxyPageSize = 20;
+let adminProxyUserFilter = '';
 let nodeHealthPage = 1;
 let tunnelModalOpen = false;
 let adminFrpcModalOpen = false;
@@ -232,6 +235,7 @@ function setNav(){
     navButton('用户', 'admin', 'secondary', 'users'),
     navButton('密钥', 'admin', 'secondary', 'keys'),
     navButton('节点', 'admin', 'secondary', 'nodes'),
+    navButton('映射监控', 'admin-proxies', 'secondary', 'proxies'),
     navButton('风控', 'admin', 'secondary', 'risk'),
   ].join('') : '';
   const mainNav = licenseRequired && isAdmin ? navButton('软件授权', 'license') : (
@@ -267,6 +271,7 @@ nav.addEventListener('click', async (e) => {
     if(action === 'license') return renderLicenseActivate();
     if(action === 'dashboard') return loadDashboard();
     if(action === 'admin-dashboard') return loadAdminDashboard();
+    if(action === 'admin-proxies') return loadAdminProxies();
     if(action === 'admin') return loadAdmin(section);
   }catch(err){
     show(err.message || '操作失败', true);
@@ -551,6 +556,58 @@ function closeTunnelModal(){
 
 async function toggleTunnel(id){ await api('/api/tunnels/toggle', {method:'POST', body:{id}}).then(loadDashboard).catch(e=>show(e.message,true)); }
 async function deleteTunnel(id){ if(confirm('删除这个隧道？')) await api('/api/tunnels/delete', {method:'POST', body:{id}}).then(loadDashboard).catch(e=>show(e.message,true)); }
+
+async function loadAdminProxies(page=adminProxyPage){
+  clearAdminDashboardTimer();
+  hideFlash();
+  currentAdminSection = 'proxies';
+  adminProxyPage = Math.max(1, Number(page || 1));
+  setNav();
+  let data;
+  try{
+    const qs = new URLSearchParams({page:String(adminProxyPage), page_size:String(adminProxyPageSize)});
+    if(adminProxyUserFilter) qs.set('username', adminProxyUserFilter);
+    data = await api('/api/admin/frps-proxies?' + qs.toString());
+  }catch(err){ show(err.message, true); return; }
+  const dash = data.dashboard || {};
+  const total = Number(dash.total || 0);
+  const pageSize = Number(dash.page_size || adminProxyPageSize);
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  adminProxyPage = Math.min(Math.max(1, Number(dash.page || adminProxyPage)), pages);
+  const rows = (dash.proxies || []).map(p => `
+    <tr>
+      <td>${esc(p.username || '-')}</td><td>${esc(p.name || '-')}</td><td>${esc(p.type || '-')}</td>
+      <td>${p.status === 'online' ? '<span class="ok">online</span>' : `<span class="bad">${esc(p.status || 'unknown')}</span>`}</td>
+      <td>${esc(p.remote_port || (Array.isArray(p.custom_domains) ? p.custom_domains.join(', ') : p.custom_domains) || '-')}</td>
+      <td>${esc(p.cur_conns || 0)}</td><td>${fmtBytes(p.today_traffic_in)} / ${fmtBytes(p.today_traffic_out)}</td>
+      <td>${esc(p.client_version || '-')}</td><td>${esc(p.last_start_time || '-')}</td><td>${esc(p.last_close_time || '-')}</td>
+    </tr>`).join('') || emptyRow(10, dash.enabled ? '暂无映射数据' : (dash.error || 'frps dashboard 未接入'));
+  app.innerHTML = `
+    <section class="card dashboard-hero"><div><div class="eyebrow">FRPS MONITOR</div><h2>映射监控</h2><p>管理员全局视图；普通用户页面仍只显示自己的映射。</p></div><div class="hero-actions"><button onclick="loadAdminProxies(${adminProxyPage})">刷新</button><button class="secondary" onclick="loadAdminDashboard()">返回仪表盘</button></div></section>
+    <section class="card admin-toolbar row">
+      <label>用户筛选 <input id="adminProxyUserFilter" value="${esc(adminProxyUserFilter)}" placeholder="留空显示全部"></label>
+      <label>每页显示 <select id="adminProxyPageSize"><option value="10">10</option><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
+      <button id="adminProxyApply">应用</button>
+      <button class="secondary" id="adminProxyClear">清空</button>
+      <span class="muted small">共 ${total} 条 · 第 ${adminProxyPage} / ${pages} 页</span>
+    </section>
+    <section class="card"><table><thead><tr><th>用户</th><th>名称</th><th>类型</th><th>状态</th><th>公网端口/域名</th><th>连接数</th><th>今日入/出</th><th>客户端</th><th>启动时间</th><th>关闭时间</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="pager"><button class="secondary" ${adminProxyPage <= 1 ? 'disabled' : ''} onclick="loadAdminProxies(${adminProxyPage - 1})">上一页</button><span class="muted small">第 ${adminProxyPage} / ${pages} 页</span><button class="secondary" ${adminProxyPage >= pages ? 'disabled' : ''} onclick="loadAdminProxies(${adminProxyPage + 1})">下一页</button></div>
+    </section>`;
+  const sizeSel = document.querySelector('#adminProxyPageSize');
+  if(sizeSel) sizeSel.value = String(adminProxyPageSize);
+  document.querySelector('#adminProxyApply').onclick = () => {
+    adminProxyUserFilter = document.querySelector('#adminProxyUserFilter').value.trim();
+    adminProxyPageSize = Number(document.querySelector('#adminProxyPageSize').value || 20);
+    adminProxyPage = 1;
+    loadAdminProxies(1);
+  };
+  document.querySelector('#adminProxyClear').onclick = () => {
+    adminProxyUserFilter = '';
+    adminProxyPage = 1;
+    loadAdminProxies(1);
+  };
+}
 
 async function loadAdmin(section=currentAdminSection){
   clearAdminDashboardTimer();

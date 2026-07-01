@@ -634,35 +634,64 @@ def frps_dashboard_get(path: str) -> dict[str, Any]:
         return json.loads(resp.read().decode("utf-8"))
 
 
+def normalize_frps_proxy(proxy: dict[str, Any], typ: str) -> dict[str, Any]:
+    name = str(proxy.get("name") or "")
+    username, short_name = (name.split(".", 1) + [""])[:2] if "." in name else ("", name)
+    conf = proxy.get("conf") or {}
+    domains = conf.get("customDomains") or conf.get("custom_domains") or []
+    if isinstance(domains, str):
+        domains = [d.strip() for d in domains.split(",") if d.strip()]
+    return {
+        "username": username,
+        "name": short_name,
+        "full_name": name,
+        "type": typ,
+        "status": proxy.get("status") or "unknown",
+        "remote_port": conf.get("remotePort") or 0,
+        "custom_domains": domains,
+        "cur_conns": proxy.get("curConns") or 0,
+        "today_traffic_in": proxy.get("todayTrafficIn") or 0,
+        "today_traffic_out": proxy.get("todayTrafficOut") or 0,
+        "client_version": proxy.get("clientVersion") or "",
+        "last_start_time": proxy.get("lastStartTime") or "",
+        "last_close_time": proxy.get("lastCloseTime") or "",
+    }
+
+
+def frps_all_proxies() -> list[dict[str, Any]]:
+    proxies: list[dict[str, Any]] = []
+    for typ in PROXY_TYPE_ORDER:
+        data = frps_dashboard_get(f"/api/proxy/{typ}")
+        for p in data.get("proxies") or []:
+            proxies.append(normalize_frps_proxy(p, typ))
+    proxies.sort(key=lambda p: (p.get("username") or "", p.get("type") or "", p.get("name") or ""))
+    return proxies
+
+
 def frps_user_dashboard(username: str) -> dict[str, Any]:
     if not FRPS_DASHBOARD_URL:
         return {"enabled": False, "error": "frps dashboard 未接入面板"}
-    proxies: list[dict[str, Any]] = []
     try:
-        for typ in PROXY_TYPE_ORDER:
-            data = frps_dashboard_get(f"/api/proxy/{typ}")
-            for p in data.get("proxies") or []:
-                name = str(p.get("name") or "")
-                if not name.startswith(f"{username}."):
-                    continue
-                conf = p.get("conf") or {}
-                proxies.append({
-                    "name": name.split(".", 1)[1],
-                    "full_name": name,
-                    "type": typ,
-                    "status": p.get("status") or "unknown",
-                    "remote_port": conf.get("remotePort") or 0,
-                    "custom_domains": conf.get("customDomains") or conf.get("custom_domains") or [],
-                    "cur_conns": p.get("curConns") or 0,
-                    "today_traffic_in": p.get("todayTrafficIn") or 0,
-                    "today_traffic_out": p.get("todayTrafficOut") or 0,
-                    "client_version": p.get("clientVersion") or "",
-                    "last_start_time": p.get("lastStartTime") or "",
-                    "last_close_time": p.get("lastCloseTime") or "",
-                })
+        proxies = [p for p in frps_all_proxies() if p.get("username") == username]
         return {"enabled": True, "proxies": proxies, "total": len(proxies)}
     except Exception as e:
         return {"enabled": False, "error": f"读取 frps dashboard 失败：{e.__class__.__name__}"}
+
+
+def frps_admin_dashboard(page: int = 1, page_size: int = 20, username: str = "") -> dict[str, Any]:
+    if not FRPS_DASHBOARD_URL:
+        return {"enabled": False, "error": "frps dashboard 未接入面板", "proxies": [], "total": 0, "page": page, "page_size": page_size}
+    try:
+        page = max(1, int(page or 1))
+        page_size = min(100, max(10, int(page_size or 20)))
+        proxies = frps_all_proxies()
+        if username:
+            proxies = [p for p in proxies if p.get("username") == username]
+        total = len(proxies)
+        start = (page - 1) * page_size
+        return {"enabled": True, "proxies": proxies[start:start + page_size], "total": total, "page": page, "page_size": page_size, "users": sorted({p.get("username") or "" for p in proxies if p.get("username")})}
+    except Exception as e:
+        return {"enabled": False, "error": f"读取 frps dashboard 失败：{e.__class__.__name__}", "proxies": [], "total": 0, "page": page, "page_size": page_size}
 
 
 def init_db() -> None:
@@ -1970,6 +1999,15 @@ class Handler(BaseHTTPRequestHandler):
                             "expired": bool(k["expires_at"] and k["expires_at"] <= now()), "activated_at": k["activated_at"], "last_check_at": k["last_check_at"], "created_at": k["created_at"],
                         })
             self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "invite_keys": invite_keys, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": (FML_SETUP_KEY if FML_SETUP_KEY else ""), "has_setup_key": bool(FML_SETUP_KEY)})
+            return
+        if path == "/api/admin/frps-proxies":
+            if not self.require_admin():
+                return
+            q = urllib.parse.parse_qs(urlparse(self.path).query)
+            page = int_or_none((q.get("page") or ["1"])[0]) or 1
+            page_size = int_or_none((q.get("page_size") or ["20"])[0]) or 20
+            username = str((q.get("username") or [""])[0]).strip()
+            self.send_json({"ok": True, "dashboard": frps_admin_dashboard(page, page_size, username), "username": username})
             return
         if path == "/api/admin/dashboard":
             if not self.require_admin():
