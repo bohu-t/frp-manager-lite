@@ -143,6 +143,14 @@ function emptyRow(cols, text){
   return `<tr><td colspan="${cols}" class="empty-state">${esc(text)}</td></tr>`;
 }
 
+function tunnelMappingStatusHtml(t){
+  const status = t.mapping_status || (t.enabled ? 'unknown' : 'disabled');
+  const cls = status === 'online' ? 'ok' : (status === 'registered' ? 'warn' : (status === 'disabled' ? 'muted' : 'bad'));
+  const label = status === 'online' ? '已映射' : (status === 'registered' ? '已注册' : (status === 'disabled' ? '已停用' : '未连接'));
+  const message = t.mapping_message || '';
+  return `<span class="${cls}">${label}</span>${message ? `<div class="muted small status-note">${esc(message)}</div>` : ''}`;
+}
+
 function clampPage(page, total, pageSize){
   const pages = Math.max(1, Math.ceil(Number(total || 0) / pageSize));
   return Math.min(Math.max(1, Number(page || 1)), pages);
@@ -441,9 +449,10 @@ async function loadDashboard(){
     <tr>
       <td>${esc(t.name)}</td><td>${esc(t.proxy_type)}</td><td>${esc(t.local_ip)}:${esc(t.local_port)}</td><td>${endpoint}</td>
       <td>${t.enabled ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
-      <td class="actions"><button onclick="toggleTunnel(${t.id})">切换</button><button class="danger" onclick="deleteTunnel(${t.id})">删除</button></td>
+      <td>${tunnelMappingStatusHtml(t)}</td>
+      <td class="actions"><button onclick="loadDashboard()">刷新</button><button onclick="toggleTunnel(${t.id})">切换</button><button class="danger" onclick="deleteTunnel(${t.id})">删除</button></td>
     </tr>`;
-  }).join('') || emptyRow(6, '还没有隧道');
+  }).join('') || emptyRow(7, '还没有隧道');
   const portOptions = data.ports.map(p => `<option value="${p}">${p}${used.has(p) ? '（已用）' : ''}</option>`).join('');
   // Dropdown only for non-admin with reasonable port count; admin or huge lists get number input
   const portCount = ps.total || data.ports.length;
@@ -474,7 +483,7 @@ async function loadDashboard(){
         <p class="muted small">HTTP/HTTPS/TCPMUX 需要 frps 已配置 vhostHTTPPort / vhostHTTPSPort / tcpmuxHTTPConnectPort 等对应能力。</p>
       </section>
     </div>
-    <section class="card"><div class="section-title"><h2>隧道列表</h2><p>修改后请重新下载 frpc.toml</p></div><table><thead><tr><th>名称</th><th>类型</th><th>本地服务</th><th>公网端口/域名/密钥</th><th>状态</th><th>操作</th></tr></thead><tbody>${tunnelRows}</tbody></table></section>`;
+    <section class="card"><div class="section-title"><h2>隧道列表</h2><p>“映射状态”会检测公网端口或 frpc 注册状态；修改后请重新下载 frpc.toml 并重启 frpc。</p></div><table><thead><tr><th>名称</th><th>类型</th><th>本地服务</th><th>公网端口/域名/密钥</th><th>配置状态</th><th>映射状态</th><th>操作</th></tr></thead><tbody>${tunnelRows}</tbody></table></section>`;
   const proxyTypeSelect = document.querySelector('#proxyTypeSelect');
   if(tunnelFormDraft.proxy_type) proxyTypeSelect.value = tunnelFormDraft.proxy_type;
   const tunnelForm = document.querySelector('#tunnelForm');
