@@ -58,7 +58,7 @@ DOMAIN_PROXY_TYPES = {"http", "https", "tcpmux"}
 SECRET_KEY_PROXY_TYPES = {"stcp", "xtcp"}
 PROXY_TYPE_ORDER = ["tcp", "udp", "http", "https", "stcp", "xtcp", "tcpmux"]
 SOFTWARE_LICENSE_SECRET = os.getenv("FML_SOFTWARE_LICENSE_SECRET", "")
-SOFTWARE_LICENSE_SERVER_URL = os.getenv("FML_LICENSE_SERVER_URL", "").rstrip("/")
+SOFTWARE_LICENSE_SERVER_URL = "https://mcp.224130.xyz"
 SOFTWARE_LICENSE_FILE = Path(os.getenv("FML_LICENSE_FILE", DB_PATH.parent / "software-license.json"))
 SOFTWARE_LICENSE_AUTHORITY = os.getenv("FML_LICENSE_AUTHORITY", "0").lower() in {"1", "true", "yes", "on"}
 SOFTWARE_LICENSE_REQUIRED = True  # always enforced — no env-var off switch
@@ -218,7 +218,6 @@ def public_software_license(record: sqlite3.Row | dict[str, Any] | None) -> dict
         "license_key": payload["license_key"],
         "machine_id": fingerprint,
         "bound_machine_id": bound_machine_id,
-        "server_url": str(record_val(record, "server_url", "")),
         "plan": payload["plan"],
         "expires_at": expires_at,
         "expires_text": fmt_time(expires_at),
@@ -923,7 +922,7 @@ def local_license_authority_activate(license_key: str, machine_id: str) -> tuple
 
 
 def call_license_server(license_key: str, machine_id: str, override_url: str = "") -> tuple[bool, str, dict[str, Any] | None]:
-    server_url = (override_url or SOFTWARE_LICENSE_SERVER_URL).rstrip("/")
+    server_url = SOFTWARE_LICENSE_SERVER_URL.rstrip("/")
     if not server_url:
         return local_license_authority_activate(license_key, machine_id)
     body = json.dumps({"license_key": license_key, "machine_id": machine_id, "app": APP_NAME}).encode("utf-8")
@@ -951,10 +950,10 @@ def call_license_server(license_key: str, machine_id: str, override_url: str = "
 def activate_software_license(license_key: str, server_url: str = "") -> tuple[bool, str]:
     license_key = license_key.strip().upper()
     if not license_key:
-        return False, "请输入软件授权码"
-    server_url = server_url.strip()
+        return False, "请输入鉴权密钥"
+    server_url = SOFTWARE_LICENSE_SERVER_URL.rstrip("/")
     machine_id = software_machine_fingerprint()
-    ok, msg, payload = call_license_server(license_key, machine_id, server_url)
+    ok, msg, payload = call_license_server(license_key, machine_id)
     if not ok or not payload:
         return False, msg
     saved_payload = {
@@ -2116,7 +2115,7 @@ class Handler(BaseHTTPRequestHandler):
                         sw_license = current_software_license(conn)
                 except Exception:
                     sw_license = {"licensed": False, "required": True, "message": "未激活软件授权"}
-                self.send_json({"ok": False, "error": "software_license_required", "license": sw_license, "message": "请先激活软件授权码"}, 402)
+                self.send_json({"ok": False, "error": "software_license_required", "license": sw_license, "message": "请先激活鉴权密钥"}, 402)
                 return
 
         if path == "/api/login":
