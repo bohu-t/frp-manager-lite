@@ -151,6 +151,28 @@ function tunnelMappingStatusHtml(t){
   return `<span class="${cls}">${label}</span>${message ? `<div class="muted small status-note">${esc(message)}</div>` : ''}`;
 }
 
+function fmtBytes(n){
+  n = Number(n || 0);
+  if(n < 1024) return `${n} B`;
+  if(n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if(n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function userFrpsDashboardHtml(dash){
+  if(!dash || !dash.enabled){
+    return `<section class="card"><div class="section-title"><h2>我的映射监控</h2><p>${esc(dash?.error || '暂未接入 frps dashboard')}</p></div><p class="muted small">当前仍可通过“映射状态”列查看端口连通性。</p></section>`;
+  }
+  const rows = (dash.proxies || []).map(p => `
+    <tr>
+      <td>${esc(p.name)}</td><td>${esc(p.type)}</td><td>${p.status === 'online' ? '<span class="ok">online</span>' : `<span class="bad">${esc(p.status || 'unknown')}</span>`}</td>
+      <td>${esc(p.remote_port || (Array.isArray(p.custom_domains) ? p.custom_domains.join(', ') : p.custom_domains) || '-')}</td>
+      <td>${esc(p.cur_conns || 0)}</td><td>${fmtBytes(p.today_traffic_in)} / ${fmtBytes(p.today_traffic_out)}</td>
+      <td>${esc(p.client_version || '-')}</td><td>${esc(p.last_start_time || '-')}</td>
+    </tr>`).join('') || emptyRow(8, '当前没有在线映射');
+  return `<section class="card"><div class="section-title"><h2>我的映射监控</h2><p>只显示当前账号的 frps 代理，不会看到其他用户。</p></div><table class="compact-table"><thead><tr><th>名称</th><th>类型</th><th>状态</th><th>公网端口/域名</th><th>连接数</th><th>今日入/出</th><th>客户端</th><th>启动时间</th></tr></thead><tbody>${rows}</tbody></table></section>`;
+}
+
 function clampPage(page, total, pageSize){
   const pages = Math.max(1, Math.ceil(Number(total || 0) / pageSize));
   return Math.min(Math.max(1, Number(page || 1)), pages);
@@ -465,6 +487,7 @@ async function loadDashboard(){
       <section class="card stat"><div class="label">当前账号</div><div class="num">${esc(data.user.username)}</div><p>地区节点：<b>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</b></p><p>端口上限：${esc(data.user.max_ports)} · 到期：<b>${esc(data.user.expires_text)}</b></p></section>
       <section class="card stat"><div class="label">FRPS 接入点</div><div class="num" style="font-size:20px">${esc(data.frps.addr)}</div><p>端口：<code>${esc(data.frps.port)}</code></p><p><a class="btn" href="/config/frpc.toml">下载 frpc.toml</a></p><p class="muted small">全协议：${(data.allowed_proxy_types || []).join(' / ')}</p></section>
     </div>
+    ${isAdmin ? '' : userFrpsDashboardHtml(data.frps_user_dashboard)}
     ${isAdmin ? '' : `<section class="card"><div class="section-title"><h2>已分配端口</h2><p>绿色表示已经创建隧道</p></div><div class="ports">${portsHtml}</div></section>`}
     <section class="card tunnel-config-entry"><div class="section-title"><h2>隧道配置</h2><p>在页面内弹出配置页，填写后创建新隧道。</p></div><button onclick="openTunnelModal()">新建隧道</button><p class="muted small">TCP/UDP 使用分配端口；HTTP/HTTPS/TCPMUX 使用自定义域名；STCP/XTCP 使用密钥。</p></section>
     <div id="tunnelModal" class="modal-backdrop${tunnelModalOpen ? '' : ' hidden'}" role="dialog" aria-modal="true" aria-labelledby="tunnelModalTitle">

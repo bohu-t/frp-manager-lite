@@ -69,6 +69,9 @@ CSRF_TTL = 2 * 3600
 NODE_CHECK_TIMEOUT = float(os.getenv("FML_NODE_CHECK_TIMEOUT", "1.5"))
 NODE_CHECK_MAX_WORKERS = int(os.getenv("FML_NODE_CHECK_MAX_WORKERS", "16"))
 NODE_DASHBOARD_REFRESH_SECONDS = int(os.getenv("FML_NODE_DASHBOARD_REFRESH_SECONDS", "30"))
+FRPS_DASHBOARD_URL = os.getenv("FML_FRPS_DASHBOARD_URL", "").rstrip("/")
+FRPS_DASHBOARD_USER = os.getenv("FML_FRPS_DASHBOARD_USER", "")
+FRPS_DASHBOARD_PASSWORD = os.getenv("FML_FRPS_DASHBOARD_PASSWORD", "")
 TUNNEL_STATUS_TTL = int(os.getenv("FML_TUNNEL_STATUS_TTL", "120"))
 TUNNEL_CONNECT_TIMEOUT = float(os.getenv("FML_TUNNEL_CONNECT_TIMEOUT", "1.5"))
 
@@ -618,6 +621,48 @@ def attach_tunnel_mapping_status(tunnels: list[dict[str, Any]]) -> list[dict[str
         for fut in as_completed(futures):
             futures[fut].update(fut.result())
     return tunnels
+
+
+def frps_dashboard_get(path: str) -> dict[str, Any]:
+    if not FRPS_DASHBOARD_URL:
+        return {}
+    req = urllib.request.Request(f"{FRPS_DASHBOARD_URL}{path}")
+    if FRPS_DASHBOARD_USER or FRPS_DASHBOARD_PASSWORD:
+        raw = f"{FRPS_DASHBOARD_USER}:{FRPS_DASHBOARD_PASSWORD}".encode("utf-8")
+        req.add_header("Authorization", "Basic " + base64.b64encode(raw).decode("ascii"))
+    with urllib.request.urlopen(req, timeout=3) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def frps_user_dashboard(username: str) -> dict[str, Any]:
+    if not FRPS_DASHBOARD_URL:
+        return {"enabled": False, "error": "frps dashboard 未接入面板"}
+    proxies: list[dict[str, Any]] = []
+    try:
+        for typ in PROXY_TYPE_ORDER:
+            data = frps_dashboard_get(f"/api/proxy/{typ}")
+            for p in data.get("proxies") or []:
+                name = str(p.get("name") or "")
+                if not name.startswith(f"{username}."):
+                    continue
+                conf = p.get("conf") or {}
+                proxies.append({
+                    "name": name.split(".", 1)[1],
+                    "full_name": name,
+                    "type": typ,
+                    "status": p.get("status") or "unknown",
+                    "remote_port": conf.get("remotePort") or 0,
+                    "custom_domains": conf.get("customDomains") or conf.get("custom_domains") or [],
+                    "cur_conns": p.get("curConns") or 0,
+                    "today_traffic_in": p.get("todayTrafficIn") or 0,
+                    "today_traffic_out": p.get("todayTrafficOut") or 0,
+                    "client_version": p.get("clientVersion") or "",
+                    "last_start_time": p.get("lastStartTime") or "",
+                    "last_close_time": p.get("lastCloseTime") or "",
+                })
+        return {"enabled": True, "proxies": proxies, "total": len(proxies)}
+    except Exception as e:
+        return {"enabled": False, "error": f"读取 frps dashboard 失败：{e.__class__.__name__}"}
 
 
 def init_db() -> None:
@@ -1862,7 +1907,8 @@ class Handler(BaseHTTPRequestHandler):
                 # Cap: only send first 200 for rendering, too many would freeze the browser
                 ports_display = ports[:200] if port_count > 200 else ports
                 port_stats = {"total": port_count, "used": len(used_ports), "free": port_count - len(used_ports)}
-            self.send_json({"ok": True, "user": public_user(user), "software_license": sw_license, "node": node_public(node) if node else None, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
+                user_dashboard = frps_user_dashboard(user["username"])
+            self.send_json({"ok": True, "user": public_user(user), "software_license": sw_license, "node": node_public(node) if node else None, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
             return
         if path == "/api/admin/overview":
             if not self.require_admin():
