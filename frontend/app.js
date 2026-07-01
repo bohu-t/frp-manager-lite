@@ -12,6 +12,8 @@ let nodeHealthPage = 1;
 let tunnelModalOpen = false;
 let adminFrpcModalOpen = false;
 let tunnelFormDraft = {};
+let adminFrpcUsers = [];
+let adminFrpcDraftRows = [{name:'web', proxy_type:'tcp', local_ip:'127.0.0.1', local_port:'80', remote_port:'', custom_domains:'', secret_key:''}];
 const ADMIN_PAGE_SIZE = 10;
 const systemDarkQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
@@ -784,13 +786,77 @@ function closeAdminFrpcModal(){
   const modal = document.querySelector('#adminFrpcModal');
   if(modal) modal.classList.add('hidden');
 }
+function selectedAdminFrpcUser(){
+  const form = document.querySelector('#adminFrpcForm');
+  const userId = Number(form && form.user_id ? form.user_id.value : 0);
+  return adminFrpcUsers.find(u => Number(u.id) === userId) || adminFrpcUsers[0] || null;
+}
+function adminFrpcPortOptions(value=''){
+  const user = selectedAdminFrpcUser();
+  const assigned = user && Array.isArray(user.assigned_ports) ? user.assigned_ports : [];
+  const used = new Set(user && Array.isArray(user.used_remote_ports) ? user.used_remote_ports.map(Number) : []);
+  const valueNum = Number(value || 0);
+  const options = assigned.map(p => {
+    const n = Number(p);
+    const disabled = used.has(n) && n !== valueNum;
+    return `<option value="${esc(n)}" ${String(n)===String(value)?'selected':''} ${disabled?'disabled':''}>${esc(n)}${disabled?'（已用）':''}</option>`;
+  }).join('');
+  return `<option value="">自动选择可用端口</option>${options}`;
+}
+function saveAdminFrpcDraft(){
+  const form = document.querySelector('#adminFrpcForm');
+  if(!form) return;
+  adminFrpcDraftRows = [...form.querySelectorAll('.admin-frpc-row')].map(row => ({
+    name: row.querySelector('[name="name"]')?.value || '',
+    proxy_type: row.querySelector('[name="proxy_type"]')?.value || 'tcp',
+    local_ip: row.querySelector('[name="local_ip"]')?.value || '127.0.0.1',
+    local_port: row.querySelector('[name="local_port"]')?.value || '80',
+    remote_port: row.querySelector('[name="remote_port"]')?.value || '',
+    custom_domains: row.querySelector('[name="custom_domains"]')?.value || '',
+    secret_key: row.querySelector('[name="secret_key"]')?.value || '',
+  }));
+}
+function adminFrpcRowHtml(row={}, idx=0){
+  const type = row.proxy_type || 'tcp';
+  return `<div class="admin-frpc-row" data-index="${idx}">
+    <div class="section-title mini-title"><h3>隧道 ${idx + 1}</h3><p>${idx === 0 ? '默认第一条，可继续添加更多隧道' : `<button type="button" class="secondary" onclick="removeAdminFrpcRow(${idx})">删除</button>`}</p></div>
+    <div class="grid">
+      <div><label>隧道名称</label><input name="name" value="${esc(row.name || `web${idx ? idx + 1 : ''}`)}" required></div>
+      <div><label>类型</label><select name="proxy_type" onchange="syncAdminFrpcFields()">${(window.adminProxyTypeOptions || ['tcp','udp','http','https','stcp','xtcp','tcpmux']).map(t => `<option value="${esc(t)}" ${t===type?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
+      <div><label>本地 IP</label><input name="local_ip" value="${esc(row.local_ip || '127.0.0.1')}" required></div>
+      <div><label>本地端口</label><input name="local_port" type="number" min="1" max="65535" value="${esc(row.local_port || '80')}" required></div>
+      <div class="admin-remote-port-field"><label>公网端口</label><select name="remote_port">${adminFrpcPortOptions(row.remote_port || '')}</select></div>
+      <div class="admin-domain-field hidden"><label>自定义域名</label><input name="custom_domains" value="${esc(row.custom_domains || '')}" placeholder="app.example.com"></div>
+      <div class="admin-secret-field hidden"><label>访问密钥</label><input name="secret_key" value="${esc(row.secret_key || '')}" placeholder="留空自动生成"></div>
+    </div>
+  </div>`;
+}
+function renderAdminFrpcRows(){
+  const box = document.querySelector('#adminFrpcRows');
+  if(!box) return;
+  box.innerHTML = adminFrpcDraftRows.map(adminFrpcRowHtml).join('');
+  syncAdminFrpcFields();
+}
+function addAdminFrpcRow(){
+  saveAdminFrpcDraft();
+  adminFrpcDraftRows.push({name:`web${adminFrpcDraftRows.length + 1}`, proxy_type:'tcp', local_ip:'127.0.0.1', local_port:'80', remote_port:'', custom_domains:'', secret_key:''});
+  renderAdminFrpcRows();
+}
+function removeAdminFrpcRow(idx){
+  saveAdminFrpcDraft();
+  if(adminFrpcDraftRows.length <= 1) return;
+  adminFrpcDraftRows.splice(idx, 1);
+  renderAdminFrpcRows();
+}
 function syncAdminFrpcFields(){
   const form = document.querySelector('#adminFrpcForm');
   if(!form) return;
-  const type = form.proxy_type.value;
-  form.querySelector('.admin-remote-port-field').classList.toggle('hidden', !['tcp','udp'].includes(type));
-  form.querySelector('.admin-domain-field').classList.toggle('hidden', !['http','https','tcpmux'].includes(type));
-  form.querySelector('.admin-secret-field').classList.toggle('hidden', !['stcp','xtcp'].includes(type));
+  form.querySelectorAll('.admin-frpc-row').forEach(row => {
+    const type = row.querySelector('[name="proxy_type"]').value;
+    row.querySelector('.admin-remote-port-field').classList.toggle('hidden', !['tcp','udp'].includes(type));
+    row.querySelector('.admin-domain-field').classList.toggle('hidden', !['http','https','tcpmux'].includes(type));
+    row.querySelector('.admin-secret-field').classList.toggle('hidden', !['stcp','xtcp'].includes(type));
+  });
 }
 async function downloadAdminFrpc(userId){
   const r = await api('/api/admin/frpc-config', {method:'POST', body:{user_id:userId}});
@@ -805,12 +871,15 @@ async function downloadAdminFrpcOnly(){
 async function submitAdminFrpc(e){
   e.preventDefault();
   const form = e.target;
-  const body = Object.fromEntries(new FormData(form));
+  saveAdminFrpcDraft();
+  const body = {user_id: Number(form.user_id.value || 0), tunnels: adminFrpcDraftRows};
   try{
     const r = await api('/api/admin/tunnels/create-for-user', {method:'POST', body});
-    show(r.message || '隧道已创建');
-    await downloadAdminFrpc(Number(body.user_id || 0));
+    if(r.config) downloadText(r.filename || 'frpc.toml', r.config || '');
+    show(r.message || '隧道已创建并下载 frpc 配置');
+    adminFrpcDraftRows = [{name:'web', proxy_type:'tcp', local_ip:'127.0.0.1', local_port:'80', remote_port:'', custom_domains:'', secret_key:''}];
     closeAdminFrpcModal();
+    await loadAdminDashboard();
   }catch(err){ show(err.message, true); }
 }
 function fileToDataUrl(file){
@@ -917,7 +986,9 @@ async function loadAdminDashboard(auto=false){
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
   const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
   const frpcUsers = data.frpc_users || [];
-  const frpcUserOptions = frpcUsers.map(u => `<option value="${u.id}">${esc(u.username)} · ${esc(u.node_region || '-')} / ${esc(u.node_name || '-')} · 隧道 ${u.tunnel_count || 0}</option>`).join('');
+  adminFrpcUsers = frpcUsers;
+  window.adminProxyTypeOptions = data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux'];
+  const frpcUserOptions = frpcUsers.map(u => `<option value="${u.id}">${esc(u.username)} · ${esc(u.node_region || '-')} / ${esc(u.node_name || '-')} · 端口 ${u.port_count || 0} · 可用 ${(u.available_ports || []).length} · 隧道 ${u.tunnel_count || 0}</option>`).join('');
   const proxyTypeOptions = (data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux']).map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
   app.innerHTML = `
     <section class="dashboard-hero card">
@@ -952,17 +1023,11 @@ async function loadAdminDashboard(auto=false){
 
     <div id="adminFrpcModal" class="modal-backdrop${adminFrpcModalOpen ? '' : ' hidden'}" role="dialog" aria-modal="true" aria-labelledby="adminFrpcModalTitle">
       <section class="modal-page card admin-frpc-modal">
-        <div class="section-title modal-title"><div><h2 id="adminFrpcModalTitle">为用户配置并下载 frpc</h2><p>选择普通用户，填写本地服务；TCP/UDP 端口留空时自动使用该用户可用端口。</p></div><button type="button" class="secondary modal-close" onclick="closeAdminFrpcModal()" aria-label="关闭 frpc 配置">关闭 ×</button></div>
-        ${frpcUserOptions ? `<form id="adminFrpcForm" class="grid">
-          <div><label>用户</label><select name="user_id" required>${frpcUserOptions}</select></div>
-          <div><label>隧道名称</label><input name="name" value="web" required></div>
-          <div><label>类型</label><select name="proxy_type" onchange="syncAdminFrpcFields()">${proxyTypeOptions}</select></div>
-          <div><label>本地 IP</label><input name="local_ip" value="127.0.0.1" required></div>
-          <div><label>本地端口</label><input name="local_port" type="number" min="1" max="65535" value="80" required></div>
-          <div class="admin-remote-port-field"><label>公网端口</label><input name="remote_port" type="number" min="1" max="65535" placeholder="留空自动分配"></div>
-          <div class="admin-domain-field hidden"><label>自定义域名</label><input name="custom_domains" placeholder="app.example.com"></div>
-          <div class="admin-secret-field hidden"><label>访问密钥</label><input name="secret_key" placeholder="留空自动生成"></div>
-          <div class="form-actions"><button>创建隧道并下载</button><button type="button" class="secondary" onclick="downloadAdminFrpcOnly()">只下载现有配置</button></div>
+        <div class="section-title modal-title"><div><h2 id="adminFrpcModalTitle">为用户配置并下载 frpc</h2><p>选择普通用户，可一次添加多条隧道；TCP/UDP 公网端口从该用户已分配端口中选择。</p></div><button type="button" class="secondary modal-close" onclick="closeAdminFrpcModal()" aria-label="关闭 frpc 配置">关闭 ×</button></div>
+        ${frpcUserOptions ? `<form id="adminFrpcForm">
+          <div class="grid"><div><label>用户</label><select name="user_id" required onchange="saveAdminFrpcDraft(); renderAdminFrpcRows();">${frpcUserOptions}</select></div></div>
+          <div id="adminFrpcRows" class="admin-frpc-rows"></div>
+          <div class="form-actions"><button>创建隧道并下载</button><button type="button" class="secondary" onclick="addAdminFrpcRow()">添加一条隧道</button><button type="button" class="secondary" onclick="downloadAdminFrpcOnly()">只下载现有配置</button></div>
         </form>` : '<p class="muted">暂无普通用户，先创建用户后再下载 frpc 配置。</p>'}
       </section>
     </div>
@@ -986,7 +1051,7 @@ async function loadAdminDashboard(auto=false){
   const r2Form = document.querySelector('#r2ConfigForm');
   if(r2Form) r2Form.onsubmit = saveR2Config;
   const adminFrpcForm = document.querySelector('#adminFrpcForm');
-  if(adminFrpcForm){ adminFrpcForm.onsubmit = submitAdminFrpc; syncAdminFrpcFields(); }
+  if(adminFrpcForm){ adminFrpcForm.onsubmit = submitAdminFrpc; renderAdminFrpcRows(); }
   adminDashboardTimer = setTimeout(() => loadAdminDashboard(true), refreshSeconds * 1000);
 }
 
