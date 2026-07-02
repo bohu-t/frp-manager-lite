@@ -112,6 +112,20 @@ function downloadText(filename, text){
   setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
 }
 
+function absoluteUrl(path){
+  return new URL(path, window.location.origin).toString();
+}
+
+function userDeployScriptUrl(user){
+  if(!user || !user.token) return '';
+  return absoluteUrl(`/config/deploy-frpc.sh?token=${encodeURIComponent(user.token)}`);
+}
+
+function userDeployScriptCommand(user){
+  const url = userDeployScriptUrl(user);
+  return url ? `curl -fsSL '${url}' | sudo bash` : '';
+}
+
 function regionBadges(nodes){
   const regions = [...new Set((nodes || []).filter(n => n.active).map(n => n.region).filter(Boolean))].slice(0, 8);
   if(!regions.length) return '<span>多地区节点</span>';
@@ -160,6 +174,19 @@ function fmtBytes(n){
   if(n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   if(n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function userDeployScriptAddressHtml(user){
+  const url = userDeployScriptUrl(user);
+  const cmd = userDeployScriptCommand(user);
+  if(!url) return '';
+  return `<section class="card">
+    <div class="section-title"><h2>部署脚本地址（可选）</h2><p>适合在客户服务器上直接拉取部署；这个地址包含你的账号令牌，请不要公开转发。</p></div>
+    <div class="stack-form">
+      <div><div class="label">脚本地址</div><div class="row"><code class="token">${esc(url)}</code><button type="button" class="secondary" onclick="copyText(userDeployScriptUrl(currentUser))">复制地址</button></div></div>
+      <div><div class="label">一键部署命令</div><div class="row"><code class="token">${esc(cmd)}</code><button type="button" class="secondary" onclick="copyText(userDeployScriptCommand(currentUser))">复制命令</button></div></div>
+    </div>
+  </section>`;
 }
 
 function userFrpsDashboardHtml(dash){
@@ -488,6 +515,7 @@ async function loadDashboard(){
       <section class="card stat"><div class="label">当前账号</div><div class="num">${esc(data.user.username)}</div><p>地区节点：<b>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</b></p><p>端口上限：${esc(data.user.max_ports)} · 到期：<b>${esc(data.user.expires_text)}</b></p></section>
       <section class="card stat"><div class="label">FRPS 接入点</div><div class="num" style="font-size:20px">${esc(data.frps.addr)}</div><p>端口：<code>${esc(data.frps.port)}</code></p><p class="row"><a class="btn" href="/config/frpc.toml">下载 frpc.toml</a><a class="btn secondary" href="/config/deploy-frpc.sh">下载部署脚本</a></p><p class="muted small">全协议：${(data.allowed_proxy_types || []).join(' / ')}</p></section>
     </div>
+    ${isAdmin ? '' : userDeployScriptAddressHtml(data.user)}
     ${isAdmin ? '' : userFrpsDashboardHtml(data.frps_user_dashboard)}
     ${isAdmin ? '' : `<section class="card"><div class="section-title"><h2>已分配端口</h2><p>绿色表示已经创建隧道</p></div><div class="ports">${portsHtml}</div></section>`}
     <section class="card tunnel-config-entry"><div class="section-title"><h2>隧道配置</h2><p>在页面内弹出配置页，填写后创建新隧道。</p></div><button onclick="openTunnelModal()">新建隧道</button><p class="muted small">TCP/UDP 使用分配端口；HTTP/HTTPS/TCPMUX 使用自定义域名；STCP/XTCP 使用密钥。</p></section>

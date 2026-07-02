@@ -1174,6 +1174,21 @@ def session_user(cookie_header: str | None) -> sqlite3.Row | None:
         ).fetchone()
 
 
+def download_token_user(token: str) -> sqlite3.Row | None:
+    """Resolve a normal user by their long-lived panel token for script URL downloads."""
+    token = str(token or "").strip()
+    if not token:
+        return None
+    with db() as conn:
+        return conn.execute(
+            """
+            SELECT * FROM users
+            WHERE token=? AND role!='admin' AND active=1 AND (expires_at=0 OR expires_at>?)
+            """,
+            (token, now()),
+        ).fetchone()
+
+
 def clear_session(cookie_header: str | None) -> None:
     cookie = SimpleCookie(cookie_header)
     morsel = cookie.get("fml_session")
@@ -2752,8 +2767,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_body(tunnel_config(user, node, tunnels).encode(), 200, "application/toml; charset=utf-8", {"Content-Disposition": 'attachment; filename="frpc.toml"'})
 
     def download_frpc_deploy_script(self) -> None:
-        user = self.require_user()
-        if not user or not self.require_software_license():
+        # Browser downloads use the normal login session. Server-side curl/wget can use
+        # /config/deploy-frpc.sh?token=<user panel token>, which is shown only to the
+        # logged-in normal user as an optional deployment script address.
+        user = self.current_user
+        if not user:
+            q = urllib.parse.parse_qs(urlparse(self.path).query)
+            user = download_token_user(str((q.get("token") or [""])[0]))
+        if not user:
+            self.send_json({"ok": False, "error": "unauthorized"}, 401)
+            return
+        if not self.require_software_license():
             return
         if user["role"] == "admin":
             self.send_json({"ok": False, "error": "管理员请在仪表盘下载模块为普通用户生成部署脚本"}, 403)
