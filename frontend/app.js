@@ -176,17 +176,37 @@ function fmtBytes(n){
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
-function userDeployScriptAddressHtml(user){
+function userDeployScriptAddressHtml(user, opts={}){
   const url = userDeployScriptUrl(user);
   const cmd = userDeployScriptCommand(user);
   if(!url) return '';
-  return `<section class="card">
-    <div class="section-title"><h2>部署脚本地址（可选）</h2><p>适合在客户服务器上直接拉取部署；这个地址包含你的账号令牌，请不要公开转发。</p></div>
-    <div class="stack-form">
-      <div><div class="label">脚本地址</div><div class="row"><code class="token">${esc(url)}</code><button type="button" class="secondary" onclick="copyText(userDeployScriptUrl(currentUser))">复制地址</button></div></div>
-      <div><div class="label">一键部署命令</div><div class="row"><code class="token">${esc(cmd)}</code><button type="button" class="secondary" onclick="copyText(userDeployScriptCommand(currentUser))">复制命令</button></div></div>
+  const scope = opts.scope || 'current';
+  const copyUrl = scope === 'admin' ? `copyText(userDeployScriptUrl(selectedAdminFrpcUser()))` : `copyText(userDeployScriptUrl(currentUser))`;
+  const copyCmd = scope === 'admin' ? `copyText(userDeployScriptCommand(selectedAdminFrpcUser()))` : `copyText(userDeployScriptCommand(currentUser))`;
+  const title = opts.title || '部署脚本地址（可选）';
+  const desc = opts.desc || '适合在客户服务器上直接拉取部署；这个地址包含账号令牌，请不要公开转发。';
+  return `<section class="card deploy-script-card">
+    <div class="section-title"><h2>${esc(title)}</h2><p>${esc(desc)}</p></div>
+    <div class="deploy-script-grid">
+      <div class="deploy-script-item"><div class="label">脚本地址</div><div class="copy-line"><code class="token deploy-token">${esc(url)}</code><button type="button" class="secondary" onclick="${copyUrl}">复制地址</button></div></div>
+      <div class="deploy-script-item"><div class="label">一键部署命令</div><div class="copy-line"><code class="token deploy-token">${esc(cmd)}</code><button type="button" class="secondary" onclick="${copyCmd}">复制命令</button></div></div>
     </div>
   </section>`;
+}
+
+function adminDeployScriptAddressHtml(){
+  const user = selectedAdminFrpcUser();
+  if(!user) return '<p class="muted small">请选择普通用户后显示部署脚本地址。</p>';
+  return userDeployScriptAddressHtml(user, {
+    scope: 'admin',
+    title: `用户 ${user.username || ''} 的部署脚本地址`,
+    desc: '给该普通用户复制脚本地址或一键命令；地址包含用户令牌，请只发给对应客户。',
+  });
+}
+
+function renderAdminDeployScriptAddress(){
+  const box = document.querySelector('#adminDeployScriptAddress');
+  if(box) box.innerHTML = adminDeployScriptAddressHtml();
 }
 
 function userFrpsDashboardHtml(dash){
@@ -1140,7 +1160,8 @@ async function loadAdminDashboard(auto=false){
       <section class="modal-page card admin-frpc-modal">
         <div class="section-title modal-title"><div><h2 id="adminFrpcModalTitle">为用户配置并下载 frpc</h2><p>选择普通用户，可一次添加多条隧道；TCP/UDP 公网端口从该用户已分配端口中选择。</p></div><button type="button" class="secondary modal-close" onclick="closeAdminFrpcModal()" aria-label="关闭 frpc 配置">关闭 ×</button></div>
         ${frpcUserOptions ? `<form id="adminFrpcForm">
-          <div class="grid"><div><label>用户</label><select name="user_id" required onchange="saveAdminFrpcDraft(); renderAdminFrpcRows();">${frpcUserOptions}</select></div></div>
+          <div class="grid"><div><label>用户</label><select name="user_id" required onchange="saveAdminFrpcDraft(); renderAdminFrpcRows(); renderAdminDeployScriptAddress();">${frpcUserOptions}</select></div></div>
+          <div id="adminDeployScriptAddress">${adminDeployScriptAddressHtml()}</div>
           <div id="adminFrpcRows" class="admin-frpc-rows"></div>
           <div class="form-actions"><button>创建隧道并下载</button><button type="button" class="secondary" onclick="addAdminFrpcRow()">添加一条隧道</button><button type="button" class="secondary" onclick="downloadAdminFrpcOnly()">只下载现有配置</button></div>
         </form>` : '<p class="muted">暂无普通用户，先创建用户后再下载 frpc 配置。</p>'}
@@ -1166,7 +1187,7 @@ async function loadAdminDashboard(auto=false){
   const r2Form = document.querySelector('#r2ConfigForm');
   if(r2Form) r2Form.onsubmit = saveR2Config;
   const adminFrpcForm = document.querySelector('#adminFrpcForm');
-  if(adminFrpcForm){ adminFrpcForm.onsubmit = submitAdminFrpc; renderAdminFrpcRows(); }
+  if(adminFrpcForm){ adminFrpcForm.onsubmit = submitAdminFrpc; renderAdminDeployScriptAddress(); renderAdminFrpcRows(); }
   adminDashboardTimer = setTimeout(() => loadAdminDashboard(true), refreshSeconds * 1000);
 }
 
