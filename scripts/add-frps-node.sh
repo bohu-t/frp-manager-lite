@@ -277,7 +277,7 @@ webServer.user = "${FRPS_DASHBOARD_USER}"
 webServer.password = "${FRPS_DASHBOARD_PWD}"
 
 # Prometheus 监控指标
-enablePrometheus = true
+webServer.enablePrometheus = true
 EOF
 
 log "配置文件已生成：${FRPS_DIR}/frps.toml"

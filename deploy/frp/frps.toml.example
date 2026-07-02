@@ -28,7 +28,7 @@ webServer.user = "admin"
 webServer.password = "CHANGE_THIS_FRPS_DASHBOARD_PASSWORD"
 
 # Prometheus 监控指标（/metrics 端点）
-enablePrometheus = true
+webServer.enablePrometheus = true
 
 # Production-required authorization hook. It prevents users from bypassing the panel
 # with hand-written frpc configs and stealing ports.

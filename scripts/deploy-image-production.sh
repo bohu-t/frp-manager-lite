@@ -418,7 +418,7 @@ webServer.port = ${FRPS_WEB_PORT}
 webServer.user = "admin"
 webServer.password = "${FRPS_WEB_PASSWORD}"
 
-enablePrometheus = true
+webServer.enablePrometheus = true
 
 [[httpPlugins]]
 name = "frp-manager-lite-auth"
