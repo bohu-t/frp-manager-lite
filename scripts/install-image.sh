@@ -15,6 +15,19 @@ need_cmd() {
   }
 }
 
+detect_system_arch() {
+  SYSTEM_ARCH="$(uname -m)"
+  case "${SYSTEM_ARCH}" in
+    x86_64|amd64) IMAGE_ARCH="amd64" ;;
+    aarch64|arm64) IMAGE_ARCH="arm64" ;;
+    *)
+      echo "不支持的 CPU 架构：${SYSTEM_ARCH}（镜像部署脚本当前支持 x86_64/amd64、arm64/aarch64）" >&2
+      exit 1
+      ;;
+  esac
+  echo "系统架构检测通过：${SYSTEM_ARCH} → linux/${IMAGE_ARCH}"
+}
+
 rand_alnum() {
   local n="${1:-24}"
   set +o pipefail
@@ -24,6 +37,7 @@ rand_alnum() {
   printf '%s' "$v"
 }
 
+detect_system_arch
 need_cmd docker
 if ! docker compose version >/dev/null 2>&1; then
   echo "缺少 Docker Compose 插件：docker compose"
