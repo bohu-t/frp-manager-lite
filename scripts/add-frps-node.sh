@@ -26,6 +26,37 @@ log()  { echo -e "${GREEN}✅${NC} $*"; }
 warn() { echo -e "${YELLOW}⚠️${NC}  $*"; }
 err()  { echo -e "${RED}❌${NC} $*"; exit 1; }
 
+# `curl ... | sudo bash` 会把 stdin 用作脚本内容；交互输入必须从控制终端读取，
+# 否则 read 会把后续脚本源码当成用户输入。
+if [[ -r /dev/tty ]]; then
+  exec 3</dev/tty
+else
+  exec 3<&0
+fi
+
+ask() {
+  local __var="$1"
+  local __prompt="$2"
+  local __value=""
+  if [[ ! -t 3 ]]; then
+    err "当前没有可交互终端，请改用环境变量传参或在终端中运行脚本"
+  fi
+  read -r -p "$__prompt" __value <&3
+  printf -v "$__var" '%s' "$__value"
+}
+
+ask_secret() {
+  local __var="$1"
+  local __prompt="$2"
+  local __value=""
+  if [[ ! -t 3 ]]; then
+    err "当前没有可交互终端，请改用环境变量传参或在终端中运行脚本"
+  fi
+  read -r -s -p "$__prompt" __value <&3
+  echo
+  printf -v "$__var" '%s' "$__value"
+}
+
 url_encode() {
   python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
 }
@@ -57,13 +88,12 @@ echo -e "${CYAN}━━━ 第 1 步：连接你的面板 ━━━${NC}"
 echo ''
 
 while [[ -z "$PANEL_URL" ]]; do
-  read -r -p "  面板地址（例如 https://panel.example.com）：" PANEL_URL
+  ask PANEL_URL "  面板地址（例如 https://panel.example.com）："
 done
 if [[ "$PANEL_URL" =~ /$ ]]; then PANEL_URL="${PANEL_URL%/}"; fi
 
 while [[ -z "$SETUP_KEY" ]]; do
-  read -r -s -p "  FML_SETUP_KEY（在面板后台 → 仪表盘 → 运维入口查看，不回显）：" SETUP_KEY
-  echo
+  ask_secret SETUP_KEY "  FML_SETUP_KEY（在面板后台 → 仪表盘 → 运维入口查看，不回显）："
   SETUP_KEY="$(echo "$SETUP_KEY" | tr -d '[:space:]')"
   if [[ ${#SETUP_KEY} -lt 8 ]]; then
     echo '  ❌ 密钥太短，至少 8 位'
@@ -93,15 +123,15 @@ if [[ -z "$SERVER_IP" ]]; then
 fi
 
 while [[ -z "$NODE_NAME" ]]; do
-  read -r -p "  节点名称（英文，如 hk-01、jp-tokyo-01）：" NODE_NAME
+  ask NODE_NAME "  节点名称（英文，如 hk-01、jp-tokyo-01）："
 done
 
 while [[ -z "$REGION" ]]; do
-  read -r -p "  地区名称（如 香港、东京、洛杉矶）：" REGION
+  ask REGION "  地区名称（如 香港、东京、洛杉矶）："
 done
 
 while [[ -z "$SERVER_IP" ]]; do
-  read -r -p "  本机公网 IP：" SERVER_IP
+  ask SERVER_IP "  本机公网 IP："
 done
 echo -e "  → 公网 IP：${GREEN}${SERVER_IP}${NC}"
 
@@ -112,13 +142,12 @@ echo -e "${CYAN}━━━ 第 3 步：端口配置 ━━━${NC}"
 echo ''
 
 while [[ -z "$FRPS_BIND_PORT" ]] || ! [[ "$FRPS_BIND_PORT" =~ ^[0-9]+$ ]]; do
-  read -r -p "  frps 通信端口 [7000]：" FRPS_BIND_PORT
+  ask FRPS_BIND_PORT "  frps 通信端口 [7000]："
   FRPS_BIND_PORT="${FRPS_BIND_PORT:-7000}"
 done
 
 while [[ -z "$FRPS_TOKEN" ]]; do
-  read -r -s -p "  frps 鉴权 token（至少 6 位，不回显）：" FRPS_TOKEN
-  echo
+  ask_secret FRPS_TOKEN "  frps 鉴权 token（至少 6 位，不回显）："
   if [[ ${#FRPS_TOKEN} -lt 6 ]]; then
     echo '  ❌ token 至少 6 位'
     FRPS_TOKEN=""
@@ -126,22 +155,21 @@ while [[ -z "$FRPS_TOKEN" ]]; do
 done
 
 while [[ -z "$PORT_START" ]] || ! [[ "$PORT_START" =~ ^[0-9]+$ ]]; do
-  read -r -p "  用户端口池起始（例如 30000）：" PORT_START
+  ask PORT_START "  用户端口池起始（例如 30000）："
 done
 
 while [[ -z "$PORT_END" ]] || ! [[ "$PORT_END" =~ ^[0-9]+$ ]]; do
-  read -r -p "  用户端口池结束（例如 30199）：" PORT_END
+  ask PORT_END "  用户端口池结束（例如 30199）："
 done
 
 if [[ $PORT_END -le $PORT_START ]]; then
   err "端口池范围不合法：${PORT_START}-${PORT_END}，结束必须大于起始"
 fi
 
-if [[ $((PORT_END - PORT_START + 1)) -gt 20000 ]]; then
+PORT_COUNT=$((PORT_END - PORT_START + 1))
+if [[ $PORT_COUNT -gt 20000 ]]; then
   err "端口池太大（${PORT_COUNT} 个），单节点最多 20000 个端口"
 fi
-
-PORT_COUNT=$((PORT_END - PORT_START + 1))
 echo -e "  → 端口池：${PORT_START}-${PORT_END}（共 ${PORT_COUNT} 个）"
 
 # ── 第 4 步：注册到面板 ────────────────────────────────────
@@ -150,7 +178,6 @@ echo ''
 echo -e "${CYAN}━━━ 第 4 步：注册到面板 ━━━${NC}"
 log "正在注册节点 ${NODE_NAME}（${REGION}）…"
 
-# Debug: show the JSON payload
 PAYLOAD="$(python3 -c "
 import json, sys
 print(json.dumps({
@@ -164,7 +191,6 @@ print(json.dumps({
     'port_end': int(sys.argv[8])
 }, ensure_ascii=False))
 " "$SETUP_KEY" "$NODE_NAME" "$REGION" "$SERVER_IP" "$FRPS_BIND_PORT" "$FRPS_TOKEN" "$PORT_START" "$PORT_END")"
-echo "  → 请求 JSON: ${PAYLOAD}"
 
 API_RESP="$(set +e; curl -sS --connect-timeout 10 -X POST "${PANEL_URL}/api/setup/register-node" \
   -H "Content-Type: application/json" \
