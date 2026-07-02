@@ -61,7 +61,23 @@ url_encode() {
   python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
 }
 
+
+detect_system_arch() {
+  SYSTEM_ARCH="$(uname -m)"
+  case "$SYSTEM_ARCH" in
+    x86_64|amd64) FRP_ARCH="amd64" ;;
+    aarch64|arm64) FRP_ARCH="arm64" ;;
+    armv7l|armv7*) FRP_ARCH="arm" ;;
+    armv6l|armv6*) FRP_ARCH="arm" ;;
+    i386|i686) FRP_ARCH="386" ;;
+    *) err "不支持的 CPU 架构：${SYSTEM_ARCH}（支持 x86_64/amd64、arm64/aarch64、armv6/armv7、i386/i686）" ;;
+  esac
+  log "系统架构检测通过：${SYSTEM_ARCH} → frp linux_${FRP_ARCH}"
+}
+
 # ── 交互式引导 ──────────────────────────────────────────────
+
+detect_system_arch
 
 echo ''
 echo -e "${CYAN}  ╔══════════════════════════════════════╗${NC}"
@@ -212,14 +228,19 @@ echo -e "${CYAN}━━━ 第 5 步：安装 frps ━━━${NC}"
 FRPS_DIR="/opt/frps-${NODE_NAME}"
 mkdir -p "${FRPS_DIR}"
 
-if [[ ! -f "${FRPS_DIR}/frps" ]]; then
-  log "下载 frps ${FRP_VERSION} …"
-  ARCH="$(uname -m)"
-  case "$ARCH" in
-    x86_64|amd64) FRP_ARCH="amd64" ;;
-    aarch64|arm64) FRP_ARCH="arm64" ;;
-    *) err "不支持的 CPU 架构：$ARCH（仅支持 x86_64 和 arm64）" ;;
-  esac
+NEED_INSTALL_FRPS=1
+if [[ -x "${FRPS_DIR}/frps" ]]; then
+  CURRENT_FRPS_VERSION="$(${FRPS_DIR}/frps --version 2>/dev/null || true)"
+  if [[ "$CURRENT_FRPS_VERSION" == "$FRP_VERSION" ]]; then
+    NEED_INSTALL_FRPS=0
+    log "检测到 frps ${FRP_VERSION}，跳过下载"
+  else
+    warn "检测到已有 frps 版本 ${CURRENT_FRPS_VERSION:-未知}，将替换为 ${FRP_VERSION}"
+  fi
+fi
+
+if [[ "$NEED_INSTALL_FRPS" == "1" ]]; then
+  log "下载 frps ${FRP_VERSION} (${FRP_ARCH}) …"
   TARBALL="frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz"
   URL="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/${TARBALL}"
   TMPD="$(mktemp -d)"
@@ -228,9 +249,7 @@ if [[ ! -f "${FRPS_DIR}/frps" ]]; then
   cp "${TMPD}/frp_${FRP_VERSION}_linux_${FRP_ARCH}/frps" "${FRPS_DIR}/frps"
   rm -rf "$TMPD"
   chmod +x "${FRPS_DIR}/frps"
-  log "frps 安装完成"
-else
-  log "frps 已安装，跳过下载"
+  log "frps 安装完成：$(${FRPS_DIR}/frps --version 2>/dev/null | sed 's/^/frps /')"
 fi
 
 # ── 生成配置 ────────────────────────────────────────────────

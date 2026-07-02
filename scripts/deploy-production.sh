@@ -206,16 +206,21 @@ start_panel() {
   warn "面板 60 秒内未就绪，请检查：cd ${PROJECT_DIR}/dist/obfuscated && docker compose logs --tail=100"
 }
 
-frp_arch() {
-  local machine
-  machine="$(uname -m)"
-  case "${machine}" in
-    x86_64|amd64) echo "amd64" ;;
-    aarch64|arm64) echo "arm64" ;;
-    armv7l|armv7*) echo "arm" ;;
-    i386|i686)     echo "386" ;;
-    *) err "不支持的 CPU 架构：${machine}"; exit 1 ;;
+detect_system_arch() {
+  SYSTEM_ARCH="$(uname -m)"
+  case "${SYSTEM_ARCH}" in
+    x86_64|amd64) FRP_ARCH="amd64" ;;
+    aarch64|arm64) FRP_ARCH="arm64" ;;
+    armv7l|armv7*) FRP_ARCH="arm" ;;
+    armv6l|armv6*) FRP_ARCH="arm" ;;
+    i386|i686)     FRP_ARCH="386" ;;
+    *) err "不支持的 CPU 架构：${SYSTEM_ARCH}"; exit 1 ;;
   esac
+  log "系统架构检测通过：${SYSTEM_ARCH} → frp linux_${FRP_ARCH}"
+}
+
+frp_arch() {
+  printf '%s\n' "${FRP_ARCH:?未检测系统架构}"
 }
 
 install_frps_binary() {
@@ -420,6 +425,7 @@ print_summary() {
 
 main() {
   need_root
+  detect_system_arch
   require_supported_os
   cd "${PROJECT_DIR}"
 
