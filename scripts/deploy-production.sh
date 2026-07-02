@@ -271,7 +271,7 @@ webServer.user = "admin"
 webServer.password = "${FRPS_WEB_PASSWORD}"
 
 # Prometheus 监控指标
-enablePrometheus = true
+webServer.enablePrometheus = true
 
 # 生产环境鉴权插件：校验用户状态、panelToken 和端口归属；多节点配置需使用带 node_id/node_token 的插件路径。
 # 不配置此项，用户可以绕过面板手写 frpc.toml 抢占端口。
