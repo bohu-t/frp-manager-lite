@@ -2210,7 +2210,7 @@ class Handler(BaseHTTPRequestHandler):
                 r2_public = public_r2_config(conn)
                 frpc_users = []
                 for u in conn.execute("""
-                    SELECT u.id, u.username, u.active, u.expires_at, u.node_id, n.name AS node_name, n.region AS node_region,
+                    SELECT u.id, u.username, u.token, u.active, u.expires_at, u.node_id, n.name AS node_name, n.region AS node_region,
                            COUNT(DISTINCT p.id) AS port_count, COUNT(DISTINCT t.id) AS tunnel_count
                     FROM users u
                     LEFT JOIN nodes n ON n.id=u.node_id
@@ -2223,7 +2223,7 @@ class Handler(BaseHTTPRequestHandler):
                     used_remote_ports = [int(r["remote_port"]) for r in conn.execute("SELECT remote_port FROM tunnels WHERE node_id=? AND user_id=? AND proxy_type IN ('tcp','udp') AND remote_port>0 ORDER BY remote_port", (u["node_id"], u["id"]))]
                     used_set = set(used_remote_ports)
                     frpc_users.append({
-                        "id": u["id"], "username": u["username"], "active": bool(u["active"]), "expired": is_expired(u),
+                        "id": u["id"], "username": u["username"], "token": u["token"], "active": bool(u["active"]), "expired": is_expired(u),
                         "node_id": u["node_id"], "node_name": u["node_name"], "node_region": u["node_region"],
                         "port_count": u["port_count"], "tunnel_count": u["tunnel_count"],
                         "assigned_ports": assigned_ports,
