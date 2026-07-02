@@ -16,6 +16,8 @@ set -Eeuo pipefail
 APP_NAME="frp-manager-lite"
 APP_DIR="${APP_DIR:-/opt/frp-manager-lite}"
 ENV_FILE="${ENV_FILE:-${APP_DIR}/.env}"
+FRP_STABLE_VERSION="${FRP_STABLE_VERSION:-0.66.0}"
+FRP_CHANNEL="${FRP_CHANNEL:-}"
 
 log()   { printf '\033[1;34m[部署]\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m[警告]\033[0m %s\n' "$*"; }
@@ -122,6 +124,57 @@ prompt_secret() {
   fi
 }
 
+resolve_latest_frp_version() {
+  local latest
+  latest="$(curl -fsSL --connect-timeout 10 https://api.github.com/repos/fatedier/frp/releases/latest | python3 -c '
+import json, sys
+try:
+    tag = json.load(sys.stdin).get("tag_name", "")
+    print(tag[1:] if tag.startswith("v") else tag)
+except Exception:
+    sys.exit(1)
+')" || { err "获取 frp 最新版失败，请检查网络或直接设置 FRP_VERSION"; exit 1; }
+  [[ -n "$latest" ]] || { err "获取 frp 最新版失败：GitHub 返回为空"; exit 1; }
+  printf '%s\n' "$latest"
+}
+
+select_frp_version() {
+  if [[ -n "${FRP_VERSION:-}" ]]; then
+    log "使用指定 frp 版本：${FRP_VERSION}"
+    return 0
+  fi
+
+  local choice="${FRP_CHANNEL:-}"
+  if [[ -z "$choice" ]]; then
+    if has_tty; then
+      echo '' > /dev/tty
+      echo '请选择 frp 安装版本：' > /dev/tty
+      echo "  1) 稳定版 v${FRP_STABLE_VERSION}（推荐）" > /dev/tty
+      echo '  2) 最新版（自动读取 GitHub Releases）' > /dev/tty
+      read -r -p '请选择 [1/2，默认 1]: ' choice < /dev/tty
+      choice="${choice:-1}"
+    else
+      choice="stable"
+    fi
+  fi
+
+  case "${choice,,}" in
+    1|stable|stable版|稳定|稳定版)
+      FRP_VERSION="$FRP_STABLE_VERSION"
+      FRP_CHANNEL="stable"
+      ;;
+    2|latest|latest版|最新|最新版)
+      FRP_VERSION="$(resolve_latest_frp_version)"
+      FRP_CHANNEL="latest"
+      ;;
+    *)
+      err "未知 frp 版本选项：${choice}（请输入 1/2、stable/latest，或直接设置 FRP_VERSION）"
+      exit 1
+      ;;
+  esac
+  log "frp 安装版本：${FRP_CHANNEL} → v${FRP_VERSION}"
+}
+
 valid_port() {
   [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= 65535 ))
 }
@@ -168,7 +221,8 @@ collect_env_file() {
   fi
 
   IMAGE="${IMAGE:-ghcr.io/bohu-t/frp-manager-lite:latest}"
-  FRP_VERSION="${FRP_VERSION:-0.66.0}"
+  FRP_VERSION="${FRP_VERSION:-}"
+  select_frp_version
   FML_PUBLISH_PORT="${FML_PUBLISH_PORT:-18081}"
   FML_ADMIN_USER="${FML_ADMIN_USER:-admin}"
   FML_DEFAULT_MAX_PORTS="${FML_DEFAULT_MAX_PORTS:-5}"
