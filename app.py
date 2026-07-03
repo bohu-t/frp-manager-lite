@@ -2974,8 +2974,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"ok": True})
 
     def download_frpc(self) -> None:
-        user = self.require_user()
-        if not user or not self.require_software_license():
+        user = self.current_user
+        if not user:
+            q = urllib.parse.parse_qs(urlparse(self.path).query)
+            user = download_token_user(str((q.get("token") or [""])[0]))
+        if not user:
+            self.send_json({"ok": False, "error": "unauthorized"}, 401)
+            return
+        if not self.require_software_license():
             return
         if user["role"] == "admin":
             self.send_json({"ok": False, "error": "管理员请在仪表盘下载模块为普通用户生成 frpc 配置"}, 403)
