@@ -387,6 +387,28 @@ def insert_user_record(conn: sqlite3.Connection, username: str, password_hash_va
     return conn.execute(f"INSERT INTO users({','.join(cols)}) VALUES({placeholders})", vals)
 
 
+def node_dashboard_url(row: sqlite3.Row | dict[str, Any] | None) -> str:
+    if not row:
+        return ""
+    url = str(row_val(row, "dashboard_url", "") or "").strip().rstrip("/")
+    if url:
+        return url
+    web_port = int(row_val(row, "web_port", 0) or 0)
+    if web_port > 0:
+        host = split_node_host(str(row_val(row, "server_addr", "") or ""))
+        if host:
+            return f"http://{host}:{web_port}"
+    return ""
+
+
+def node_dashboard_auth(row: sqlite3.Row | dict[str, Any] | None) -> tuple[str, str]:
+    user = str(row_val(row, "dashboard_user", "") or "") if row else ""
+    password = str(row_val(row, "dashboard_password", "") or "") if row else ""
+    if not user and not password:
+        user, password = FRPS_DASHBOARD_USER, FRPS_DASHBOARD_PASSWORD
+    return user, password
+
+
 def node_public(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
@@ -397,6 +419,10 @@ def node_public(row: sqlite3.Row) -> dict[str, Any]:
         "auth_token": row["auth_token"],
         "port_start": row["port_start"],
         "port_end": row["port_end"],
+        "web_port": int(row_val(row, "web_port", 0) or 0),
+        "dashboard_url": row_val(row, "dashboard_url", "") or "",
+        "dashboard_user": row_val(row, "dashboard_user", "") or "",
+        "dashboard_configured": bool(node_dashboard_url(row)),
         "active": bool(row["active"]),
         "note": row["note"],
         "created_at": row["created_at"],
@@ -426,6 +452,12 @@ def ensure_default_node(conn: sqlite3.Connection) -> int:
         conn.execute("ALTER TABLE nodes ADD COLUMN region TEXT NOT NULL DEFAULT '默认地区'")
     if "web_port" not in cols:
         conn.execute("ALTER TABLE nodes ADD COLUMN web_port INTEGER NOT NULL DEFAULT 0")
+    if "dashboard_url" not in cols:
+        conn.execute("ALTER TABLE nodes ADD COLUMN dashboard_url TEXT NOT NULL DEFAULT ''")
+    if "dashboard_user" not in cols:
+        conn.execute("ALTER TABLE nodes ADD COLUMN dashboard_user TEXT NOT NULL DEFAULT ''")
+    if "dashboard_password" not in cols:
+        conn.execute("ALTER TABLE nodes ADD COLUMN dashboard_password TEXT NOT NULL DEFAULT ''")
     row = conn.execute("SELECT * FROM nodes ORDER BY id LIMIT 1").fetchone()
     if row:
         # 如果默认节点还是占位符，同步 env
@@ -439,10 +471,13 @@ def ensure_default_node(conn: sqlite3.Connection) -> int:
         if FRPS_WEB_PORT > 0 and row_val(row, "web_port", 0) in (0, None, ""):
             conn.execute("UPDATE nodes SET web_port=? WHERE id=?", (FRPS_WEB_PORT, row["id"]))
             print(f"INFO: default node web_port synced from FRPS_WEB_PORT ({FRPS_WEB_PORT})")
+        if FRPS_DASHBOARD_URL and not row_val(row, "dashboard_url", ""):
+            conn.execute("UPDATE nodes SET dashboard_url=?, dashboard_user=?, dashboard_password=? WHERE id=?", (FRPS_DASHBOARD_URL, FRPS_DASHBOARD_USER, FRPS_DASHBOARD_PASSWORD, row["id"]))
+            print("INFO: default node frps dashboard settings synced from FML_FRPS_DASHBOARD_URL")
         return int(row["id"])
     cur = conn.execute(
-        "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-        ("默认地区", "default", FRP_SERVER_ADDR, FRP_SERVER_PORT, FRP_AUTH_TOKEN, PORT_START, PORT_END, FRPS_WEB_PORT, 1, "自动创建的默认节点", now()),
+        "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("默认地区", "default", FRP_SERVER_ADDR, FRP_SERVER_PORT, FRP_AUTH_TOKEN, PORT_START, PORT_END, FRPS_WEB_PORT, FRPS_DASHBOARD_URL, FRPS_DASHBOARD_USER, FRPS_DASHBOARD_PASSWORD, 1, "自动创建的默认节点", now()),
     )
     return int(cur.lastrowid)
 
@@ -707,18 +742,21 @@ def attach_tunnel_mapping_status(tunnels: list[dict[str, Any]]) -> list[dict[str
     return tunnels
 
 
-def frps_dashboard_get(path: str) -> dict[str, Any]:
-    if not FRPS_DASHBOARD_URL:
+def frps_dashboard_get(path: str, node: sqlite3.Row | dict[str, Any] | None = None) -> dict[str, Any]:
+    url = node_dashboard_url(node) if node is not None else FRPS_DASHBOARD_URL
+    url = str(url or "").rstrip("/")
+    if not url:
         return {}
-    req = urllib.request.Request(f"{FRPS_DASHBOARD_URL}{path}")
-    if FRPS_DASHBOARD_USER or FRPS_DASHBOARD_PASSWORD:
-        raw = f"{FRPS_DASHBOARD_USER}:{FRPS_DASHBOARD_PASSWORD}".encode("utf-8")
+    req = urllib.request.Request(f"{url}{path}")
+    user, password = node_dashboard_auth(node) if node is not None else (FRPS_DASHBOARD_USER, FRPS_DASHBOARD_PASSWORD)
+    if user or password:
+        raw = f"{user}:{password}".encode("utf-8")
         req.add_header("Authorization", "Basic " + base64.b64encode(raw).decode("ascii"))
     with urllib.request.urlopen(req, timeout=3) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def normalize_frps_proxy(proxy: dict[str, Any], typ: str) -> dict[str, Any]:
+def normalize_frps_proxy(proxy: dict[str, Any], typ: str, node: sqlite3.Row | dict[str, Any] | None = None) -> dict[str, Any]:
     name = str(proxy.get("name") or "")
     username, short_name = (name.split(".", 1) + [""])[:2] if "." in name else ("", name)
     conf = proxy.get("conf") or {}
@@ -743,24 +781,41 @@ def normalize_frps_proxy(proxy: dict[str, Any], typ: str) -> dict[str, Any]:
         "client_version": proxy.get("clientVersion") or "",
         "last_start_time": proxy.get("lastStartTime") or "",
         "last_close_time": proxy.get("lastCloseTime") or "",
+        "node_id": int(row_val(node, "id", 0) or 0) if node is not None else 0,
+        "node_name": row_val(node, "name", "") or "" if node is not None else "",
+        "node_region": row_val(node, "region", "") or "" if node is not None else "",
     }
 
 
-def frps_all_proxies() -> list[dict[str, Any]]:
+def dashboard_nodes_for_user(conn: sqlite3.Connection, user: sqlite3.Row | None = None) -> list[sqlite3.Row]:
+    if user is not None and user["role"] != "admin":
+        rows = conn.execute("SELECT * FROM nodes WHERE id=? AND active=1", (user["node_id"],)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM nodes WHERE active=1 ORDER BY region, id").fetchall()
+    return [r for r in rows if node_dashboard_url(r)]
+
+
+def frps_all_proxies(nodes: list[sqlite3.Row] | None = None) -> list[dict[str, Any]]:
     proxies: list[dict[str, Any]] = []
-    for typ in PROXY_TYPE_ORDER:
-        data = frps_dashboard_get(f"/api/proxy/{typ}")
-        for p in data.get("proxies") or []:
-            proxies.append(normalize_frps_proxy(p, typ))
-    proxies.sort(key=lambda p: (p.get("username") or "", p.get("type") or "", p.get("name") or ""))
+    if nodes is None:
+        with db() as conn:
+            nodes = dashboard_nodes_for_user(conn)
+    for node in nodes:
+        for typ in PROXY_TYPE_ORDER:
+            data = frps_dashboard_get(f"/api/proxy/{typ}", node)
+            for p in data.get("proxies") or []:
+                proxies.append(normalize_frps_proxy(p, typ, node))
+    proxies.sort(key=lambda p: (p.get("node_region") or "", p.get("node_name") or "", p.get("username") or "", p.get("type") or "", p.get("name") or ""))
     return proxies
 
 
-def frps_user_dashboard(username: str) -> dict[str, Any]:
-    if not FRPS_DASHBOARD_URL:
-        return {"enabled": False, "error": "frps dashboard 未接入面板"}
+def frps_user_dashboard(username: str, user: sqlite3.Row | None = None) -> dict[str, Any]:
     try:
-        proxies = [p for p in frps_all_proxies() if p.get("username") == username]
+        with db() as conn:
+            nodes = dashboard_nodes_for_user(conn, user)
+        if not nodes:
+            return {"enabled": False, "error": "frps dashboard 未接入面板"}
+        proxies = [p for p in frps_all_proxies(nodes) if p.get("username") == username]
         traffic_in = sum(int(p.get("today_traffic_in") or 0) for p in proxies)
         traffic_out = sum(int(p.get("today_traffic_out") or 0) for p in proxies)
         return {"enabled": True, "proxies": proxies, "total": len(proxies), "today_traffic_in": traffic_in, "today_traffic_out": traffic_out, "today_traffic_total": traffic_in + traffic_out}
@@ -768,11 +823,9 @@ def frps_user_dashboard(username: str) -> dict[str, Any]:
         return {"enabled": False, "error": f"读取 frps dashboard 失败：{e.__class__.__name__}"}
 
 
-def user_today_traffic_bytes(username: str) -> int | None:
-    if not FRPS_DASHBOARD_URL:
-        return None
+def user_today_traffic_bytes(username: str, user: sqlite3.Row | None = None) -> int | None:
     try:
-        data = frps_user_dashboard(username)
+        data = frps_user_dashboard(username, user)
         if not data.get("enabled"):
             return None
         return int(data.get("today_traffic_total") or 0)
@@ -784,17 +837,19 @@ def user_over_traffic_limit(user: sqlite3.Row) -> bool:
     limit = int(row_val(user, "traffic_limit_bytes", 0) or 0)
     if limit <= 0:
         return False
-    used = user_today_traffic_bytes(user["username"])
+    used = user_today_traffic_bytes(user["username"], user)
     return used is not None and used >= limit
 
 
 def frps_admin_dashboard(page: int = 1, page_size: int = 20, username: str = "") -> dict[str, Any]:
-    if not FRPS_DASHBOARD_URL:
-        return {"enabled": False, "error": "frps dashboard 未接入面板", "proxies": [], "total": 0, "page": page, "page_size": page_size}
     try:
         page = max(1, int(page or 1))
         page_size = min(100, max(10, int(page_size or 20)))
-        proxies = frps_all_proxies()
+        with db() as conn:
+            nodes = dashboard_nodes_for_user(conn)
+        if not nodes:
+            return {"enabled": False, "error": "frps dashboard 未接入面板", "proxies": [], "total": 0, "page": page, "page_size": page_size}
+        proxies = frps_all_proxies(nodes)
         if username:
             proxies = [p for p in proxies if p.get("username") == username]
         total = len(proxies)
@@ -817,6 +872,10 @@ def init_db() -> None:
                 auth_token TEXT NOT NULL,
                 port_start INTEGER NOT NULL,
                 port_end INTEGER NOT NULL,
+                web_port INTEGER NOT NULL DEFAULT 0,
+                dashboard_url TEXT NOT NULL DEFAULT '',
+                dashboard_user TEXT NOT NULL DEFAULT '',
+                dashboard_password TEXT NOT NULL DEFAULT '',
                 active INTEGER NOT NULL DEFAULT 1,
                 note TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL
@@ -1951,6 +2010,10 @@ class Handler(BaseHTTPRequestHandler):
             port_start = int(data.get("port_start", 20000))
             port_end = int(data.get("port_end", 20199))
             note = str(data.get("note", "")).strip()[:120]
+            web_port = int(data.get("web_port", 0) or 0)
+            dashboard_url = str(data.get("dashboard_url", "")).strip().rstrip("/")[:300]
+            dashboard_user = str(data.get("dashboard_user", "")).strip()[:80]
+            dashboard_password = str(data.get("dashboard_password", "")).strip()[:200]
             if not name or not name.replace("_", "").replace("-", "").isalnum():
                 raise ValueError("节点名称只能包含字母、数字、下划线、短横线")
             if not server_addr:
@@ -1959,6 +2022,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("auth_token 至少 6 位")
             if not (1 <= port_start <= port_end <= 65535):
                 raise ValueError("端口池范围不合法")
+            if web_port and not (1 <= web_port <= 65535):
+                raise ValueError("frps dashboard 端口不合法")
             if port_end - port_start > 20000:
                 raise ValueError("单节点端口池不要超过 20000 个")
             with db() as conn:
@@ -1967,8 +2032,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"ok": False, "error": f"节点名称 {name} 已存在"}, 409)
                     return
                 cur = conn.execute(
-                    "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, note, active, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                    (region, name, server_addr, server_port, auth_token, port_start, port_end, 0, note, 1, now()),
+                    "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, note, active, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, note, 1, now()),
                 )
                 node_id = cur.lastrowid
                 # Pre-create port pool
@@ -2302,7 +2367,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Cap: only send first 200 for rendering, too many would freeze the browser
                 ports_display = ports[:200] if port_count > 200 else ports
                 port_stats = {"total": port_count, "used": len(used_ports), "free": port_count - len(used_ports)}
-                user_dashboard = frps_user_dashboard(user["username"])
+                user_dashboard = frps_user_dashboard(user["username"], user)
             self.send_json({"ok": True, "user": public_user(user), "software_license": sw_license, "node": node_public(node) if node else None, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
             return
         if path == "/api/admin/overview":
@@ -2887,6 +2952,10 @@ class Handler(BaseHTTPRequestHandler):
             port_start = int(data.get("port_start", 20000))
             port_end = int(data.get("port_end", 20199))
             note = str(data.get("note", "")).strip()[:120]
+            web_port = int(data.get("web_port", 0) or 0)
+            dashboard_url = str(data.get("dashboard_url", "")).strip().rstrip("/")[:300]
+            dashboard_user = str(data.get("dashboard_user", "")).strip()[:80]
+            dashboard_password = str(data.get("dashboard_password", "")).strip()[:200]
             if len(region) > 40:
                 raise ValueError("地区名称太长")
             if not name or len(name) > 40 or not name.replace("_", "").replace("-", "").isalnum():
@@ -2897,14 +2966,16 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("frps bindPort 不合法")
             if len(auth_token) < 6:
                 raise ValueError("frps token 至少 6 位")
+            if web_port and not (1 <= web_port <= 65535):
+                raise ValueError("frps dashboard 端口不合法")
             if not (1 <= port_start <= port_end <= 65535):
                 raise ValueError("端口池范围不合法")
             if port_end - port_start > 20000:
                 raise ValueError("单节点端口池不要超过 20000 个")
             with db() as conn:
                 cur = conn.execute(
-                    "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (region, name, server_addr, server_port, auth_token, port_start, port_end, 1, note, now()),
+                    "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, 1, note, now()),
                 )
                 node_id = int(cur.lastrowid)
                 conn.executemany("INSERT OR IGNORE INTO ports(node_id, port, created_at) VALUES(?,?,?)", [(node_id, p, now()) for p in range(port_start, port_end + 1)])
@@ -2925,6 +2996,10 @@ class Handler(BaseHTTPRequestHandler):
             server_port = int(data.get("server_port", 7000))
             auth_token = str(data.get("auth_token", "")).strip()
             note = str(data.get("note", "")).strip()[:120]
+            web_port = int(data.get("web_port", 0) or 0)
+            dashboard_url = str(data.get("dashboard_url", "")).strip().rstrip("/")[:300]
+            dashboard_user = str(data.get("dashboard_user", "")).strip()[:80]
+            dashboard_password = str(data.get("dashboard_password", "")).strip()[:200]
             active = 1 if str(data.get("active", "1")) in ("1", "true", "True", "on", "yes") else 0
             if len(region) > 40:
                 raise ValueError("地区名称太长")
@@ -2936,14 +3011,16 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("frps bindPort 不合法")
             if len(auth_token) < 6:
                 raise ValueError("frps token 至少 6 位")
+            if web_port and not (1 <= web_port <= 65535):
+                raise ValueError("frps dashboard 端口不合法")
             with db() as conn:
                 row = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
                 if not row:
                     self.send_json({"ok": False, "error": "节点不存在"}, 404)
                     return
                 conn.execute(
-                    "UPDATE nodes SET region=?, name=?, server_addr=?, server_port=?, auth_token=?, active=?, note=? WHERE id=?",
-                    (region, name, server_addr, server_port, auth_token, active, note, node_id),
+                    "UPDATE nodes SET region=?, name=?, server_addr=?, server_port=?, auth_token=?, web_port=?, dashboard_url=?, dashboard_user=?, dashboard_password=?, active=?, note=? WHERE id=?",
+                    (region, name, server_addr, server_port, auth_token, web_port, dashboard_url, dashboard_user, dashboard_password, active, note, node_id),
                 )
             self.send_json({"ok": True, "message": f"节点 {region} / {name} 已更新"})
         except sqlite3.IntegrityError:

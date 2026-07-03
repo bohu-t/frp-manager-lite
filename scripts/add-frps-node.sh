@@ -141,6 +141,7 @@ echo '  本脚本会：'
 echo '    ① 向你的面板注册新节点'
 echo '    ② 安装并启动 frps'
 echo '    ③ 配置 systemd 开机自启'
+echo '    ④ 接入面板监控并安装端口限速同步'
 echo ''
 echo '  需要提前准备：'
 echo '    · 面板地址（如 https://panel.example.com）'
@@ -241,6 +242,13 @@ if [[ $PORT_COUNT -gt 20000 ]]; then
 fi
 echo -e "  → 端口池：${PORT_START}-${PORT_END}（共 ${PORT_COUNT} 个）"
 
+# ── dashboard 凭据 ───────────────────────────────────────────
+
+if [[ -z "$FRPS_DASHBOARD_PWD" ]]; then
+  FRPS_DASHBOARD_PWD="$(openssl rand -base64 12 2>/dev/null || python3 -c "import secrets; print(secrets.token_urlsafe(12))")"
+fi
+DASHBOARD_URL="${DASHBOARD_URL:-http://${SERVER_IP}:${FRPS_DASHBOARD_PORT}}"
+
 # ── 第 4 步：注册到面板 ────────────────────────────────────
 
 echo ''
@@ -257,9 +265,13 @@ print(json.dumps({
     'server_port': int(sys.argv[5]),
     'auth_token': sys.argv[6],
     'port_start': int(sys.argv[7]),
-    'port_end': int(sys.argv[8])
+    'port_end': int(sys.argv[8]),
+    'web_port': int(sys.argv[9]),
+    'dashboard_url': sys.argv[10],
+    'dashboard_user': sys.argv[11],
+    'dashboard_password': sys.argv[12]
 }, ensure_ascii=False))
-" "$SETUP_KEY" "$NODE_NAME" "$REGION" "$SERVER_IP" "$FRPS_BIND_PORT" "$FRPS_TOKEN" "$PORT_START" "$PORT_END")"
+" "$SETUP_KEY" "$NODE_NAME" "$REGION" "$SERVER_IP" "$FRPS_BIND_PORT" "$FRPS_TOKEN" "$PORT_START" "$PORT_END" "$FRPS_DASHBOARD_PORT" "$DASHBOARD_URL" "$FRPS_DASHBOARD_USER" "$FRPS_DASHBOARD_PWD")"
 
 API_RESP="$(set +e; curl -sS --connect-timeout 10 -X POST "${PANEL_URL}/api/setup/register-node" \
   -H "Content-Type: application/json" \
@@ -306,10 +318,6 @@ if [[ "$NEED_INSTALL_FRPS" == "1" ]]; then
 fi
 
 # ── 生成配置 ────────────────────────────────────────────────
-
-if [[ -z "$FRPS_DASHBOARD_PWD" ]]; then
-  FRPS_DASHBOARD_PWD="$(openssl rand -base64 12 2>/dev/null || python3 -c "import secrets; print(secrets.token_urlsafe(12))")"
-fi
 
 # 从面板地址提取域名用于 httpPlugins
 PANEL_HOST="${PANEL_URL#https://}"
@@ -393,6 +401,107 @@ else
   warn "frps 可能未成功启动，检查日志：journalctl -u ${SERVICE_NAME} -n 30"
 fi
 
+# ── 端口限速同步 ────────────────────────────────────────────
+
+install_rate_limit_sync() {
+  if [[ "${ENABLE_PORT_RATE_LIMIT:-1}" != "1" ]]; then
+    warn "已跳过端口限速同步安装（ENABLE_PORT_RATE_LIMIT=0）"
+    return 0
+  fi
+  if [[ -z "${NODE_ID:-}" ]]; then
+    warn "节点 ID 为空，跳过端口限速同步安装"
+    return 0
+  fi
+  command -v tc >/dev/null 2>&1 || { warn "缺少 tc(iproute2)，跳过端口限速同步"; return 0; }
+  command -v iptables >/dev/null 2>&1 || { warn "缺少 iptables，跳过端口限速同步"; return 0; }
+
+  cat > "${FRPS_DIR}/rate-limit.env" <<EOF
+PANEL_URL=${PANEL_URL}
+FML_SETUP_KEY=${SETUP_KEY}
+FML_RATE_LIMIT_NODE_ID=${NODE_ID}
+FML_RATE_LIMIT_IFACE=${FML_RATE_LIMIT_IFACE:-}
+EOF
+  chmod 600 "${FRPS_DIR}/rate-limit.env"
+
+  cat > /usr/local/sbin/fml-sync-port-rate-limits <<'SYNC_SCRIPT'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+ENV_FILE="${ENV_FILE:-}"
+PANEL_URL="${PANEL_URL:-}"
+FML_SETUP_KEY="${FML_SETUP_KEY:-}"
+IFACE="${FML_RATE_LIMIT_IFACE:-}"
+NODE_ID="${FML_RATE_LIMIT_NODE_ID:-}"
+DRY_RUN="${DRY_RUN:-0}"
+CLEAR="${CLEAR:-0}"
+CHAIN="FML_RATE_LIMIT"
+MARK_BASE="${FML_RATE_LIMIT_MARK_BASE:-42000}"
+CLASS_BASE="${FML_RATE_LIMIT_CLASS_BASE:-4200}"
+QDISC_HANDLE="${FML_RATE_LIMIT_QDISC_HANDLE:-42}"
+DEFAULT_CLASS="${FML_RATE_LIMIT_DEFAULT_CLASS:-9999}"
+DEFAULT_RATE="${FML_RATE_LIMIT_DEFAULT_RATE:-10000mbit}"
+FORCE="${FML_RATE_LIMIT_FORCE:-0}"
+log(){ printf '\033[1;34m[rate-limit]\033[0m %s\n' "$*"; }
+warn(){ printf '\033[1;33m[rate-limit] WARN:\033[0m %s\n' "$*"; }
+err(){ printf '\033[1;31m[rate-limit] ERROR:\033[0m %s\n' "$*" >&2; }
+run(){ if [[ "$DRY_RUN" == "1" ]]; then printf '+ '; printf '%q ' "$@"; printf '\n'; else "$@"; fi; }
+need_cmd(){ command -v "$1" >/dev/null 2>&1 || { err "缺少命令：$1"; exit 1; }; }
+load_env(){ if [[ -n "$ENV_FILE" && -f "$ENV_FILE" ]]; then set -a; . "$ENV_FILE"; set +a; fi; }
+detect_iface(){ if [[ -n "$IFACE" ]]; then return 0; fi; IFACE="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"; [[ -n "$IFACE" ]] || IFACE="$(ip -o -4 route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"; [[ -n "$IFACE" ]] || { err "无法自动识别出口网卡，请设置 FML_RATE_LIMIT_IFACE=eth0"; exit 1; }; }
+api_url(){ local url="${PANEL_URL%/}/api/host/port-rate-rules"; if [[ -n "$NODE_ID" ]]; then url="${url}?node_id=${NODE_ID}"; fi; printf '%s' "$url"; }
+fetch_rules(){ local url tmp; url="$(api_url)"; tmp="$(mktemp)"; if ! curl -fsS --connect-timeout 5 --max-time 20 -H "X-FML-Setup-Key: ${FML_SETUP_KEY}" "$url" -o "$tmp"; then rm -f "$tmp"; err "拉取限速规则失败：$url"; exit 1; fi; python3 - "$tmp" <<'PY'
+import json, sys
+path=sys.argv[1]
+data=json.load(open(path,'r',encoding='utf-8'))
+if not data.get('ok'): raise SystemExit(data.get('error') or 'API returned ok=false')
+for r in data.get('rules') or []:
+    port=int(r.get('port') or 0); proto=str(r.get('protocol') or 'tcp').lower(); rate=int(r.get('rate_kbit') or 0)
+    if port>0 and proto in {'tcp','udp'} and rate>0: print(f'{port}\t{proto}\t{rate}')
+PY
+rm -f "$tmp"; }
+clear_rules(){ run iptables -t mangle -D OUTPUT -j "$CHAIN" 2>/dev/null || true; run iptables -t mangle -F "$CHAIN" 2>/dev/null || true; run iptables -t mangle -X "$CHAIN" 2>/dev/null || true; if tc qdisc show dev "$IFACE" 2>/dev/null | grep -q "qdisc htb ${QDISC_HANDLE}:"; then run tc qdisc del dev "$IFACE" root 2>/dev/null || true; fi; }
+guard_existing_qdisc(){ local line; line="$(tc qdisc show dev "$IFACE" 2>/dev/null | awk '$0 ~ / root / {print; exit}')"; [[ -z "$line" ]] && return 0; if grep -q "qdisc htb ${QDISC_HANDLE}:" <<< "$line"; then return 0; fi; if [[ "$FORCE" == "1" ]]; then warn "将覆盖现有 root qdisc：$line"; return 0; fi; if grep -Eq 'qdisc (fq_codel|pfifo_fast|noqueue|mq) ' <<< "$line"; then warn "将替换系统默认 root qdisc：$line"; return 0; fi; err "检测到已有自定义 root qdisc，默认不覆盖：$line；如确认可覆盖，设置 FML_RATE_LIMIT_FORCE=1"; exit 1; }
+ensure_base(){ guard_existing_qdisc; modprobe sch_htb 2>/dev/null || true; modprobe cls_fw 2>/dev/null || true; run iptables -t mangle -N "$CHAIN" 2>/dev/null || true; run iptables -t mangle -F "$CHAIN"; if ! iptables -t mangle -C OUTPUT -j "$CHAIN" >/dev/null 2>&1; then run iptables -t mangle -A OUTPUT -j "$CHAIN"; fi; run tc qdisc replace dev "$IFACE" root handle "${QDISC_HANDLE}:" htb default "$DEFAULT_CLASS"; run tc class replace dev "$IFACE" parent "${QDISC_HANDLE}:" classid "${QDISC_HANDLE}:${DEFAULT_CLASS}" htb rate "$DEFAULT_RATE" ceil "$DEFAULT_RATE"; }
+apply_rules(){ local rules count=0 idx=1; rules="$(fetch_rules)"; if [[ -z "$rules" ]]; then clear_rules; log "没有需要应用的端口速率策略；已清空 ${CHAIN} 规则。"; return 0; fi; ensure_base; while IFS=$'\t' read -r port proto rate_kbit; do [[ -n "$port" ]] || continue; local mark classid; mark=$((MARK_BASE+idx)); classid=$((CLASS_BASE+idx)); run tc class replace dev "$IFACE" parent "${QDISC_HANDLE}:" classid "${QDISC_HANDLE}:${classid}" htb rate "${rate_kbit}kbit" ceil "${rate_kbit}kbit"; run tc filter replace dev "$IFACE" protocol ip parent "${QDISC_HANDLE}:" prio 10 handle "$mark" fw flowid "${QDISC_HANDLE}:${classid}"; if [[ "$proto" == "tcp" ]]; then run iptables -t mangle -A "$CHAIN" -p tcp --sport "$port" -j MARK --set-mark "$mark"; else run iptables -t mangle -A "$CHAIN" -p udp --sport "$port" -j MARK --set-mark "$mark"; fi; count=$((count+1)); idx=$((idx+1)); done <<< "$rules"; log "已应用 ${count} 条端口速率策略：iface=${IFACE}, node_id=${NODE_ID}"; }
+main(){ [[ "$(id -u)" == "0" ]] || { err "请用 root 执行"; exit 1; }; need_cmd curl; need_cmd python3; need_cmd ip; need_cmd tc; need_cmd iptables; load_env; [[ -n "$PANEL_URL" ]] || { err "缺少 PANEL_URL"; exit 1; }; [[ -n "$FML_SETUP_KEY" ]] || { err "缺少 FML_SETUP_KEY"; exit 1; }; detect_iface; if [[ "$CLEAR" == "1" ]]; then clear_rules; log "已清理端口速率策略"; return 0; fi; apply_rules; }
+main "$@"
+SYNC_SCRIPT
+  chmod 0755 /usr/local/sbin/fml-sync-port-rate-limits
+
+  cat > "/etc/systemd/system/fml-port-rate-limit-${NODE_NAME}.service" <<EOF
+[Unit]
+Description=Sync frp-manager-lite port rate limits for node ${NODE_NAME}
+After=network-online.target ${SERVICE_NAME}.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=ENV_FILE=${FRPS_DIR}/rate-limit.env
+EnvironmentFile=${FRPS_DIR}/rate-limit.env
+ExecStart=/usr/local/sbin/fml-sync-port-rate-limits
+EOF
+
+  cat > "/etc/systemd/system/fml-port-rate-limit-${NODE_NAME}.timer" <<EOF
+[Unit]
+Description=Run frp-manager-lite port rate-limit sync for node ${NODE_NAME}
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=fml-port-rate-limit-${NODE_NAME}.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now "fml-port-rate-limit-${NODE_NAME}.timer"
+  systemctl start "fml-port-rate-limit-${NODE_NAME}.service" || warn "端口限速首次同步失败，可查看：journalctl -u fml-port-rate-limit-${NODE_NAME}.service -n 80"
+  log "端口限速同步已启用：fml-port-rate-limit-${NODE_NAME}.timer"
+}
+
+install_rate_limit_sync
+
 # ── 完成 ────────────────────────────────────────────────────
 
 echo ''
@@ -405,7 +514,7 @@ echo "  地区：        ${REGION}"
 echo "  公网 IP：     ${SERVER_IP}"
 echo "  frps 端口：   ${FRPS_BIND_PORT}"
 echo "  端口池：      ${PORT_START} - ${PORT_END}（${PORT_COUNT} 个）"
-echo "  仪表盘：      http://${SERVER_IP}:${FRPS_DASHBOARD_PORT}"
+echo "  仪表盘：      ${DASHBOARD_URL}"
 echo "  仪表盘用户：  ${FRPS_DASHBOARD_USER}"
 echo "  仪表盘密码：  ${FRPS_DASHBOARD_PWD}"
 echo ''
@@ -420,4 +529,6 @@ echo "    systemctl stop ${SERVICE_NAME}     停止"
 echo "    systemctl restart ${SERVICE_NAME}  重启"
 echo "    systemctl status ${SERVICE_NAME}   状态"
 echo "    journalctl -u ${SERVICE_NAME} -f   日志"
+echo "    systemctl status fml-port-rate-limit-${NODE_NAME}.timer  端口限速同步"
+echo "    DRY_RUN=1 ENV_FILE=${FRPS_DIR}/rate-limit.env /usr/local/sbin/fml-sync-port-rate-limits  限速预览"
 echo ''
