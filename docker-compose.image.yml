@@ -1,6 +1,6 @@
 services:
   frp-manager-lite:
-    image: registry.cn-hangzhou.aliyuncs.com/dxlx/frp-manager-lite:latest
+    image: registry.cn-hangzhou.aliyuncs.com/dxlx/frp-manager-lite:1.0.0
     pull_policy: always
     container_name: frp-manager-lite
     restart: unless-stopped

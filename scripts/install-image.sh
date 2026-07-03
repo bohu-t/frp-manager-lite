@@ -3,7 +3,7 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/frp-manager-lite}"
 COMPOSE_FILE="${APP_DIR}/docker-compose.yml"
-IMAGE="${IMAGE:-registry.cn-hangzhou.aliyuncs.com/dxlx/frp-manager-lite:latest}"
+IMAGE="${IMAGE:-registry.cn-hangzhou.aliyuncs.com/dxlx/frp-manager-lite:1.0.0}"
 PUBLISH_BIND="${FML_PUBLISH_BIND:-127.0.0.1}"
 PUBLISH_PORT="${FML_PUBLISH_PORT:-18081}"
 
