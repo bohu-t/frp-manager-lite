@@ -44,6 +44,7 @@ ADMIN_USER = os.getenv("FML_ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.getenv("FML_ADMIN_PASSWORD", "admin123")
 FRP_SERVER_ADDR = os.getenv("FRP_SERVER_ADDR", "YOUR_FRPS_IP_OR_DOMAIN")
 FRP_SERVER_PORT = int(os.getenv("FRP_SERVER_PORT", "7000"))
+FRPS_WEB_PORT = int(os.getenv("FRPS_WEB_PORT", os.getenv("FML_FRPS_WEB_PORT", "0")) or 0)
 FRP_AUTH_TOKEN = os.getenv("FRP_AUTH_TOKEN", "CHANGE_ME_SHARED_FRPS_TOKEN")
 FML_SETUP_KEY = os.getenv("FML_SETUP_KEY", "")  # 用于一键添加 frps 节点的验证密钥
 R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID", "")
@@ -435,10 +436,13 @@ def ensure_default_node(conn: sqlite3.Connection) -> int:
         if row["auth_token"] == "CHANGE_ME_SHARED_FRPS_TOKEN" or row["auth_token"] != FRP_AUTH_TOKEN:
             conn.execute("UPDATE nodes SET auth_token=? WHERE id=?", (FRP_AUTH_TOKEN, row["id"]))
             print(f"INFO: default node auth_token synced from FRP_AUTH_TOKEN")
+        if FRPS_WEB_PORT > 0 and row_val(row, "web_port", 0) in (0, None, ""):
+            conn.execute("UPDATE nodes SET web_port=? WHERE id=?", (FRPS_WEB_PORT, row["id"]))
+            print(f"INFO: default node web_port synced from FRPS_WEB_PORT ({FRPS_WEB_PORT})")
         return int(row["id"])
     cur = conn.execute(
-        "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-        ("默认地区", "default", FRP_SERVER_ADDR, FRP_SERVER_PORT, FRP_AUTH_TOKEN, PORT_START, PORT_END, 1, "自动创建的默认节点", now()),
+        "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        ("默认地区", "default", FRP_SERVER_ADDR, FRP_SERVER_PORT, FRP_AUTH_TOKEN, PORT_START, PORT_END, FRPS_WEB_PORT, 1, "自动创建的默认节点", now()),
     )
     return int(cur.lastrowid)
 
