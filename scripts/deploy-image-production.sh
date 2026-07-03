@@ -8,6 +8,9 @@ set -Eeuo pipefail
 # 快速使用：
 #   curl -fsSL https://raw.githubusercontent.com/bohu-t/frp-manager-lite/main/scripts/deploy-image-production.sh | sudo bash
 #
+# 默认从阿里云 ACR 公开仓库拉取镜像：
+#   registry.cn-hangzhou.aliyuncs.com/dxlx/frp-manager-lite:latest
+#
 # 非交互示例：
 #   PANEL_DOMAIN=panel.example.com PANEL_HTTPS_PORT=8443 FRPS_DOMAIN=frp.example.com \
 #   FML_ADMIN_PASSWORD='change-me' FRP_AUTH_TOKEN='change-me-token' \
@@ -220,7 +223,7 @@ collect_env_file() {
     cp -a "${ENV_FILE}" "${ENV_FILE}.bak.$(date +%Y%m%d-%H%M%S)"
   fi
 
-  IMAGE="${IMAGE:-ghcr.io/bohu-t/frp-manager-lite:latest}"
+  IMAGE="${IMAGE:-registry.cn-hangzhou.aliyuncs.com/dxlx/frp-manager-lite:latest}"
   FRP_VERSION="${FRP_VERSION:-}"
   select_frp_version
   FML_PUBLISH_PORT="${FML_PUBLISH_PORT:-18081}"
@@ -342,8 +345,14 @@ install_docker() {
   docker compose version
 }
 
-maybe_ghcr_login() {
-  if [[ -n "${GHCR_TOKEN:-}" ]]; then
+maybe_registry_login() {
+  # 当前默认镜像仓库是公开 ACR，不需要登录。
+  # 如果以后改为私有仓库，可传入 ACR_USERNAME/ACR_PASSWORD；GHCR_TOKEN 兼容旧镜像。
+  if [[ -n "${ACR_USERNAME:-}" && -n "${ACR_PASSWORD:-}" ]]; then
+    local registry="${ACR_REGISTRY:-registry.cn-hangzhou.aliyuncs.com}"
+    log "检测到 ACR_USERNAME/ACR_PASSWORD，正在登录 ${registry}…"
+    echo "${ACR_PASSWORD}" | docker login "${registry}" -u "${ACR_USERNAME}" --password-stdin
+  elif [[ -n "${GHCR_TOKEN:-}" ]]; then
     log "检测到 GHCR_TOKEN，正在登录 ghcr.io…"
     echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER:-${GITHUB_ACTOR:-token}}" --password-stdin
   fi
@@ -706,7 +715,7 @@ main() {
   log "开始安装基础依赖…"
   apt_install_base
   install_docker
-  maybe_ghcr_login
+  maybe_registry_login
   write_panel_files
   start_panel
   install_frps_binary

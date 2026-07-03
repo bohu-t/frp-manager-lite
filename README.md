@@ -22,10 +22,10 @@ curl -fsSL https://raw.githubusercontent.com/bohu-t/frp-manager-lite/main/script
 curl -fsSL https://raw.githubusercontent.com/bohu-t/frp-manager-lite/main/scripts/install-image.sh | sudo bash
 ```
 
-默认部署到 `/opt/frp-manager-lite`，镜像来自：
+默认部署到 `/opt/frp-manager-lite`，镜像来自阿里云 ACR 公开仓库：
 
 ```text
-ghcr.io/bohu-t/frp-manager-lite:latest
+registry.cn-hangzhou.aliyuncs.com/dxlx/frp-manager-lite:latest
 ```
 
 升级：
