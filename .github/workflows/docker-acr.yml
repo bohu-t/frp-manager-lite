@@ -42,8 +42,15 @@ jobs:
             echo "Invalid version: $version" >&2
             exit 1
           fi
+          image="${ACR_REGISTRY}/${ACR_NAMESPACE}/${ACR_REPOSITORY}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "image=${ACR_REGISTRY}/${ACR_NAMESPACE}/${ACR_REPOSITORY}:${version}" >> "$GITHUB_OUTPUT"
+          echo "image=${image}:${version}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "${image}:${version}"
+            echo "${image}:latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -67,6 +74,6 @@ jobs:
           context: dist/obfuscated
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.version.outputs.image }}
+          tags: ${{ steps.version.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

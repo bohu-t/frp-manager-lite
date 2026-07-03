@@ -25,7 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/bohu-t/frp-manager-lite/main/script
 默认部署到 `/opt/frp-manager-lite`，镜像来自阿里云 ACR 公开仓库：
 
 ```text
-registry.cn-hangzhou.aliyuncs.com/dxlx/frp-manager-lite:1.0.1
+registry.cn-hangzhou.aliyuncs.com/dxlx/frp-manager-lite:latest
 ```
 
 升级：

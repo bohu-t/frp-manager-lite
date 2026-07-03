@@ -9,7 +9,7 @@ set -Eeuo pipefail
 #   curl -fsSL https://raw.githubusercontent.com/bohu-t/frp-manager-lite/main/scripts/deploy-image-production.sh | sudo bash
 #
 # 默认从阿里云 ACR 公开仓库拉取镜像：
-#   registry.cn-hangzhou.aliyuncs.com/dxlx/frp-manager-lite:1.0.1
+#   registry.cn-hangzhou.aliyuncs.com/dxlx/frp-manager-lite:latest
 #
 # 非交互示例：
 #   PANEL_DOMAIN=panel.example.com PANEL_HTTPS_PORT=8443 FRPS_DOMAIN=frp.example.com \
@@ -223,7 +223,7 @@ collect_env_file() {
     cp -a "${ENV_FILE}" "${ENV_FILE}.bak.$(date +%Y%m%d-%H%M%S)"
   fi
 
-  IMAGE="${IMAGE:-registry.cn-hangzhou.aliyuncs.com/dxlx/frp-manager-lite:1.0.1}"
+  IMAGE="${IMAGE:-registry.cn-hangzhou.aliyuncs.com/dxlx/frp-manager-lite:latest}"
   FRP_VERSION="${FRP_VERSION:-}"
   select_frp_version
   FML_PUBLISH_PORT="${FML_PUBLISH_PORT:-18081}"
