@@ -1,0 +1,72 @@
+name: Build and publish Docker image to Aliyun ACR
+
+on:
+  push:
+    tags: ["release-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Image version, for example 1.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-acr-${{ github.ref }}-${{ inputs.version || '' }}
+  cancel-in-progress: true
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    env:
+      ACR_REGISTRY: registry.cn-hangzhou.aliyuncs.com
+      ACR_NAMESPACE: dxlx
+      ACR_REPOSITORY: frp-manager-lite
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            version="${{ inputs.version }}"
+          else
+            ref="${GITHUB_REF_NAME}"
+            version="${ref#release-v}"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version: $version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "image=${ACR_REGISTRY}/${ACR_NAMESPACE}/${ACR_REPOSITORY}:${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Aliyun ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build obfuscated runtime tree
+        env:
+          OBFUSCATION_SEED: ${{ secrets.OBFUSCATION_SEED }}
+        run: |
+          python3 tools/build-obfuscated.py --no-docker
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: dist/obfuscated
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.version.outputs.image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
