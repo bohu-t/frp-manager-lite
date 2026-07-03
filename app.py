@@ -30,7 +30,7 @@ from urllib.parse import unquote, urlparse
 import urllib.parse
 
 APP_NAME = "frp-manager-lite"
-APP_VERSION = os.getenv("FML_PANEL_VERSION", "1.0.2")  # 面板版本，不是 frp 版本
+APP_VERSION = os.getenv("FML_PANEL_VERSION", "1.0.4")  # 面板版本，不是 frp 版本
 FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0.66.0"))
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -2193,6 +2193,59 @@ class Handler(BaseHTTPRequestHandler):
             target = frontend_root / "index.html"
         self.send_body(target.read_bytes(), 200, static_content_type(target))
 
+    def host_port_rate_rules(self) -> None:
+        """Host-side tc/iptables sync endpoint, authenticated by FML_SETUP_KEY."""
+        token = self.headers.get("X-FML-Setup-Key", "")
+        if not token:
+            q = urllib.parse.parse_qs(urlparse(self.path).query)
+            token = str((q.get("setup_key") or q.get("token") or [""])[0])
+        if not FML_SETUP_KEY or not hmac.compare_digest(str(token), FML_SETUP_KEY):
+            self.send_json({"ok": False, "error": "forbidden"}, 403)
+            return
+        q = urllib.parse.parse_qs(urlparse(self.path).query)
+        node_id = int_or_none((q.get("node_id") or [""])[0])
+        params: list[Any] = [now()]
+        node_clause = ""
+        if node_id:
+            node_clause = "AND t.node_id=?"
+            params.append(node_id)
+        with db() as conn:
+            rows = conn.execute(f"""
+                SELECT DISTINCT t.remote_port, t.proxy_type, u.id AS user_id, u.username, u.bandwidth_limit_kbps, t.node_id, n.name AS node_name, n.region AS node_region
+                FROM tunnels t
+                JOIN users u ON u.id=t.user_id
+                LEFT JOIN nodes n ON n.id=t.node_id
+                WHERE t.enabled=1
+                  AND t.proxy_type IN ('tcp','udp')
+                  AND t.remote_port IS NOT NULL
+                  AND u.active=1
+                  AND (u.expires_at=0 OR u.expires_at>?)
+                  AND u.bandwidth_limit_kbps>0
+                  {node_clause}
+                ORDER BY t.remote_port
+            """, params).fetchall()
+        rules = []
+        seen: set[tuple[int, str]] = set()
+        for r in rows:
+            port = int(r["remote_port"] or 0)
+            speed_kib = int(r["bandwidth_limit_kbps"] or 0)
+            proto = str(r["proxy_type"] or "tcp")
+            if port <= 0 or speed_kib <= 0 or (port, proto) in seen:
+                continue
+            seen.add((port, proto))
+            rules.append({
+                "port": port,
+                "protocol": proto,
+                "rate_kib_per_sec": speed_kib,
+                "rate_kbit": max(8, speed_kib * 8),
+                "user_id": int(r["user_id"]),
+                "username": r["username"],
+                "node_id": int(r["node_id"] or 0),
+                "node_name": r["node_name"] or "",
+                "node_region": r["node_region"] or "",
+            })
+        self.send_json({"ok": True, "generated_at": now(), "node_id": node_id or 0, "rules": rules})
+
     def api_get(self, path: str) -> None:
         if path == "/api/csrf":
             token = make_csrf_token()
@@ -2205,6 +2258,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/license/status":
             with db() as conn:
                 self.send_json({"ok": True, "license": current_software_license(conn)})
+            return
+        if path == "/api/host/port-rate-rules":
+            self.host_port_rate_rules()
             return
         if path == "/api/me":
             user = self.current_user
