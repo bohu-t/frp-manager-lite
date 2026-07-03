@@ -351,7 +351,6 @@ def public_user(user: sqlite3.Row) -> dict[str, Any]:
         "invite_key_used": row_val(user, "invite_key_used"),
         "max_ports": user["max_ports"],
         "traffic_limit_bytes": int(row_val(user, "traffic_limit_bytes", 0) or 0),
-        "bandwidth_limit_kbps": int(row_val(user, "bandwidth_limit_kbps", 0) or 0),
         "active": bool(user["active"]),
         "expires_at": user["expires_at"],
         "expires_text": fmt_time(user["expires_at"]),
@@ -1022,7 +1021,7 @@ def create_user(username: str, password: str, max_ports: int, expires_days: int,
     if traffic_limit_bytes:
         extra.append(f"今日流量上限 {traffic_limit_bytes / 1024 / 1024 / 1024:.1f}GB")
     if bandwidth_limit_kbps:
-        extra.append(f"限速 {bandwidth_limit_kbps / 1024:.1f}MB/s")
+        extra.append(f"速率策略 {bandwidth_limit_kbps / 1024:.1f}MB/s")
     suffix = "，" + "，".join(extra) if extra else ""
     return True, f"已创建用户 {username}，地区节点：{node['region']} / {node['name']}，分配 {max_ports} 个端口，到期时间：{fmt_time(expires_at)}{suffix}"
 
@@ -1365,7 +1364,6 @@ def rate_limit_check(key: str, limit: int, window: int = RATE_WINDOW) -> tuple[b
 
 
 def tunnel_config(user: sqlite3.Row, node: sqlite3.Row, tunnels: list[sqlite3.Row]) -> str:
-    bandwidth_limit_kbps = int(row_val(user, "bandwidth_limit_kbps", 0) or 0)
     lines = [
         f'serverAddr = "{node["server_addr"]}"',
         f"serverPort = {node['server_port']}",
@@ -1397,9 +1395,6 @@ def tunnel_config(user: sqlite3.Row, node: sqlite3.Row, tunnels: list[sqlite3.Ro
         )
         if proxy_type in REMOTE_PORT_PROXY_TYPES:
             lines.append(f'remotePort = {t["remote_port"]}')
-        if bandwidth_limit_kbps > 0:
-            lines.append(f'bandwidthLimit = "{bandwidth_limit_kbps}KB"')
-            lines.append('bandwidthLimitMode = "client"')
         if proxy_type == "tcpmux":
             lines.append('multiplexer = "httpconnect"')
         if proxy_type in DOMAIN_PROXY_TYPES and t["custom_domains"]:
@@ -2265,6 +2260,7 @@ class Handler(BaseHTTPRequestHandler):
                     """
                 ):
                     item = public_user(r)
+                    item["bandwidth_limit_kbps"] = int(row_val(r, "bandwidth_limit_kbps", 0) or 0)
                     item["port_count"] = r["port_count"]
                     item["tunnel_count"] = r["tunnel_count"]
                     item["node_name"] = r["node_name"]
@@ -2670,7 +2666,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": False, "error": "用户不存在或不允许修改管理员"}, 404)
                 return
             conn.execute("UPDATE users SET traffic_limit_bytes=?, bandwidth_limit_kbps=? WHERE id=?", (traffic_limit_bytes, bandwidth_limit_kbps, user_id))
-        self.send_json({"ok": True, "message": f"已更新用户 {row['username']} 的流量/限速套餐"})
+        self.send_json({"ok": True, "message": f"已更新用户 {row['username']} 的流量/速率策略"})
 
     def admin_reset_password(self, data: dict[str, Any]) -> None:
         if not self.require_admin():
@@ -3057,14 +3053,6 @@ class Handler(BaseHTTPRequestHandler):
                         requested_secret = str(first_nested_value(content, {"sk", "secret_key", "secretKey", "SecretKey"}) or "")
                         if str(tunnel["secret_key"] or "") and requested_secret != str(tunnel["secret_key"] or ""):
                             reject, reason = True, "secret key does not match panel tunnel"
-                    if not reject:
-                        expected_bandwidth = int(row_val(user, "bandwidth_limit_kbps", 0) or 0)
-                        if expected_bandwidth > 0:
-                            requested_bandwidth = normalize_bandwidth_to_kbps(first_nested_value(content, {"bandwidthLimit", "bandwidth_limit", "BandwidthLimit"}))
-                            if requested_bandwidth is None or requested_bandwidth <= 0:
-                                reject, reason = True, "bandwidth limit missing"
-                            elif requested_bandwidth > expected_bandwidth:
-                                reject, reason = True, "bandwidth limit exceeds account plan"
                     if not reject and tunnel:
                         conn.execute("UPDATE tunnels SET last_proxy_at=? WHERE id=?", (now(), tunnel["id"]))
 
