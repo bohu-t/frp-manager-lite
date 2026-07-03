@@ -1578,7 +1578,6 @@ webServer.user = "admin"
 webServer.password = "CHANGE_ME"
 
 # Prometheus 监控指标（/metrics 端点）
-webServer.enablePrometheus = true
 
 # frps HTTP 插件鉴权 —— 面板会校验节点身份、账号状态、会话令牌和端口归属。
 [[httpPlugins]]
