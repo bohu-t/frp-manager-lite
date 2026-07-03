@@ -30,7 +30,7 @@ from urllib.parse import unquote, urlparse
 import urllib.parse
 
 APP_NAME = "frp-manager-lite"
-APP_VERSION = os.getenv("FML_PANEL_VERSION", "1.0.0")  # 面板版本，不是 frp 版本
+APP_VERSION = os.getenv("FML_PANEL_VERSION", "1.0.2")  # 面板版本，不是 frp 版本
 FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0.66.0"))
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -90,6 +90,63 @@ def fmt_time(ts: int | None) -> str:
 def row_val(row: sqlite3.Row, key: str, default: Any = "") -> Any:
     """Safe Row access — sqlite3.Row lacks .get() on some Python builds."""
     return row[key] if key in row.keys() else default
+
+
+def clamp_int(value: Any, default: int = 0, min_value: int = 0, max_value: int = 10**12) -> int:
+    try:
+        n = int(float(str(value).strip()))
+    except Exception:
+        n = default
+    return max(min_value, min(max_value, n))
+
+
+def traffic_gb_to_bytes(value: Any) -> int:
+    try:
+        gb = float(str(value or "0").strip())
+    except Exception:
+        gb = 0.0
+    gb = max(0.0, min(1_000_000.0, gb))
+    return int(gb * 1024 * 1024 * 1024)
+
+
+def speed_mbs_to_kbps(value: Any) -> int:
+    """Convert UI MB/s to KiB/s for frp bandwidthLimit."""
+    try:
+        mbs = float(str(value or "0").strip())
+    except Exception:
+        mbs = 0.0
+    mbs = max(0.0, min(1024.0, mbs))
+    return int(mbs * 1024)
+
+
+def normalize_bandwidth_to_kbps(value: Any) -> int | None:
+    """Best-effort parse frp bandwidthLimit values into KiB/s."""
+    if value is None:
+        return None
+    s = str(value).strip().lower().replace(" ", "")
+    if not s:
+        return None
+    multipliers = {
+        "kib": 1, "kb": 1, "k": 1,
+        "mib": 1024, "mb": 1024, "m": 1024,
+        "gib": 1024 * 1024, "gb": 1024 * 1024, "g": 1024 * 1024,
+        "b": 1 / 1024,
+    }
+    unit = ""
+    num = s
+    for suffix in sorted(multipliers, key=len, reverse=True):
+        if s.endswith(suffix):
+            unit = suffix
+            num = s[:-len(suffix)]
+            break
+    try:
+        n = float(num)
+    except Exception:
+        return None
+    if unit:
+        return int(round(n * multipliers[unit]))
+    # frp may report numeric values as bytes/s in some payload variants.
+    return int(round(n / 1024)) if n > 1024 * 1024 else int(round(n))
 
 
 def record_val(record: sqlite3.Row | dict[str, Any], key: str, default: Any = "") -> Any:
@@ -293,6 +350,8 @@ def public_user(user: sqlite3.Row) -> dict[str, Any]:
         "token": user["token"],
         "invite_key_used": row_val(user, "invite_key_used"),
         "max_ports": user["max_ports"],
+        "traffic_limit_bytes": int(row_val(user, "traffic_limit_bytes", 0) or 0),
+        "bandwidth_limit_kbps": int(row_val(user, "bandwidth_limit_kbps", 0) or 0),
         "active": bool(user["active"]),
         "expires_at": user["expires_at"],
         "expires_text": fmt_time(user["expires_at"]),
@@ -302,7 +361,7 @@ def public_user(user: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def insert_user_record(conn: sqlite3.Connection, username: str, password_hash_value: str, role: str, token: str, max_ports: int, expires_at: int, node_id: int, invite_key_used: str = "") -> sqlite3.Cursor:
+def insert_user_record(conn: sqlite3.Connection, username: str, password_hash_value: str, role: str, token: str, max_ports: int, expires_at: int, node_id: int, invite_key_used: str = "", traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0) -> sqlite3.Cursor:
     """Insert a user without any user-facing license binding.
 
     Older deployments may still have legacy users.license_key/machine_id columns with
@@ -312,6 +371,12 @@ def insert_user_record(conn: sqlite3.Connection, username: str, password_hash_va
     table_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
     cols = ["username", "password_hash", "role", "token", "max_ports", "expires_at", "node_id", "created_at"]
     vals: list[Any] = [username, password_hash_value, role, token, max_ports, expires_at, node_id, now()]
+    if "traffic_limit_bytes" in table_cols:
+        cols.insert(-1, "traffic_limit_bytes")
+        vals.insert(-1, int(traffic_limit_bytes or 0))
+    if "bandwidth_limit_kbps" in table_cols:
+        cols.insert(-1, "bandwidth_limit_kbps")
+        vals.insert(-1, int(bandwidth_limit_kbps or 0))
     if "invite_key_used" in table_cols:
         cols.insert(4, "invite_key_used")
         vals.insert(4, invite_key_used)
@@ -386,6 +451,16 @@ def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int) -> None
         conn.execute("UPDATE users SET node_id=? WHERE node_id IS NULL", (default_node_id,))
     if "invite_key_used" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN invite_key_used TEXT NOT NULL DEFAULT ''")
+    if "traffic_limit_bytes" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN traffic_limit_bytes INTEGER NOT NULL DEFAULT 0")
+    if "bandwidth_limit_kbps" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0")
+
+    invite_cols = {r["name"] for r in conn.execute("PRAGMA table_info(invite_keys)").fetchall()}
+    if "traffic_limit_bytes" not in invite_cols:
+        conn.execute("ALTER TABLE invite_keys ADD COLUMN traffic_limit_bytes INTEGER NOT NULL DEFAULT 0")
+    if "bandwidth_limit_kbps" not in invite_cols:
+        conn.execute("ALTER TABLE invite_keys ADD COLUMN bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0")
 
     port_cols = [r["name"] for r in conn.execute("PRAGMA table_info(ports)").fetchall()]
     if "node_id" not in port_cols or "id" not in port_cols:
@@ -638,6 +713,8 @@ def normalize_frps_proxy(proxy: dict[str, Any], typ: str) -> dict[str, Any]:
     name = str(proxy.get("name") or "")
     username, short_name = (name.split(".", 1) + [""])[:2] if "." in name else ("", name)
     conf = proxy.get("conf") or {}
+    bandwidth_limit = conf.get("bandwidthLimit") or conf.get("bandwidth_limit") or proxy.get("bandwidthLimit") or proxy.get("bandwidth_limit") or ""
+    bandwidth_limit_kbps = normalize_bandwidth_to_kbps(bandwidth_limit) or 0
     domains = conf.get("customDomains") or conf.get("custom_domains") or []
     if isinstance(domains, str):
         domains = [d.strip() for d in domains.split(",") if d.strip()]
@@ -652,6 +729,8 @@ def normalize_frps_proxy(proxy: dict[str, Any], typ: str) -> dict[str, Any]:
         "cur_conns": proxy.get("curConns") or 0,
         "today_traffic_in": proxy.get("todayTrafficIn") or 0,
         "today_traffic_out": proxy.get("todayTrafficOut") or 0,
+        "bandwidth_limit": bandwidth_limit,
+        "bandwidth_limit_kbps": bandwidth_limit_kbps,
         "client_version": proxy.get("clientVersion") or "",
         "last_start_time": proxy.get("lastStartTime") or "",
         "last_close_time": proxy.get("lastCloseTime") or "",
@@ -673,9 +752,31 @@ def frps_user_dashboard(username: str) -> dict[str, Any]:
         return {"enabled": False, "error": "frps dashboard 未接入面板"}
     try:
         proxies = [p for p in frps_all_proxies() if p.get("username") == username]
-        return {"enabled": True, "proxies": proxies, "total": len(proxies)}
+        traffic_in = sum(int(p.get("today_traffic_in") or 0) for p in proxies)
+        traffic_out = sum(int(p.get("today_traffic_out") or 0) for p in proxies)
+        return {"enabled": True, "proxies": proxies, "total": len(proxies), "today_traffic_in": traffic_in, "today_traffic_out": traffic_out, "today_traffic_total": traffic_in + traffic_out}
     except Exception as e:
         return {"enabled": False, "error": f"读取 frps dashboard 失败：{e.__class__.__name__}"}
+
+
+def user_today_traffic_bytes(username: str) -> int | None:
+    if not FRPS_DASHBOARD_URL:
+        return None
+    try:
+        data = frps_user_dashboard(username)
+        if not data.get("enabled"):
+            return None
+        return int(data.get("today_traffic_total") or 0)
+    except Exception:
+        return None
+
+
+def user_over_traffic_limit(user: sqlite3.Row) -> bool:
+    limit = int(row_val(user, "traffic_limit_bytes", 0) or 0)
+    if limit <= 0:
+        return False
+    used = user_today_traffic_bytes(user["username"])
+    return used is not None and used >= limit
 
 
 def frps_admin_dashboard(page: int = 1, page_size: int = 20, username: str = "") -> dict[str, Any]:
@@ -719,6 +820,8 @@ def init_db() -> None:
                 token TEXT NOT NULL UNIQUE,
                 invite_key_used TEXT NOT NULL DEFAULT '',
                 max_ports INTEGER NOT NULL DEFAULT 5,
+                traffic_limit_bytes INTEGER NOT NULL DEFAULT 0,
+                bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0,
                 active INTEGER NOT NULL DEFAULT 1,
                 expires_at INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL
@@ -784,6 +887,8 @@ def init_db() -> None:
                 max_uses INTEGER NOT NULL DEFAULT 1,
                 used_count INTEGER NOT NULL DEFAULT 0,
                 max_ports INTEGER NOT NULL DEFAULT 5,
+                traffic_limit_bytes INTEGER NOT NULL DEFAULT 0,
+                bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0,
                 user_expires_days INTEGER NOT NULL DEFAULT 30,
                 active INTEGER NOT NULL DEFAULT 1,
                 expires_at INTEGER NOT NULL DEFAULT 0,
@@ -828,6 +933,15 @@ def init_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0")
         if "invite_key_used" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN invite_key_used TEXT NOT NULL DEFAULT ''")
+        if "traffic_limit_bytes" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN traffic_limit_bytes INTEGER NOT NULL DEFAULT 0")
+        if "bandwidth_limit_kbps" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0")
+        invite_cols = {r["name"] for r in conn.execute("PRAGMA table_info(invite_keys)").fetchall()}
+        if "traffic_limit_bytes" not in invite_cols:
+            conn.execute("ALTER TABLE invite_keys ADD COLUMN traffic_limit_bytes INTEGER NOT NULL DEFAULT 0")
+        if "bandwidth_limit_kbps" not in invite_cols:
+            conn.execute("ALTER TABLE invite_keys ADD COLUMN bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0")
         # software_license.server_url migration
         sw_cols = {r["name"] for r in conn.execute("PRAGMA table_info(software_license)").fetchall()}
         if "server_url" not in sw_cols:
@@ -876,7 +990,7 @@ def available_ports_for_assignment(conn: sqlite3.Connection, node_id: int, limit
     ).fetchall()
 
 
-def create_user(username: str, password: str, max_ports: int, expires_days: int, node_id: int) -> tuple[bool, str]:
+def create_user(username: str, password: str, max_ports: int, expires_days: int, node_id: int, traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0) -> tuple[bool, str]:
     username = username.strip()
     if not username or len(username) > 32 or not username.replace("_", "").replace("-", "").isalnum():
         return False, "用户名只能包含字母、数字、下划线、短横线，长度 1-32"
@@ -886,6 +1000,10 @@ def create_user(username: str, password: str, max_ports: int, expires_days: int,
         return False, "端口数量必须在 1-100 之间"
     if expires_days < 0 or expires_days > 3650:
         return False, "有效期天数必须在 0-3650 之间"
+    if traffic_limit_bytes < 0:
+        return False, "流量限制不能小于 0"
+    if bandwidth_limit_kbps < 0:
+        return False, "网速限制不能小于 0"
     expires_at = 0 if expires_days == 0 else now() + expires_days * 86400
     with db() as conn:
         node = conn.execute("SELECT * FROM nodes WHERE id=? AND active=1", (node_id,)).fetchone()
@@ -895,12 +1013,18 @@ def create_user(username: str, password: str, max_ports: int, expires_days: int,
         if len(free_ports) < max_ports:
             return False, f"端口池不足，只剩 {len(free_ports)} 个可用端口"
         try:
-            cur = insert_user_record(conn, username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, expires_at, node_id)
+            cur = insert_user_record(conn, username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, expires_at, node_id, "", traffic_limit_bytes, bandwidth_limit_kbps)
         except sqlite3.IntegrityError:
             return False, "用户名已存在"
         user_id = cur.lastrowid
         conn.executemany("UPDATE ports SET user_id=? WHERE node_id=? AND port=?", [(user_id, node_id, r["port"]) for r in free_ports])
-    return True, f"已创建用户 {username}，地区节点：{node['region']} / {node['name']}，分配 {max_ports} 个端口，到期时间：{fmt_time(expires_at)}"
+    extra = []
+    if traffic_limit_bytes:
+        extra.append(f"今日流量上限 {traffic_limit_bytes / 1024 / 1024 / 1024:.1f}GB")
+    if bandwidth_limit_kbps:
+        extra.append(f"限速 {bandwidth_limit_kbps / 1024:.1f}MB/s")
+    suffix = "，" + "，".join(extra) if extra else ""
+    return True, f"已创建用户 {username}，地区节点：{node['region']} / {node['name']}，分配 {max_ports} 个端口，到期时间：{fmt_time(expires_at)}{suffix}"
 
 
 def local_license_authority_activate(license_key: str, machine_id: str) -> tuple[bool, str, dict[str, Any] | None]:
@@ -1009,7 +1133,7 @@ def create_software_license_keys_batch(note: str, plan: str, expires_days: int, 
     return True, f"已生成 {len(keys)} 个软件授权码", keys
 
 
-def create_invite_key(note: str, max_uses: int, max_ports: int, user_expires_days: int, key_expires_days: int, created_by: int) -> tuple[bool, str, str | None]:
+def create_invite_key(note: str, max_uses: int, max_ports: int, user_expires_days: int, key_expires_days: int, created_by: int, traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0) -> tuple[bool, str, str | None]:
     note = note.strip()[:120]
     max_uses = 1  # 注册密钥按业务规则只能使用一次
     if max_ports < 1 or max_ports > 100:
@@ -1018,17 +1142,19 @@ def create_invite_key(note: str, max_uses: int, max_ports: int, user_expires_day
         return False, "用户有效期必须在 0-3650 天之间", None
     if key_expires_days < 0 or key_expires_days > 3650:
         return False, "密钥有效期必须在 0-3650 天之间", None
+    if traffic_limit_bytes < 0 or bandwidth_limit_kbps < 0:
+        return False, "流量/网速限制不能小于 0", None
     key = "FML-" + secrets.token_urlsafe(18).replace("-", "").replace("_", "")[:24].upper()
     key_expires_at = 0 if key_expires_days == 0 else now() + key_expires_days * 86400
     with db() as conn:
         conn.execute(
-            "INSERT INTO invite_keys(key, note, max_uses, max_ports, user_expires_days, expires_at, created_by, created_at) VALUES(?,?,?,?,?,?,?,?)",
-            (key, note, max_uses, max_ports, user_expires_days, key_expires_at, created_by, now()),
+            "INSERT INTO invite_keys(key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, expires_at, created_by, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, key_expires_at, created_by, now()),
         )
     return True, "密钥已生成", key
 
 
-def create_invite_keys_batch(note: str, max_uses: int, max_ports: int, user_expires_days: int, key_expires_days: int, created_by: int, count: int) -> tuple[bool, str, list[str]]:
+def create_invite_keys_batch(note: str, max_uses: int, max_ports: int, user_expires_days: int, key_expires_days: int, created_by: int, count: int, traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0) -> tuple[bool, str, list[str]]:
     note = note.strip()[:120]
     max_uses = 1  # 注册密钥按业务规则只能使用一次
     if count < 1 or count > 500:
@@ -1039,14 +1165,16 @@ def create_invite_keys_batch(note: str, max_uses: int, max_ports: int, user_expi
         return False, "用户有效期必须在 0-3650 天之间", []
     if key_expires_days < 0 or key_expires_days > 3650:
         return False, "密钥有效期必须在 0-3650 天之间", []
+    if traffic_limit_bytes < 0 or bandwidth_limit_kbps < 0:
+        return False, "流量/网速限制不能小于 0", []
     keys: list[str] = []
     key_expires_at = 0 if key_expires_days == 0 else now() + key_expires_days * 86400
     with db() as conn:
         for _ in range(count):
             key = "FML-" + secrets.token_urlsafe(18).replace("-", "").replace("_", "")[:24].upper()
             conn.execute(
-                "INSERT INTO invite_keys(key, note, max_uses, max_ports, user_expires_days, expires_at, created_by, created_at) VALUES(?,?,?,?,?,?,?,?)",
-                (key, note, max_uses, max_ports, user_expires_days, key_expires_at, created_by, now()),
+                "INSERT INTO invite_keys(key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, expires_at, created_by, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, key_expires_at, created_by, now()),
             )
             keys.append(key)
     return True, f"已生成 {len(keys)} 枚密钥", keys
@@ -1075,13 +1203,15 @@ def register_with_invite(username: str, password: str, invite_key: str, node_id:
         if not node:
             return False, "请选择有效的地区节点"
         max_ports = int(key_row["max_ports"])
+        traffic_limit_bytes = int(row_val(key_row, "traffic_limit_bytes", 0) or 0)
+        bandwidth_limit_kbps = int(row_val(key_row, "bandwidth_limit_kbps", 0) or 0)
         free_ports = available_ports_for_assignment(conn, node_id, max_ports)
         if len(free_ports) < max_ports:
             return False, f"端口池不足，只剩 {len(free_ports)} 个可用端口"
         expires_days = int(key_row["user_expires_days"])
         user_expires_at = 0 if expires_days == 0 else now() + expires_days * 86400
         try:
-            cur = insert_user_record(conn, username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, user_expires_at, node_id, invite_key)
+            cur = insert_user_record(conn, username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, user_expires_at, node_id, invite_key, traffic_limit_bytes, bandwidth_limit_kbps)
         except sqlite3.IntegrityError:
             return False, "用户名已存在"
         user_id = cur.lastrowid
@@ -1235,6 +1365,7 @@ def rate_limit_check(key: str, limit: int, window: int = RATE_WINDOW) -> tuple[b
 
 
 def tunnel_config(user: sqlite3.Row, node: sqlite3.Row, tunnels: list[sqlite3.Row]) -> str:
+    bandwidth_limit_kbps = int(row_val(user, "bandwidth_limit_kbps", 0) or 0)
     lines = [
         f'serverAddr = "{node["server_addr"]}"',
         f"serverPort = {node['server_port']}",
@@ -1266,6 +1397,9 @@ def tunnel_config(user: sqlite3.Row, node: sqlite3.Row, tunnels: list[sqlite3.Ro
         )
         if proxy_type in REMOTE_PORT_PROXY_TYPES:
             lines.append(f'remotePort = {t["remote_port"]}')
+        if bandwidth_limit_kbps > 0:
+            lines.append(f'bandwidthLimit = "{bandwidth_limit_kbps}KB"')
+            lines.append('bandwidthLimitMode = "client"')
         if proxy_type == "tcpmux":
             lines.append('multiplexer = "httpconnect"')
         if proxy_type in DOMAIN_PROXY_TYPES and t["custom_domains"]:
@@ -2043,12 +2177,14 @@ class Handler(BaseHTTPRequestHandler):
         import csv
         buf = io.StringIO()
         w = csv.writer(buf)
-        w.writerow(["key", "note", "used_count", "max_uses", "max_ports", "user_expires_days", "active", "expires_at", "created_at"])
+        w.writerow(["key", "note", "used_count", "max_uses", "max_ports", "traffic_limit_gb_per_day", "bandwidth_limit_mbs", "user_expires_days", "active", "expires_at", "created_at"])
         with db() as conn:
             for k in conn.execute("SELECT * FROM invite_keys WHERE active=1 AND used_count=0 AND used_count < max_uses AND (expires_at=0 OR expires_at>?) ORDER BY id DESC", (now(),)):
                 w.writerow([
-                    k["key"], k["note"], k["used_count"], k["max_uses"], k["max_ports"], k["user_expires_days"],
-                    "yes" if k["active"] else "no", fmt_time(k["expires_at"]), fmt_time(k["created_at"]),
+                    k["key"], k["note"], k["used_count"], k["max_uses"], k["max_ports"],
+                    round(int(row_val(k, "traffic_limit_bytes", 0) or 0) / 1024 / 1024 / 1024, 2),
+                    round(int(row_val(k, "bandwidth_limit_kbps", 0) or 0) / 1024, 2),
+                    k["user_expires_days"], "yes" if k["active"] else "no", fmt_time(k["expires_at"]), fmt_time(k["created_at"]),
                 ])
         self.send_body(buf.getvalue().encode("utf-8-sig"), 200, "text/csv; charset=utf-8", {"Content-Disposition": 'attachment; filename="invite-keys.csv"'})
 
@@ -2145,6 +2281,8 @@ class Handler(BaseHTTPRequestHandler):
                         "used_count": k["used_count"],
                         "remaining": max(0, k["max_uses"] - k["used_count"]),
                         "max_ports": k["max_ports"],
+                        "traffic_limit_bytes": int(row_val(k, "traffic_limit_bytes", 0) or 0),
+                        "bandwidth_limit_kbps": int(row_val(k, "bandwidth_limit_kbps", 0) or 0),
                         "user_expires_days": k["user_expires_days"],
                         "active": bool(k["active"]),
                         "expires_at": k["expires_at"],
@@ -2375,6 +2513,8 @@ class Handler(BaseHTTPRequestHandler):
             self.admin_toggle_user(user, data)
         elif path == "/api/admin/users/extend":
             self.admin_extend_user(data)
+        elif path == "/api/admin/users/limits":
+            self.admin_update_user_limits(data)
         elif path == "/api/admin/users/reset-password":
             self.admin_reset_password(data)
         elif path == "/api/admin/users/delete":
@@ -2478,7 +2618,15 @@ class Handler(BaseHTTPRequestHandler):
     def admin_create_user(self, data: dict[str, Any]) -> None:
         if not self.require_admin():
             return
-        ok, msg = create_user(str(data.get("username", "")), str(data.get("password", "")), int(data.get("max_ports", DEFAULT_MAX_PORTS)), int(data.get("expires_days", 30)), int(data.get("node_id", 0)))
+        ok, msg = create_user(
+            str(data.get("username", "")),
+            str(data.get("password", "")),
+            int(data.get("max_ports", DEFAULT_MAX_PORTS)),
+            int(data.get("expires_days", 30)),
+            int(data.get("node_id", 0)),
+            traffic_gb_to_bytes(data.get("traffic_limit_gb", 0)),
+            speed_mbs_to_kbps(data.get("bandwidth_limit_mbs", 0)),
+        )
         self.send_json({"ok": ok, "message": msg, "error": None if ok else msg}, 200 if ok else 400)
 
     def admin_toggle_user(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
@@ -2509,6 +2657,20 @@ class Handler(BaseHTTPRequestHandler):
             new_expires_at = max(now(), int(row["expires_at"] or 0)) + days * 86400
             conn.execute("UPDATE users SET expires_at=?, active=1 WHERE id=?", (new_expires_at, user_id))
         self.send_json({"ok": True, "message": f"已续期到 {fmt_time(new_expires_at)}"})
+
+    def admin_update_user_limits(self, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        user_id = int(data.get("id", 0))
+        traffic_limit_bytes = traffic_gb_to_bytes(data.get("traffic_limit_gb", 0))
+        bandwidth_limit_kbps = speed_mbs_to_kbps(data.get("bandwidth_limit_mbs", 0))
+        with db() as conn:
+            row = conn.execute("SELECT username FROM users WHERE id=? AND role!='admin'", (user_id,)).fetchone()
+            if not row:
+                self.send_json({"ok": False, "error": "用户不存在或不允许修改管理员"}, 404)
+                return
+            conn.execute("UPDATE users SET traffic_limit_bytes=?, bandwidth_limit_kbps=? WHERE id=?", (traffic_limit_bytes, bandwidth_limit_kbps, user_id))
+        self.send_json({"ok": True, "message": f"已更新用户 {row['username']} 的流量/限速套餐"})
 
     def admin_reset_password(self, data: dict[str, Any]) -> None:
         if not self.require_admin():
@@ -2634,6 +2796,8 @@ class Handler(BaseHTTPRequestHandler):
             int(data.get("key_expires_days", 30)),
             admin["id"],
             int(data.get("count", 1)),
+            traffic_gb_to_bytes(data.get("traffic_limit_gb", 0)),
+            speed_mbs_to_kbps(data.get("bandwidth_limit_mbs", 0)),
         )
         self.send_json({"ok": ok, "message": msg if ok else None, "key": keys[0] if keys else None, "keys": keys, "error": None if ok else msg}, 200 if ok else 400)
 
@@ -2845,6 +3009,8 @@ class Handler(BaseHTTPRequestHandler):
                 user = conn.execute("SELECT * FROM users WHERE username=? AND active=1 AND (expires_at=0 OR expires_at>?)", (user_name, now())).fetchone()
                 if not user:
                     reject, reason = True, "unknown, disabled or expired user"
+                elif user_over_traffic_limit(user):
+                    reject, reason = True, "daily traffic quota exceeded"
                 elif not panel_token or not hmac.compare_digest(panel_token, user["token"]):
                     reject, reason = True, "invalid panel token"
                 elif callback_node_id is not None:
@@ -2891,6 +3057,14 @@ class Handler(BaseHTTPRequestHandler):
                         requested_secret = str(first_nested_value(content, {"sk", "secret_key", "secretKey", "SecretKey"}) or "")
                         if str(tunnel["secret_key"] or "") and requested_secret != str(tunnel["secret_key"] or ""):
                             reject, reason = True, "secret key does not match panel tunnel"
+                    if not reject:
+                        expected_bandwidth = int(row_val(user, "bandwidth_limit_kbps", 0) or 0)
+                        if expected_bandwidth > 0:
+                            requested_bandwidth = normalize_bandwidth_to_kbps(first_nested_value(content, {"bandwidthLimit", "bandwidth_limit", "BandwidthLimit"}))
+                            if requested_bandwidth is None or requested_bandwidth <= 0:
+                                reject, reason = True, "bandwidth limit missing"
+                            elif requested_bandwidth > expected_bandwidth:
+                                reject, reason = True, "bandwidth limit exceeds account plan"
                     if not reject and tunnel:
                         conn.execute("UPDATE tunnels SET last_proxy_at=? WHERE id=?", (now(), tunnel["id"]))
 

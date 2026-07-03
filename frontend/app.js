@@ -503,6 +503,10 @@ async function loadDashboard(){
   if(isAdmin){ loadAdminDashboard(); return; }
   const used = new Set(data.tunnels.map(t => t.remote_port));
   const ps = data.port_stats || {};
+  const todayTraffic = Number(data.frps_user_dashboard?.today_traffic_total || 0);
+  const trafficLimit = Number(data.user.traffic_limit_bytes || 0);
+  const trafficLine = trafficLimit ? `今日流量：<b>${fmtBytes(todayTraffic)}</b> / ${fmtBytes(trafficLimit)}` : `今日流量：<b>${fmtBytes(todayTraffic)}</b> / 不限`;
+  const speedLine = Number(data.user.bandwidth_limit_kbps || 0) ? `限速：<b>${(Number(data.user.bandwidth_limit_kbps) / 1024).toFixed(1)} MB/s</b>` : '限速：不限';
   
   // Port summary — show all known ports only when under 200; otherwise summary card
   let portsHtml;
@@ -532,7 +536,7 @@ async function loadDashboard(){
   const proxyTypeOptions = (data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux']).map(t => `<option value="${t}">${t}</option>`).join('');
   app.innerHTML = `
     <div class="grid">
-      <section class="card stat"><div class="label">当前账号</div><div class="num">${esc(data.user.username)}</div><p>地区节点：<b>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</b></p><p>端口上限：${esc(data.user.max_ports)} · 到期：<b>${esc(data.user.expires_text)}</b></p></section>
+      <section class="card stat"><div class="label">当前账号</div><div class="num">${esc(data.user.username)}</div><p>地区节点：<b>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</b></p><p>端口上限：${esc(data.user.max_ports)} · 到期：<b>${esc(data.user.expires_text)}</b></p><p>${trafficLine}</p><p>${speedLine}</p></section>
       <section class="card stat"><div class="label">FRPS 接入点</div><div class="num" style="font-size:20px">${esc(data.frps.addr)}</div><p>端口：<code>${esc(data.frps.port)}</code></p><p class="row"><a class="btn" href="/config/frpc.toml">下载 frpc.toml</a><a class="btn secondary" href="/config/deploy-frpc.sh">下载部署脚本</a></p><p class="muted small">全协议：${(data.allowed_proxy_types || []).join(' / ')}</p></section>
     </div>
     ${isAdmin ? '' : userDeployScriptAddressHtml(data.user)}
@@ -676,12 +680,14 @@ async function loadAdmin(section=currentAdminSection){
   const rows = usersSlice.map(u => `
     <tr>
       <td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${esc(u.node_region || '-')} / ${esc(u.node_name || '-')}</td><td>${u.port_count}/${u.max_ports}</td><td>${u.tunnel_count}</td>
+      <td>${fmtBytes(u.traffic_limit_bytes)} / ${u.bandwidth_limit_kbps ? `${(Number(u.bandwidth_limit_kbps) / 1024).toFixed(1)} MB/s` : '不限'}</td>
       <td>${esc(u.expires_text)} ${u.expired ? '<span class="bad">已到期</span>' : ''}</td>
       <td>${u.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
       <td><code class="token" title="${esc(u.invite_key_used || '')}">${esc(u.invite_key_used || '后台创建')}</code></td>
       <td class="actions">
         <button onclick="adminToggle(${u.id})">${u.active ? '停用' : '启用'}</button>
         <button onclick="adminExtend(${u.id})">续30天</button>
+        <button onclick="adminLimits(${u.id}, ${Number(u.traffic_limit_bytes || 0)}, ${Number(u.bandwidth_limit_kbps || 0)})">改套餐</button>
         <button onclick="adminReset(${u.id})">重置密码</button>
         <button class="danger" onclick="adminDelete(${u.id})">删除</button>
       </td>
@@ -701,11 +707,12 @@ async function loadAdmin(section=currentAdminSection){
       <td>${esc(k.note)}</td>
       <td>${k.used_count}/${k.max_uses}</td>
       <td>${k.max_ports}</td>
+      <td>${fmtBytes(k.traffic_limit_bytes)} / ${k.bandwidth_limit_kbps ? `${(Number(k.bandwidth_limit_kbps) / 1024).toFixed(1)} MB/s` : '不限'}</td>
       <td>${k.user_expires_days === 0 ? '永不过期' : `${k.user_expires_days} 天`}</td>
       <td>${esc(k.expires_text)} ${k.expired ? '<span class="bad">已过期</span>' : ''}</td>
       <td>${k.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
       <td class="actions"><button onclick="copyText('${k.key}')">复制</button><button onclick="inviteToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button class="danger" onclick="inviteDelete(${k.id})">删除</button></td>
-    </tr>`).join('') || emptyRow(9, '还没有注册密钥');
+    </tr>`).join('') || emptyRow(10, '还没有注册密钥');
   const logRows = logsSlice.map(l => `
     <tr><td>${l.id}</td><td>${esc(l.event)}</td><td>${esc(l.username || '-')}</td><td>${esc(l.remote_port || '-')}</td><td>${esc(l.proxy_type || '-')}</td><td>${esc(l.detail || '')}</td><td>${fmtTs(l.created_at)}</td></tr>
   `).join('') || emptyRow(7, '暂无审计日志');
@@ -748,11 +755,13 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>备注</label><input name="note" placeholder="订单号/套餐名"></div>
       <div><label>每枚可用次数</label><input name="max_uses" type="number" value="1" min="1" max="1" disabled><span class="muted small">固定 1 次</span></div>
       <div><label>注册后端口数</label><input name="max_ports" type="number" value="5" min="1" max="100"></div>
+      <div><label>今日流量上限 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
+      <div><label>网速限制 MB/s</label><input name="bandwidth_limit_mbs" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
       <div><label>注册后账号有效期天数</label><input name="user_expires_days" type="number" value="30" min="0" max="3650"></div>
       <div><label>密钥有效期天数</label><input name="key_expires_days" type="number" value="30" min="0" max="3650"></div>
       <div style="align-self:end"><button>生成密钥</button></div>
     </form><p><a class="btn" href="/admin/export/invite-keys.csv">导出未使用可用密钥 CSV</a></p><p class="panel-note small">批量生成后会自动复制并下载本次生成的 txt。CSV 导出只包含未使用、启用中、未过期的密钥。</p></section>
-    <section class="card"><div class="section-title"><h2>注册密钥列表</h2><p>已使用密钥不会出现在 CSV 导出里</p></div><table><thead><tr><th>ID</th><th>密钥</th><th>备注</th><th>使用</th><th>端口</th><th>账号有效期</th><th>密钥到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table>${paginationHtml('keys', keysPage, (data.invite_keys || []).length, ADMIN_PAGE_SIZE)}</section>
+    <section class="card"><div class="section-title"><h2>注册密钥列表</h2><p>已使用密钥不会出现在 CSV 导出里</p></div><table><thead><tr><th>ID</th><th>密钥</th><th>备注</th><th>使用</th><th>端口</th><th>流量/限速</th><th>账号有效期</th><th>密钥到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table>${paginationHtml('keys', keysPage, (data.invite_keys || []).length, ADMIN_PAGE_SIZE)}</section>
     ${data.software_license_authority ? `<section class="card" id="software-licenses"><div class="section-title"><h2>服务器软件授权码</h2><p>卖家后台使用：先批量生成授权码发给客户；客户输入授权码后自动绑定他的部署服务器。</p></div><form id="softwareLicenseForm" class="grid">
       <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
       <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
@@ -767,10 +776,12 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>初始密码</label><input name="password" type="password" required></div>
       <div><label>地区节点</label><select name="node_id" required>${adminNodeOptions}</select></div>
       <div><label>端口数量</label><input name="max_ports" type="number" value="5" min="1" max="100"></div>
+      <div><label>今日流量上限 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
+      <div><label>网速限制 MB/s</label><input name="bandwidth_limit_mbs" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
       <div><label>有效期天数</label><input name="expires_days" type="number" value="30" min="0" max="3650"><span class="muted small">0 表示永不过期</span></div>
       <div style="align-self:end"><button>创建</button></div>
     </form></section>
-    <section class="card" id="users"><div class="section-title"><h2>用户列表</h2><p>管理状态、续期、注册密钥和删除账号</p></div><table><thead><tr><th>ID</th><th>用户</th><th>角色</th><th>地区节点</th><th>端口</th><th>隧道</th><th>到期</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, (data.users || []).length, ADMIN_PAGE_SIZE)}</section>`;
+    <section class="card" id="users"><div class="section-title"><h2>用户列表</h2><p>管理状态、续期、注册密钥和删除账号</p></div><table><thead><tr><th>ID</th><th>用户</th><th>角色</th><th>地区节点</th><th>端口</th><th>隧道</th><th>流量/限速</th><th>到期</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, (data.users || []).length, ADMIN_PAGE_SIZE)}</section>`;
   const riskHtml = `
     <section class="card" id="risk"><div class="section-title"><h2>投诉处理 / 风控</h2><p>按端口定位用户并快速封禁</p></div>
       <form id="lookupPortForm" class="grid">
@@ -1041,6 +1052,15 @@ async function restoreFullBackup(){
 
 async function adminToggle(id){ await api('/api/admin/users/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
 async function adminExtend(id){ await api('/api/admin/users/extend', {method:'POST', body:{id, days:30}}).then(r=>{show(r.message||'已续期'); loadAdmin();}).catch(e=>show(e.message,true)); }
+async function adminLimits(id, trafficBytes=0, bandwidthKbps=0){
+  const currentGb = trafficBytes ? (Number(trafficBytes) / 1024 / 1024 / 1024).toFixed(1) : '0';
+  const currentMbs = bandwidthKbps ? (Number(bandwidthKbps) / 1024).toFixed(1) : '0';
+  const traffic_limit_gb = prompt('今日流量上限 GB（0 表示不限）', currentGb);
+  if(traffic_limit_gb === null) return;
+  const bandwidth_limit_mbs = prompt('网速限制 MB/s（0 表示不限）', currentMbs);
+  if(bandwidth_limit_mbs === null) return;
+  await api('/api/admin/users/limits', {method:'POST', body:{id, traffic_limit_gb, bandwidth_limit_mbs}}).then(r=>{show(r.message||'已更新套餐'); loadAdmin();}).catch(e=>show(e.message,true));
+}
 async function adminReset(id){ if(confirm('重置该用户密码？')) await api('/api/admin/users/reset-password', {method:'POST', body:{id}}).then(r=>{show(r.message); loadAdmin();}).catch(e=>show(e.message,true)); }
 async function adminDelete(id){ if(confirm('删除用户会释放端口并删除隧道，确定？')) await api('/api/admin/users/delete', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
 async function inviteToggle(id){ await api('/api/admin/invite-keys/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
