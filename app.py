@@ -1378,20 +1378,17 @@ def tunnel_config(user: sqlite3.Row, node: sqlite3.Row, tunnels: list[sqlite3.Ro
         f'serverAddr = "{node["server_addr"]}"',
         f"serverPort = {node['server_port']}",
         "",
-        "# frps 原生 token 通常是全局共享；生产环境建议配合本面板的 /frp-plugin 做二次鉴权。",
         "auth.method = \"token\"",
         f'auth.token = "{node["auth_token"]}"',
         f'user = "{user["username"]}"',
         f'metadatas.panelToken = "{user["token"]}"',
         "",
-        "# frp 0.66+ 推荐配置：连接池、多路复用",
         "transport.poolCount = 5",
         "transport.tcpMux = true",
         "",
     ]
     for t in tunnels:
         if not t["enabled"]:
-            lines.append(f"# disabled: {t['name']}")
             continue
         proxy_type = t["proxy_type"]
         lines.extend(
