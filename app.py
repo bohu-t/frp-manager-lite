@@ -499,11 +499,14 @@ def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int) -> None
                 secret_key TEXT NOT NULL DEFAULT '',
                 enabled INTEGER NOT NULL DEFAULT 1,
                 created_at INTEGER NOT NULL,
+                last_proxy_at INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(user_id, name)
             );
             """
         )
-        conn.execute("INSERT OR IGNORE INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at) SELECT ?, user_id, name, proxy_type, local_ip, local_port, remote_port, '', '', enabled, created_at FROM tunnels_old", (default_node_id,))
+        old_tunnel_cols = {r["name"] for r in conn.execute("PRAGMA table_info(tunnels_old)").fetchall()}
+        last_proxy_expr = "COALESCE(last_proxy_at, 0)" if "last_proxy_at" in old_tunnel_cols else "0"
+        conn.execute(f"INSERT OR IGNORE INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at, last_proxy_at) SELECT ?, user_id, name, proxy_type, local_ip, local_port, remote_port, '', '', enabled, created_at, {last_proxy_expr} FROM tunnels_old", (default_node_id,))
         conn.execute("DROP TABLE tunnels_old")
     else:
         if "custom_domains" not in tunnel_cols:
@@ -530,11 +533,14 @@ def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int) -> None
                     secret_key TEXT NOT NULL DEFAULT '',
                     enabled INTEGER NOT NULL DEFAULT 1,
                     created_at INTEGER NOT NULL,
+                    last_proxy_at INTEGER NOT NULL DEFAULT 0,
                     UNIQUE(user_id, name)
                 );
                 """
             )
-            conn.execute("INSERT OR IGNORE INTO tunnels(id, node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at) SELECT id, node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at FROM tunnels_old")
+            old_tunnel_cols = {r["name"] for r in conn.execute("PRAGMA table_info(tunnels_old)").fetchall()}
+            last_proxy_expr = "COALESCE(last_proxy_at, 0)" if "last_proxy_at" in old_tunnel_cols else "0"
+            conn.execute(f"INSERT OR IGNORE INTO tunnels(id, node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at, last_proxy_at) SELECT id, node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at, {last_proxy_expr} FROM tunnels_old")
             conn.execute("DROP TABLE tunnels_old")
     conn.execute("DROP INDEX IF EXISTS idx_tunnels_node_port")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tunnels_node_port_remote ON tunnels(node_id, remote_port) WHERE remote_port > 0")
