@@ -9,17 +9,17 @@
 ### 推荐：镜像版一键生产部署（面板 + frps + Nginx/HTTPS）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bohu-t/frp-manager-lite/main/scripts/deploy-image-production.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/bohu-t/lite-install/main/deploy-image-production.sh | sudo bash
 ```
 
 这个脚本会先询问面板域名/端口/管理员密码、frps 域名/端口/token/端口池等信息，统一生成 `/opt/frp-manager-lite/.env`，然后所有部署配置都从 `.env` 读取。它会安装 Docker、拉取预构建面板镜像、安装 frps 0.66、可选配置 Nginx 和 Let's Encrypt HTTPS。用户服务器不需要源码，也不需要本地构建镜像。HTTPS 端口默认 443；如果 443 被占用，脚本会让用户选择其它端口，例如 8443。
 
-### 仅部署面板镜像
+### 公开安装脚本仓库
 
-如果只需要部署面板，不安装 frps / Nginx：
+源码仓库保持私有；公开一键安装脚本放在：
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/bohu-t/frp-manager-lite/main/scripts/install-image.sh | sudo bash
+```text
+https://github.com/bohu-t/lite-install
 ```
 
 默认部署到 `/opt/frp-manager-lite`，镜像来自阿里云 ACR 公开仓库：
