@@ -361,7 +361,7 @@ def public_user(user: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def insert_user_record(conn: sqlite3.Connection, username: str, password_hash_value: str, role: str, token: str, max_ports: int, expires_at: int, node_id: int, invite_key_used: str = "", traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0) -> sqlite3.Cursor:
+def insert_user_record(conn: sqlite3.Connection, username: str, password_hash_value: str, role: str, token: str, max_ports: int, expires_at: int, node_id: int | None, invite_key_used: str = "", traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0) -> sqlite3.Cursor:
     """Insert a user without any user-facing license binding.
 
     Older deployments may still have legacy users.license_key/machine_id columns with
@@ -429,7 +429,7 @@ def node_public(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def ensure_default_node(conn: sqlite3.Connection) -> int:
+def ensure_default_node(conn: sqlite3.Connection) -> int | None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS nodes (
@@ -458,35 +458,18 @@ def ensure_default_node(conn: sqlite3.Connection) -> int:
         conn.execute("ALTER TABLE nodes ADD COLUMN dashboard_user TEXT NOT NULL DEFAULT ''")
     if "dashboard_password" not in cols:
         conn.execute("ALTER TABLE nodes ADD COLUMN dashboard_password TEXT NOT NULL DEFAULT ''")
-    row = conn.execute("SELECT * FROM nodes ORDER BY id LIMIT 1").fetchone()
-    if row:
-        # 如果默认节点还是占位符，同步 env
-        if row["server_addr"] == "YOUR_FRPS_IP_OR_DOMAIN":
-            conn.execute("UPDATE nodes SET server_addr=? WHERE id=?", (FRP_SERVER_ADDR, row["id"]))
-            print(f"INFO: default node server_addr synced from FRP_SERVER_ADDR ({FRP_SERVER_ADDR})")
-        # 如果默认节点 auth_token 是占位符或不匹配 env，同步
-        if row["auth_token"] == "CHANGE_ME_SHARED_FRPS_TOKEN" or row["auth_token"] != FRP_AUTH_TOKEN:
-            conn.execute("UPDATE nodes SET auth_token=? WHERE id=?", (FRP_AUTH_TOKEN, row["id"]))
-            print(f"INFO: default node auth_token synced from FRP_AUTH_TOKEN")
-        if FRPS_WEB_PORT > 0 and row_val(row, "web_port", 0) in (0, None, ""):
-            conn.execute("UPDATE nodes SET web_port=? WHERE id=?", (FRPS_WEB_PORT, row["id"]))
-            print(f"INFO: default node web_port synced from FRPS_WEB_PORT ({FRPS_WEB_PORT})")
-        if FRPS_DASHBOARD_URL and not row_val(row, "dashboard_url", ""):
-            conn.execute("UPDATE nodes SET dashboard_url=?, dashboard_user=?, dashboard_password=? WHERE id=?", (FRPS_DASHBOARD_URL, FRPS_DASHBOARD_USER, FRPS_DASHBOARD_PASSWORD, row["id"]))
-            print("INFO: default node frps dashboard settings synced from FML_FRPS_DASHBOARD_URL")
-        return int(row["id"])
-    cur = conn.execute(
-        "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        ("默认地区", "default", FRP_SERVER_ADDR, FRP_SERVER_PORT, FRP_AUTH_TOKEN, PORT_START, PORT_END, FRPS_WEB_PORT, FRPS_DASHBOARD_URL, FRPS_DASHBOARD_USER, FRPS_DASHBOARD_PASSWORD, 1, "自动创建的默认节点", now()),
-    )
-    return int(cur.lastrowid)
+    # Do not provision a node automatically. Existing nodes are left untouched;
+    # a fresh installation starts empty and the administrator creates nodes in UI.
+    row = conn.execute("SELECT id FROM nodes ORDER BY id LIMIT 1").fetchone()
+    return int(row["id"]) if row else None
 
 
-def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int) -> None:
+def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int | None) -> None:
     user_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
     if "node_id" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN node_id INTEGER REFERENCES nodes(id) ON DELETE SET NULL")
-        conn.execute("UPDATE users SET node_id=? WHERE node_id IS NULL", (default_node_id,))
+        if default_node_id is not None:
+            conn.execute("UPDATE users SET node_id=? WHERE node_id IS NULL", (default_node_id,))
     if "invite_key_used" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN invite_key_used TEXT NOT NULL DEFAULT ''")
     if "traffic_limit_bytes" not in user_cols:
@@ -1015,10 +998,13 @@ def init_db() -> None:
         if "server_url" not in sw_cols:
             conn.execute("ALTER TABLE software_license ADD COLUMN server_url TEXT NOT NULL DEFAULT ''")
         migrate_region_nodes(conn, default_node_id)
-        conn.executemany(
-            "INSERT OR IGNORE INTO ports(node_id, port, created_at) VALUES(?, ?, ?)",
-            [(default_node_id, p, now()) for p in range(PORT_START, PORT_END + 1)],
-        )
+        # Port pools belong to a specific node. Seed them only when an existing
+        # node is present; newly created nodes receive their own configured range.
+        if default_node_id is not None:
+            conn.executemany(
+                "INSERT OR IGNORE INTO ports(node_id, port, created_at) VALUES(?, ?, ?)",
+                [(default_node_id, p, now()) for p in range(PORT_START, PORT_END + 1)],
+            )
         admin = conn.execute("SELECT * FROM users WHERE role='admin' LIMIT 1").fetchone()
         if not admin:
             insert_user_record(conn, ADMIN_USER, password_hash(ADMIN_PASSWORD), "admin", secrets.token_urlsafe(24), DEFAULT_MAX_PORTS, 0, default_node_id)
@@ -1028,7 +1014,7 @@ def init_db() -> None:
                 conn.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash(ADMIN_PASSWORD), admin["id"]))
                 print(f"INFO: admin password synced from FML_ADMIN_PASSWORD")
             admin_node = admin["node_id"] or 0
-            if not admin_node:
+            if not admin_node and default_node_id is not None:
                 conn.execute("UPDATE users SET node_id=? WHERE id=?", (default_node_id, admin["id"]))
         for r in conn.execute(
             """
