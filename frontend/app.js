@@ -8,6 +8,9 @@ let adminDashboardTimer = null;
 let csrfToken = null;
 let colorMode = localStorage.getItem('fml_color_mode') || 'system';
 let adminPages = {users:1, keys:1, nodes:1, risk:1};
+let adminUserSearch = '';
+let adminUserStatus = 'all';
+let adminUserNode = '';
 let adminProxyPage = 1;
 let adminProxyPageSize = 20;
 let adminProxyUserFilter = '';
@@ -667,12 +670,23 @@ async function loadAdmin(section=currentAdminSection){
   softwareLicense = data.software_license || softwareLicense;
   setNav();
   adminPages[currentAdminSection] = adminPages[currentAdminSection] || 1;
-  const usersPage = clampPage(adminPages.users, (data.users || []).length, ADMIN_PAGE_SIZE);
+  const allUsers = data.users || [];
+  const userQuery = adminUserSearch.trim().toLocaleLowerCase();
+  const filteredUsers = allUsers.filter(u => {
+    const searchable = [u.username, u.invite_key_used, u.node_region, u.node_name, u.id].join(' ').toLocaleLowerCase();
+    if(userQuery && !searchable.includes(userQuery)) return false;
+    if(adminUserNode && String(u.node_id ?? '') !== String(adminUserNode)) return false;
+    if(adminUserStatus === 'active' && (!u.active || u.expired)) return false;
+    if(adminUserStatus === 'disabled' && u.active) return false;
+    if(adminUserStatus === 'expired' && !u.expired) return false;
+    return true;
+  });
+  const usersPage = clampPage(adminPages.users, filteredUsers.length, ADMIN_PAGE_SIZE);
   const keysPage = clampPage(adminPages.keys, (data.invite_keys || []).length, ADMIN_PAGE_SIZE);
   const nodesPage = clampPage(adminPages.nodes, (data.nodes || []).length, ADMIN_PAGE_SIZE);
   const riskPage = clampPage(adminPages.risk, (data.logs || []).length, ADMIN_PAGE_SIZE);
   adminPages.users = usersPage; adminPages.keys = keysPage; adminPages.nodes = nodesPage; adminPages.risk = riskPage;
-  const usersSlice = pageItems(data.users || [], usersPage, ADMIN_PAGE_SIZE);
+  const usersSlice = pageItems(filteredUsers, usersPage, ADMIN_PAGE_SIZE);
   const keysSlice = pageItems(data.invite_keys || [], keysPage, ADMIN_PAGE_SIZE);
   const nodesSlice = pageItems(data.nodes || [], nodesPage, ADMIN_PAGE_SIZE);
   const logsSlice = pageItems(data.logs || [], riskPage, ADMIN_PAGE_SIZE);
@@ -780,7 +794,14 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>有效期天数</label><input name="expires_days" type="number" value="30" min="0" max="3650"><span class="muted small">0 表示永不过期</span></div>
       <div style="align-self:end"><button>创建</button></div>
     </form></section>
-    <section class="card" id="users"><div class="section-title"><h2>用户列表</h2><p>管理状态、续期、注册密钥和删除账号</p></div><table><thead><tr><th>ID</th><th>用户</th><th>角色</th><th>地区节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>到期</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, (data.users || []).length, ADMIN_PAGE_SIZE)}</section>`;
+    <section class="card" id="users"><div class="section-title"><h2>用户列表</h2><p>管理状态、续期、注册密钥和删除账号</p></div>
+      <form id="adminUserFilterForm" class="grid admin-user-filters">
+        <div><label for="adminUserSearch">搜索用户</label><input id="adminUserSearch" name="search" value="${esc(adminUserSearch)}" placeholder="用户名、ID、注册密钥"></div>
+        <div><label for="adminUserNode">地区节点</label><select id="adminUserNode" name="node"><option value="">全部节点</option>${(data.nodes || []).map(n => `<option value="${n.id}" ${String(n.id)===String(adminUserNode)?'selected':''}>${esc(n.region)} / ${esc(n.name)}</option>`).join('')}</select></div>
+        <div><label for="adminUserStatus">账号状态</label><select id="adminUserStatus" name="status"><option value="all" ${adminUserStatus==='all'?'selected':''}>全部状态</option><option value="active" ${adminUserStatus==='active'?'selected':''}>正常启用</option><option value="disabled" ${adminUserStatus==='disabled'?'selected':''}>已停用</option><option value="expired" ${adminUserStatus==='expired'?'selected':''}>已到期</option></select></div>
+        <div class="form-actions"><button type="submit">筛选</button><button type="button" class="secondary" id="adminUserFilterReset">重置</button></div>
+      </form>
+      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>ID</th><th>用户</th><th>角色</th><th>地区节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>到期</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>`;
   const riskHtml = `
     <section class="card" id="risk"><div class="section-title"><h2>投诉处理 / 风控</h2><p>按端口定位用户并快速封禁</p></div>
       <form id="lookupPortForm" class="grid">
@@ -793,6 +814,24 @@ async function loadAdmin(section=currentAdminSection){
     <section class="card"><div class="section-title"><h2>审计日志</h2><p>最近 80 条关键操作和风控事件</p></div><table><thead><tr><th>ID</th><th>事件</th><th>用户</th><th>端口</th><th>协议</th><th>详情</th><th>时间</th></tr></thead><tbody>${logRows}</tbody></table>${paginationHtml('risk', riskPage, (data.logs || []).length, ADMIN_PAGE_SIZE)}</section>`;
   const sectionHtml = {users: usersHtml, keys: keysHtml, nodes: nodeHtml, risk: riskHtml}[currentAdminSection] || usersHtml;
   app.innerHTML = sectionHtml;
+  const adminUserFilterForm = document.querySelector('#adminUserFilterForm');
+  if(adminUserFilterForm){
+    adminUserFilterForm.onsubmit = (e) => {
+      e.preventDefault();
+      adminUserSearch = document.querySelector('#adminUserSearch').value.trim();
+      adminUserNode = document.querySelector('#adminUserNode').value;
+      adminUserStatus = document.querySelector('#adminUserStatus').value;
+      adminPages.users = 1;
+      loadAdmin('users');
+    };
+    document.querySelector('#adminUserFilterReset').onclick = () => {
+      adminUserSearch = '';
+      adminUserNode = '';
+      adminUserStatus = 'all';
+      adminPages.users = 1;
+      loadAdmin('users');
+    };
+  }
   const softwareLicenseForm = document.querySelector('#softwareLicenseForm');
   if(softwareLicenseForm){
     softwareLicenseForm.onsubmit = async (e) => {
