@@ -216,14 +216,17 @@ function userFrpsDashboardHtml(dash){
   if(!dash || !dash.enabled){
     return `<section class="card"><div class="section-title"><h2>我的映射监控</h2><p>${esc(dash?.error || '暂未接入 frps dashboard')}</p></div><p class="muted small">当前仍可通过“映射状态”列查看端口连通性。</p></section>`;
   }
-  const rows = (dash.proxies || []).map(p => `
-    <tr>
-      <td>${esc(p.name)}</td><td>${esc(p.type)}</td><td>${p.status === 'online' ? '<span class="ok">online</span>' : `<span class="bad">${esc(p.status || 'unknown')}</span>`}</td>
-      <td>${esc(p.remote_port || (Array.isArray(p.custom_domains) ? p.custom_domains.join(', ') : p.custom_domains) || '-')}</td>
-      <td>${esc(p.cur_conns || 0)}</td><td>${fmtBytes(p.today_traffic_in)} / ${fmtBytes(p.today_traffic_out)}</td>
-      <td>${esc(p.client_version || '-')}</td><td>${esc(p.last_start_time || '-')}</td>
-    </tr>`).join('') || emptyRow(8, '当前没有在线映射');
-  return `<section class="card"><div class="section-title"><h2>我的映射监控</h2><p>只显示当前账号的 frps 代理，不会看到其他用户。</p></div><table class="compact-table"><thead><tr><th>名称</th><th>类型</th><th>状态</th><th>公网端口/域名</th><th>连接数</th><th>今日入/出</th><th>客户端</th><th>启动时间</th></tr></thead><tbody>${rows}</tbody></table></section>`;
+  const cards = (dash.proxies || []).map(p => {
+    const endpoint = p.remote_port || (Array.isArray(p.custom_domains) ? p.custom_domains.join(', ') : p.custom_domains) || '-';
+    const online = p.status === 'online';
+    return `<article class="proxy-card">
+      <div class="proxy-card-head"><div class="proxy-symbol">${esc(String(p.type || 'tcp').slice(0, 1).toUpperCase())}</div><div class="proxy-title"><strong>${esc(p.name)}</strong><span>${esc(p.type || 'tcp')} · ${esc(p.client_version || '客户端版本未知')}</span></div><span class="status-dot ${online ? 'is-online' : 'is-offline'}">${online ? '在线' : esc(p.status || '未知')}</span></div>
+      <div class="proxy-endpoint"><span>公网入口</span><strong>${esc(endpoint)}</strong></div>
+      <div class="proxy-stats"><div><span>当前连接</span><strong>${esc(p.cur_conns || 0)}</strong></div><div><span>今日入站</span><strong>${fmtBytes(p.today_traffic_in)}</strong></div><div><span>今日出站</span><strong>${fmtBytes(p.today_traffic_out)}</strong></div></div>
+      <p class="proxy-last-seen">最近启动：${esc(p.last_start_time || '-')}</p>
+    </article>`;
+  }).join('') || `<div class="empty-state"><strong>还没有在线映射</strong><p class="muted small">创建隧道并启动 frpc 客户端后，连接状态会显示在这里。</p></div>`;
+  return `<section class="card"><div class="section-title"><div><h2>实时映射</h2><p>只显示当前账号的 frps 代理，不会看到其他用户。</p></div><span class="section-count">${(dash.proxies || []).length} 个代理</span></div><div class="proxy-card-grid">${cards}</div></section>`;
 }
 
 function clampPage(page, total, pageSize){
@@ -521,14 +524,13 @@ async function loadDashboard(){
   }
   const tunnelRows = data.tunnels.map(t => {
     const endpoint = ['tcp','udp'].includes(t.proxy_type) ? esc(t.remote_port || '-') : (t.custom_domains ? esc(t.custom_domains) : (t.secret_key ? `secretKey: ${esc(t.secret_key)}` : '-'));
-    return `
-    <tr>
-      <td>${esc(t.name)}</td><td>${esc(t.proxy_type)}</td><td>${esc(t.local_ip)}:${esc(t.local_port)}</td><td>${endpoint}</td>
-      <td>${t.enabled ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
-      <td>${tunnelMappingStatusHtml(t)}</td>
-      <td class="actions"><button onclick="loadDashboard()">刷新</button><button onclick="toggleTunnel(${t.id})">切换</button><button class="danger" onclick="deleteTunnel(${t.id})">删除</button></td>
-    </tr>`;
-  }).join('') || emptyRow(7, '还没有隧道');
+    return `<article class="tunnel-card">
+      <div class="tunnel-card-head"><div class="tunnel-type-icon">${esc(String(t.proxy_type || 'tcp').slice(0, 1).toUpperCase())}</div><div class="tunnel-title"><strong>${esc(t.name)}</strong><span>${esc(t.proxy_type)} 隧道 · #${esc(t.id)}</span></div><span class="status-dot ${t.enabled ? 'is-online' : 'is-offline'}">${t.enabled ? '已启用' : '已停用'}</span></div>
+      <div class="tunnel-route"><div><span>本地服务</span><strong>${esc(t.local_ip)}:${esc(t.local_port)}</strong></div><div><span>公网入口</span><strong>${endpoint}</strong></div></div>
+      <div class="tunnel-card-status"><span class="muted small">映射状态</span><div>${tunnelMappingStatusHtml(t)}</div></div>
+      <div class="tunnel-card-actions"><button class="secondary" onclick="loadDashboard()">刷新状态</button><button class="secondary" onclick="toggleTunnel(${t.id})">${t.enabled ? '停用' : '启用'}</button><button class="danger" onclick="deleteTunnel(${t.id})">删除</button></div>
+    </article>`;
+  }).join('') || `<div class="empty-state"><strong>还没有隧道</strong><p class="muted small">创建第一个隧道后，就能在这里查看本地服务、公网入口和运行状态。</p><button onclick="openTunnelModal()">新建隧道</button></div>`;
   const portOptions = data.ports.map(p => `<option value="${p}">${p}${used.has(p) ? '（已用）' : ''}</option>`).join('');
   // Dropdown only for non-admin with reasonable port count; admin or huge lists get number input
   const portCount = ps.total || data.ports.length;
@@ -561,7 +563,7 @@ async function loadDashboard(){
         <p class="muted small">HTTP/HTTPS/TCPMUX 需要 frps 已配置 vhostHTTPPort / vhostHTTPSPort / tcpmuxHTTPConnectPort 等对应能力。</p>
       </section>
     </div>
-    <section class="card"><div class="section-title"><h2>隧道列表</h2><p>“映射状态”会检测公网端口或 frpc 注册状态；修改后请重新下载 frpc.toml 并重启 frpc。</p></div><table><thead><tr><th>名称</th><th>类型</th><th>本地服务</th><th>公网端口/域名/密钥</th><th>配置状态</th><th>映射状态</th><th>操作</th></tr></thead><tbody>${tunnelRows}</tbody></table></section>`;
+    <section class="card tunnel-list-section"><div class="section-title"><div><h2>我的隧道</h2><p>一张卡片对应一条映射。修改配置后，请重新下载 frpc.toml 并重启客户端。</p></div><span class="section-count">${data.tunnels.length} 条隧道</span></div><div class="tunnel-card-grid">${tunnelRows}</div></section>`;
   const proxyTypeSelect = document.querySelector('#proxyTypeSelect');
   if(tunnelFormDraft.proxy_type) proxyTypeSelect.value = tunnelFormDraft.proxy_type;
   const tunnelForm = document.querySelector('#tunnelForm');
