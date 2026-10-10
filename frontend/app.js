@@ -352,7 +352,7 @@ function appSidebarHtml(kind='dashboard'){
 
 function appLayoutHtml(content, kind='dashboard', topTitle='工作区'){
   const username = currentUser?.username || '用户';
-  return `<div class="app-shell">${appSidebarHtml(kind)}<main class="workspace-main"><div class="workspace-topbar"><div class="topbar-welcome"><span>欢迎回来，${esc(username)}</span><span class="topbar-breadcrumb">/ ${esc(topTitle)}</span></div></div>${content}</main></div>`;
+  return `<div class="app-shell">${appSidebarHtml(kind)}<main class="workspace-main"><div class="workspace-topbar"><div class="topbar-welcome"><span class="topbar-greeting">欢迎回来，${esc(username)}</span><span class="topbar-breadcrumb"><img class="topbar-breadcrumb-icon" src="/dashboard-icon.svg" alt="" aria-hidden="true"><span>/ ${esc(topTitle)}</span></span></div></div>${content}</main></div>`;
 }
 
 function setNav(){
