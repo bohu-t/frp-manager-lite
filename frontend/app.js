@@ -40,6 +40,26 @@ function colorModeLabel(){
   return colorMode === 'dark' ? '深色模式' : '浅色模式';
 }
 
+function iconSvg(name){
+  const icons = {
+    user: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 21a8 8 0 0 0-16 0M12 13a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/></svg>',
+    lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
+    eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>',
+    eyeOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18M10.6 6.2A10.8 10.8 0 0 1 12 6c6 0 9.5 6 9.5 6a16 16 0 0 1-3 3.7M6.2 6.8C3.9 8.4 2.5 12 2.5 12s3.5 6 9.5 6c1.1 0 2.1-.2 3-.5"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>'
+  };
+  return icons[name] || '';
+}
+
+function togglePasswordVisibility(inputId, button){
+  const input = document.getElementById(inputId);
+  if(!input) return;
+  const visible = input.type === 'text';
+  input.type = visible ? 'password' : 'text';
+  button.innerHTML = iconSvg(visible ? 'eye' : 'eyeOff');
+  button.setAttribute('aria-label', visible ? '显示密码' : '隐藏密码');
+  button.title = visible ? '显示密码' : '隐藏密码';
+}
+
 function nextColorMode(){
   return colorMode === 'system' ? 'dark' : (colorMode === 'dark' ? 'light' : 'system');
 }
@@ -136,31 +156,60 @@ function regionBadges(nodes){
 }
 
 function authShell(title, subtitle, formHtml, footHtml='', nodes=[]){
+  const regionText = (nodes || []).filter(n => n.active).map(n => n.region).filter(Boolean).slice(0, 3).join('、') || '多地区节点';
   return `
-    <div class="auth-layout">
-      <section class="auth-hero card">
-        <div class="brand-mark">FRP</div>
-        <h2>稳定、快速的内网穿透服务</h2>
-        <p>就近选择地区节点，独立端口配额，支持 TCP / UDP / HTTP / HTTPS / STCP / XTCP / TCPMUX 全协议场景。</p>
-        <div class="feature-grid">
-          <div><b>高速线路</b><span>按地区节点接入</span></div>
-          <div><b>全协议</b><span>覆盖 frp 常用代理类型</span></div>
-          <div><b>服务器授权</b><span>安装时鉴权一次</span></div>
-          <div><b>配置简单</b><span>一键下载 frpc</span></div>
+    <div class="auth-page">
+      <header class="auth-topbar">
+        <div class="auth-topbar-inner">
+          <div class="auth-brand"><span class="auth-brand-mark">F</span><span>FRP 管理台</span></div>
+          <div class="auth-topbar-tools"><span>安全、稳定、易用</span><button type="button" class="auth-theme-button" data-nav="theme" title="切换主题">◐</button></div>
         </div>
-        <div class="hero-label">可选地区</div>
-        <div class="hero-points">${regionBadges(nodes)}</div>
-      </section>
-      <section class="auth-card card">
-        <div class="section-title"><h2>${title}</h2><p>${subtitle}</p></div>
-        ${formHtml}
-        ${footHtml}
-      </section>
+      </header>
+      <main class="auth-main">
+        <section class="auth-visual">
+          <div class="auth-visual-glow auth-visual-glow-one"></div><div class="auth-visual-glow auth-visual-glow-two"></div>
+          <div class="auth-visual-content">
+            <div class="auth-visual-brand"><span class="auth-visual-mark">F</span><strong>FRP 管理台</strong></div>
+            <h1>高效、专业的<br>内网穿透管理平台</h1>
+            <p>统一管理隧道、端口和客户端配置，让每条映射都清晰可控。</p>
+            <div class="auth-visual-points"><span>高速线路</span><span>全协议支持</span><span>${esc(regionText)}</span></div>
+          </div>
+        </section>
+        <section class="auth-form-area">
+          <div class="auth-form-wrap">
+            <div class="auth-mobile-brand"><span class="auth-brand-mark">F</span><strong>FRP 管理台</strong></div>
+            <div class="auth-form-card">
+              <div class="auth-form-heading"><h2>${title}</h2><p>${subtitle || '欢迎回来，请登录您的账号'}</p></div>
+              ${formHtml}
+              ${footHtml}
+            </div>
+            <p class="auth-footer">© 2026 FRP 管理台</p>
+          </div>
+        </section>
+      </main>
     </div>`;
 }
 
 function emptyRow(cols, text){
   return `<tr><td colspan="${cols}" class="empty-state">${esc(text)}</td></tr>`;
+}
+
+function tunnelEndpointText(t, frps={}){
+  if(['tcp','udp'].includes(t.proxy_type)) return t.remote_port ? `${t.server_addr || frps.addr || ''}:${t.remote_port}` : '-';
+  if(t.custom_domains) return String(t.custom_domains);
+  if(t.secret_key) return `secretKey: ${t.secret_key}`;
+  return '-';
+}
+
+function tunnelRuntimeStats(t, dashboard){
+  const proxies = dashboard?.proxies || [];
+  const proxy = proxies.find(p => p.name === t.name || p.full_name === t.name || String(p.full_name || '').endsWith(`.${t.name}`));
+  return {
+    trafficIn: Number(proxy?.today_traffic_in || 0),
+    trafficOut: Number(proxy?.today_traffic_out || 0),
+    connections: Number(proxy?.cur_conns || 0),
+    available: !!proxy,
+  };
 }
 
 function tunnelMappingStatusHtml(t){
@@ -254,7 +303,7 @@ function paginationHtml(target, page, total, pageSize){
 function setPage(target, page){
   if(target === 'health'){
     nodeHealthPage = page;
-    return loadAdminDashboard();
+    return loadAdminHealth();
   }
   adminPages[target] = page;
   return loadAdmin(target);
@@ -279,7 +328,33 @@ function navButton(label, action, cls='secondary', section=''){
   return `<button type="button" class="${cls}${active}" data-nav="${action}"${sectionAttr}>${label}</button>`;
 }
 
+function appSidebarHtml(kind='dashboard'){
+  const isAdmin = currentUser?.role === 'admin';
+  const items = isAdmin ? [
+    ['admin-dashboard','⌂','运行总览'],['admin','♙','用户管理','users'],['admin','▦','注册密钥','keys'],['admin','⌁','新增节点','nodes'],['admin-health','♥','节点健康','health'],['admin-proxies','◌','映射监控','proxies'],['admin','⚠','风控审计','risk']
+  ] : [
+    ['dashboard','⌂','概览'],['dashboard-tunnels','↗','我的隧道'],['dashboard-ports','#','端口资源'],['dashboard-config','↓','下载配置']
+  ];
+  const links = items.map(([action, icon, label, section]) => {
+    const active = kind === action || (section && kind === section) ? ' active' : '';
+    const click = '';
+    return `<button class="side-link${active}" data-nav="${action}"${section ? ` data-section="${section}"` : ''}${click}><span class="side-icon">${icon}</span>${label}</button>`;
+  }).join('');
+  return `<aside class="app-sidebar">
+    <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>FRP 管理台</strong><span>管理系统</span></div></div>
+    <div class="sidebar-section-label">工作区</div>${links}
+    <div class="sidebar-spacer"></div>
+  </aside>`;
+}
+
+function appLayoutHtml(content, kind='dashboard', topTitle='工作区'){
+  const username = currentUser?.username || '用户';
+  return `<div class="app-shell">${appSidebarHtml(kind)}<main class="workspace-main"><div class="workspace-topbar"><div class="topbar-welcome"><span>欢迎使用 FRP 管理台</span><span class="topbar-breadcrumb">/ ${esc(topTitle)}</span></div><div class="topbar-actions"><span class="live-status"><i></i>服务正常</span><button class="topbar-icon-button" data-nav="${kind === 'admin-dashboard' ? 'admin-dashboard' : (kind.startsWith('dashboard-') ? kind : 'dashboard')}" title="刷新数据">↻</button><div class="topbar-user"><span class="topbar-avatar">${esc(String(username).slice(0,1).toUpperCase())}</span><span class="topbar-username">${esc(username)}</span><button class="logout-topbar" type="button" data-nav="logout">退出登录</button></div></div></div>${content}</main></div>`;
+}
+
 function setNav(){
+  document.body.classList.toggle('is-app', !!currentUser);
+  document.body.classList.toggle('is-auth', !currentUser);
   const themeBtn = navButton(`${colorMode === 'dark' ? '浅色' : '深色'}模式`, 'theme');
   if(!currentUser){ nav.innerHTML = themeBtn; return; }
   const licenseRequired = !!(softwareLicense && softwareLicense.required && !softwareLicense.licensed);
@@ -287,7 +362,8 @@ function setNav(){
   const adminNav = isAdmin && !licenseRequired ? [
     navButton('用户', 'admin', 'secondary', 'users'),
     navButton('密钥', 'admin', 'secondary', 'keys'),
-    navButton('节点', 'admin', 'secondary', 'nodes'),
+    navButton('新增节点', 'admin', 'secondary', 'nodes'),
+    navButton('节点健康', 'admin-health', 'secondary', 'health'),
     navButton('映射监控', 'admin-proxies', 'secondary', 'proxies'),
     navButton('风控', 'admin', 'secondary', 'risk'),
   ].join('') : '';
@@ -325,10 +401,35 @@ nav.addEventListener('click', async (e) => {
     if(action === 'dashboard') return loadDashboard();
     if(action === 'admin-dashboard') return loadAdminDashboard();
     if(action === 'admin-proxies') return loadAdminProxies();
+    if(action === 'admin-health') return loadAdminHealth();
     if(action === 'admin') return loadAdmin(section);
   }catch(err){
     show(err.message || '操作失败', true);
   }
+});
+
+app.addEventListener('click', async (e) => {
+  const copyEl = e.target.closest?.('[data-copy-address]');
+  if(copyEl){
+    e.preventDefault();
+    return copyText(copyEl.getAttribute('data-copy-address') || '');
+  }
+  const el = e.target.closest?.('[data-nav]');
+  if(!el || nav.contains(el)) return;
+  const action = el.getAttribute('data-nav');
+  const section = el.getAttribute('data-section') || 'users';
+  try{
+    if(action === 'theme') return toggleColorMode();
+    if(action === 'logout') return logout();
+    if(action === 'dashboard') return loadDashboard();
+    if(action === 'dashboard-tunnels') return loadDashboard('tunnels');
+    if(action === 'dashboard-ports') return loadDashboard('ports');
+    if(action === 'dashboard-config') return window.location.href = '/config/frpc.toml';
+    if(action === 'admin-dashboard') return loadAdminDashboard();
+    if(action === 'admin-proxies') return loadAdminProxies();
+    if(action === 'admin-health') return loadAdminHealth();
+    if(action === 'admin') return loadAdmin(section);
+  }catch(err){ show(err.message || '操作失败', true); }
 });
 
 async function renderLogin(){
@@ -337,10 +438,10 @@ async function renderLogin(){
   let nodes = [];
   try { nodes = await loadNodes(); } catch(e) {}
   app.innerHTML = authShell('登录', '登录后管理隧道和下载配置', `
-      <form id="loginForm" class="stack-form">
-        <label>用户名</label><input name="username" autocomplete="username" required>
-        <label>密码</label><input name="password" type="password" autocomplete="current-password" required>
-        <p><button class="wide">登录</button></p>
+      <form id="loginForm" class="stack-form auth-login-form">
+        <div class="input-group"><label class="input-label" for="loginUsername">用户名</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('user')}</span><input id="loginUsername" class="input-ios" name="username" autocomplete="username" placeholder="请输入用户名" required></div></div>
+        <div class="input-group"><label class="input-label" for="loginPassword">密码</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('lock')}</span><input id="loginPassword" class="input-ios auth-password-input" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required><button type="button" class="auth-password-toggle" onclick="togglePasswordVisibility('loginPassword', this)" aria-label="显示密码" title="显示密码">${iconSvg('eye')}</button></div></div>
+        <p><button class="wide auth-submit">登录</button></p>
       </form>`,
       `<div class="auth-switch"><span>没有账号？</span><button class="secondary" onclick="renderRegister()">使用密钥注册</button></div>`, nodes);
   document.querySelector('#loginForm').onsubmit = async (e) => {
@@ -364,13 +465,13 @@ async function renderRegister(){
   clearAdminDashboardTimer();
   currentUser = null; setNav(); hideFlash();
   let nodes = [];
-  try { nodes = await loadNodes(); } catch(e) { show('加载地区节点失败：' + e.message, true); }
+  try { nodes = await loadNodes(); } catch(e) { show('加载节点失败：' + e.message, true); }
   app.innerHTML = authShell('密钥注册', '输入密钥并选择适合你的地区', `
-      <form id="registerForm" class="stack-form">
-        <label>用户名</label><input name="username" autocomplete="username" required>
-        <label>密码</label><input name="password" type="password" autocomplete="new-password" minlength="6" required>
-        <label>地区节点</label><select name="node_id" required>${nodeOptions(nodes)}</select>
-        <label>注册密钥</label><input name="invite_key" placeholder="FML-..." required>
+      <form id="registerForm" class="stack-form auth-login-form">
+        <div class="input-group"><label class="input-label" for="registerUsername">用户名</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('user')}</span><input id="registerUsername" class="input-ios" name="username" autocomplete="username" placeholder="请输入用户名" required></div></div>
+        <div class="input-group"><label class="input-label" for="registerPassword">密码</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('lock')}</span><input id="registerPassword" class="input-ios auth-password-input" name="password" type="password" autocomplete="new-password" minlength="6" placeholder="请输入密码（至少 6 位）" required><button type="button" class="auth-password-toggle" onclick="togglePasswordVisibility('registerPassword', this)" aria-label="显示密码" title="显示密码">${iconSvg('eye')}</button></div></div>
+        <div class="input-group"><label class="input-label" for="registerNode">接入节点</label><select id="registerNode" class="input-ios" name="node_id" required>${nodeOptions(nodes)}</select></div>
+        <div class="input-group"><label class="input-label" for="registerKey">注册密钥</label><input id="registerKey" class="input-ios" name="invite_key" placeholder="FML-..." required></div>
         <p class="row"><button>注册</button><button type="button" class="secondary" onclick="renderLogin()">返回登录</button></p>
       </form>`, '', nodes);
   document.querySelector('#registerForm').onsubmit = async (e) => {
@@ -486,11 +587,54 @@ function renderLicenseActivate(){
 }
 
 async function logout(){
-  await api('/api/logout', {method:'POST', body:{}}).catch(()=>{});
-  renderLogin();
+  try{
+    await api('/api/logout', {method:'POST', body:{}});
+  }catch(err){
+    // CSRF token may have expired while the page stayed open; refresh it once before giving up.
+    if(String(err.message || '').includes('CSRF')){
+      csrfToken = null;
+      try{ await api('/api/logout', {method:'POST', body:{}}); }catch(e){}
+    }
+  }
+  currentUser = null;
+  clearAdminDashboardTimer();
+  await renderLogin();
 }
 
-async function loadDashboard(){
+function bindUserTunnelForm(){
+  const proxyTypeSelect = document.querySelector('#proxyTypeSelect');
+  if(!proxyTypeSelect) return;
+  if(tunnelFormDraft.proxy_type) proxyTypeSelect.value = tunnelFormDraft.proxy_type;
+  const tunnelForm = document.querySelector('#tunnelForm');
+  if(tunnelForm && tunnelFormDraft.remote_port && tunnelForm.elements.remote_port) tunnelForm.elements.remote_port.value = tunnelFormDraft.remote_port;
+  const saveTunnelDraft = () => {
+    const form = document.querySelector('#tunnelForm');
+    if(form) tunnelFormDraft = Object.fromEntries(new FormData(form));
+  };
+  if(tunnelForm) tunnelForm.oninput = saveTunnelDraft;
+  const syncProxyFields = () => {
+    saveTunnelDraft();
+    const type = proxyTypeSelect.value;
+    document.querySelector('.remote-port-field')?.classList.toggle('hidden', !['tcp','udp'].includes(type));
+    document.querySelector('.domain-field')?.classList.toggle('hidden', !['http','https','tcpmux'].includes(type));
+    document.querySelector('.secret-field')?.classList.toggle('hidden', !['stcp','xtcp'].includes(type));
+  };
+  proxyTypeSelect.onchange = syncProxyFields;
+  syncProxyFields();
+  if(tunnelForm) tunnelForm.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try{
+      await api('/api/tunnels/create', {method:'POST', body:Object.fromEntries(fd)});
+      tunnelFormDraft = {};
+      closeTunnelModal();
+      show('隧道已创建，重新下载 frpc.toml 后重启 frpc 生效');
+      await loadDashboard('tunnels');
+    }catch(err){ show(err.message, true); }
+  };
+}
+
+async function loadDashboard(view='overview'){
   clearAdminDashboardTimer();
   hideFlash();
   let data;
@@ -523,14 +667,17 @@ async function loadDashboard(){
       ${usedPorts ? `<div><strong>已用的端口：</strong>${usedPorts}</div>` : '<p class="muted small">暂无已使用的端口</p>'}`;
   }
   const tunnelRows = data.tunnels.map(t => {
-    const endpoint = ['tcp','udp'].includes(t.proxy_type) ? esc(t.remote_port || '-') : (t.custom_domains ? esc(t.custom_domains) : (t.secret_key ? `secretKey: ${esc(t.secret_key)}` : '-'));
+    const endpointRaw = tunnelEndpointText(t, data.frps);
+    const endpoint = esc(endpointRaw);
+    const runtime = tunnelRuntimeStats(t, data.frps_user_dashboard);
     return `<article class="tunnel-card">
-      <div class="tunnel-card-head"><div class="tunnel-type-icon">${esc(String(t.proxy_type || 'tcp').slice(0, 1).toUpperCase())}</div><div class="tunnel-title"><strong>${esc(t.name)}</strong><span>${esc(t.proxy_type)} 隧道 · #${esc(t.id)}</span></div><span class="status-dot ${t.enabled ? 'is-online' : 'is-offline'}">${t.enabled ? '已启用' : '已停用'}</span></div>
-      <div class="tunnel-route"><div><span>本地服务</span><strong>${esc(t.local_ip)}:${esc(t.local_port)}</strong></div><div><span>公网入口</span><strong>${endpoint}</strong></div></div>
+      <div class="tunnel-card-head"><div class="tunnel-type-icon">${esc(String(t.proxy_type || 'tcp').slice(0, 1).toUpperCase())}</div><div class="tunnel-title"><strong title="${esc(t.name)}">${esc(t.name)}</strong><span>${esc(t.proxy_type)} 隧道 · #${esc(t.id)}</span></div><span class="status-dot ${t.enabled ? 'is-online' : 'is-offline'}">${t.enabled ? '已启用' : '已停用'}</span></div>
+      <div class="tunnel-route"><div><span>本地服务</span><strong>${esc(t.local_ip)}:${esc(t.local_port)}</strong></div><div><span>公网入口</span><strong title="${endpoint}">${endpoint}</strong>${endpointRaw !== '-' ? `<button type="button" class="copy-inline" data-copy-address="${endpoint}">复制</button>` : ''}</div></div>
       <div class="tunnel-card-status"><span class="muted small">映射状态</span><div>${tunnelMappingStatusHtml(t)}</div></div>
-      <div class="tunnel-card-actions"><button class="secondary" onclick="loadDashboard()">刷新状态</button><button class="secondary" onclick="toggleTunnel(${t.id})">${t.enabled ? '停用' : '启用'}</button><button class="danger" onclick="deleteTunnel(${t.id})">删除</button></div>
+      <div class="tunnel-traffic-row"><span>今日流量 <b>${fmtBytes(runtime.trafficIn + runtime.trafficOut)}</b></span><span>连接数 <b>${runtime.available ? runtime.connections : '-'}</b></span></div>
+      <div class="tunnel-card-actions"><button class="secondary" onclick="loadDashboard('tunnels')">刷新状态</button><button class="secondary" onclick="toggleTunnel(${t.id})">${t.enabled ? '停用' : '启用'}</button><button class="danger" onclick="deleteTunnel(${t.id})">删除</button></div>
     </article>`;
-  }).join('') || `<div class="empty-state"><strong>还没有隧道</strong><p class="muted small">创建第一个隧道后，就能在这里查看本地服务、公网入口和运行状态。</p><button onclick="openTunnelModal()">新建隧道</button></div>`;
+  }).join('') || `<div class="empty-state"><strong>还没有隧道</strong><p class="muted small">创建第一个隧道后，就能在这里查看本地服务、公网入口和运行状态。</p><button onclick="loadDashboard('tunnels')">新建隧道</button></div>`;
   const portOptions = data.ports.map(p => `<option value="${p}">${p}${used.has(p) ? '（已用）' : ''}</option>`).join('');
   // Dropdown only for non-admin with reasonable port count; admin or huge lists get number input
   const portCount = ps.total || data.ports.length;
@@ -568,11 +715,70 @@ async function loadDashboard(){
     <div class="grid">
       <section class="card stat"><div class="label">当前账号</div><div class="num">${esc(data.user.username)}</div><p>地区节点：<b>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</b></p><p>端口上限：${esc(data.user.max_ports)} · 到期：<b>${esc(data.user.expires_text)}</b></p><p>${trafficLine}</p></section>
       <section class="card stat"><div class="label">FRPS 接入点</div><div class="num" style="font-size:20px">${esc(data.frps.addr)}</div><p>端口：<code>${esc(data.frps.port)}</code></p><p class="row"><a class="btn" href="/config/frpc.toml">下载 frpc.toml</a><a class="btn secondary" href="/config/deploy-frpc.sh">下载部署脚本</a></p><p class="muted small">全协议：${(data.allowed_proxy_types || []).join(' / ')}</p></section>
+  const accountCard = `<section class="card user-account-card"><div class="section-title"><div><div class="section-kicker">ACCOUNT</div><h2>账号信息</h2></div></div><div class="account-summary-grid"><div><span>当前账号</span><strong>${esc(data.user.username)}</strong></div><div><span>接入节点</span><strong>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</strong></div><div><span>端口上限</span><strong>${esc(data.user.max_ports)}</strong></div><div><span>有效期</span><strong>${esc(data.user.expires_text)}</strong></div><div><span>FRPS 地址</span><strong>${esc(data.frps.addr)}:${esc(data.frps.port)}</strong></div></div></section>`;
+  if(view === 'overview'){
+    const node = data.node || {};
+    const nodeState = node.active ? '已启用' : '已停用';
+    const nodeStateClass = node.active ? 'ok' : 'bad';
+    app.innerHTML = appLayoutHtml(`
+      <section class="workspace-hero user-dashboard-welcome"><div><div class="hero-overline">FRP WORKSPACE</div><h1>欢迎回来，${esc(data.user.username)}</h1><p>管理你的内网服务映射，查看节点、流量和隧道运行状态。</p></div><div class="hero-actions"><button onclick="loadDashboard('tunnels')">＋ 新建隧道</button><a class="btn secondary" href="/config/frpc.toml">下载配置</a></div></section>
+      <div class="workspace-stats user-overview-stats">
+        <section class="workspace-stat highlight"><span>隧道数量</span><strong>${data.tunnels.length}</strong><small>${data.tunnels.filter(t => t.enabled).length} 条正在运行</small></section>
+        <section class="workspace-stat"><span>当前节点</span><strong>${esc(node.region || node.name || '-')}</strong><small>${esc(node.name || '未分配节点')}</small></section>
+        <section class="workspace-stat"><span>今日流量</span><strong>${fmtBytes(todayTraffic)}</strong><small>${trafficLimit ? `上限 ${fmtBytes(trafficLimit)}` : '当前不限额；按今日统计'}</small></section>
+        <section class="workspace-stat"><span>账号有效期</span><strong>${esc(data.user.expires_text || '-')}</strong><small>${data.user.expired ? '账号已到期' : '到期日期'}</small></section>
+      </div>
+      <div class="user-dashboard-grid">
+        <section class="card node-status-card"><div class="section-title"><div><div class="section-kicker">CURRENT NODE</div><h2>当前节点</h2></div><span class="status-badge ${nodeStateClass}">${nodeState}</span></div><div class="node-status-main"><div class="node-status-icon">${esc(String(node.region || node.name || 'N').slice(0,1))}</div><div><strong>${esc(node.name || '-')}</strong><span>${esc(node.region || '未设置地区')}</span></div></div><div class="node-detail-list"><div><span>FRPS 地址</span><b>${esc(data.frps.addr)}:${esc(data.frps.port)}</b></div><div><span>节点控制台</span><b>${node.dashboard_configured ? '已配置' : '未接入'}</b></div></div></section>
+        <section class="card quick-actions-card"><div class="section-title"><div><div class="section-kicker">QUICK ACTIONS</div><h2>快捷操作</h2></div></div><div class="quick-actions-grid"><button class="quick-action" onclick="loadDashboard('tunnels')"><span>↗</span><b>管理隧道</b><small>查看和控制映射</small></button><button class="quick-action" onclick="loadDashboard('ports')"><span>#</span><b>查看端口</b><small>查看端口资源</small></button><a class="quick-action" href="/config/frpc.toml"><span>↓</span><b>下载配置</b><small>获取 frpc.toml</small></a><a class="quick-action" href="/config/deploy-frpc.sh"><span>⚙</span><b>部署脚本</b><small>安装客户端</small></a></div></section>
+      </div>
+      ${accountCard}
+      <section class="card dashboard-tunnels-preview"><div class="section-title"><div><div class="section-kicker">MY TUNNELS</div><h2>我的隧道</h2><p>展示当前映射状态和今日真实流量；完整管理请进入“我的隧道”。</p></div><button class="secondary" onclick="loadDashboard('tunnels')">查看全部</button></div><div class="tunnel-card-grid">${tunnelRows}</div></section>`, 'dashboard', '概览');
+    return;
+  }
+  if(view === 'ports'){
+    app.innerHTML = appLayoutHtml(`
+      <section class="card dashboard-hero"><div><div class="eyebrow">RESOURCE POOL</div><h2>端口资源</h2><p>查看当前节点端口池和已分配端口。</p></div><button onclick="loadDashboard('ports')">刷新</button></section>
+      <section class="card ports-section"><div class="section-title"><div><div class="section-kicker">PORTS</div><h2>端口列表</h2></div><p>黄色表示已分配给隧道</p></div><div class="ports">${portsHtml}</div></section>`, 'dashboard-ports', '端口资源');
+    return;
+  }
+  if(view === 'tunnels'){
+    app.innerHTML = appLayoutHtml(`
+      <section class="card dashboard-hero"><div><div class="eyebrow">MY TUNNELS</div><h2>我的隧道</h2><p>管理映射、查看状态并创建新的隧道。</p></div><button onclick="openTunnelModal()">＋ 新建隧道</button></section>
+      <section class="card tunnel-config-entry"><div class="section-title"><div><div class="section-kicker">QUICK ACTION</div><h2>创建映射</h2></div><p>支持 TCP / UDP / HTTP / HTTPS 等协议</p></div><button onclick="openTunnelModal()">新建隧道</button><span class="muted small">填写本地服务和公网访问方式，创建后下载最新 frpc 配置。</span></section>
+      <div id="tunnelModal" class="modal-backdrop${tunnelModalOpen ? '' : ' hidden'}" role="dialog" aria-modal="true" aria-labelledby="tunnelModalTitle">
+        <section class="modal-page card"><div class="section-title modal-title"><div><h2 id="tunnelModalTitle">新建隧道</h2><p>填写本地服务和公网访问方式。</p></div><button type="button" class="secondary modal-close" onclick="closeTunnelModal()">关闭 ×</button></div>
+          <form id="tunnelForm" class="grid"><div><label>名称</label><input name="name" value="${esc(tunnelFormDraft.name || '')}" placeholder="web" required></div><div><label>类型</label><select name="proxy_type" id="proxyTypeSelect">${proxyTypeOptions}</select></div><div><label>本地 IP</label><input name="local_ip" value="${esc(tunnelFormDraft.local_ip || '127.0.0.1')}" required></div><div><label>本地端口</label><input name="local_port" type="number" min="1" max="65535" value="${esc(tunnelFormDraft.local_port || '80')}" required></div><div class="remote-port-field"><label>公网端口</label>${remotePortField}</div><div class="domain-field hidden"><label>自定义域名</label><input name="custom_domains" value="${esc(tunnelFormDraft.custom_domains || '')}" placeholder="app.example.com,api.example.com"></div><div class="secret-field hidden"><label>访问密钥</label><input name="secret_key" value="${esc(tunnelFormDraft.secret_key || '')}" placeholder="留空自动生成"></div><div class="form-actions"><button>创建</button></div></form>
+          <p class="muted small">HTTP/HTTPS/TCPMUX 需要 frps 已配置对应能力。</p></section>
+      </div>
+      <section class="card tunnel-list-section"><div class="section-title"><div><div class="section-kicker">TUNNELS</div><h2>隧道列表</h2></div><span class="section-count">${data.tunnels.length} 条隧道</span></div><div class="tunnel-card-grid">${tunnelRows}</div></section>`, 'dashboard-tunnels', '我的隧道');
+    bindUserTunnelForm();
+    return;
+  }
+  const sideNav = `<aside class="app-sidebar">
+      <div class="sidebar-brand"><div class="brand-mark-small">鱼</div><div><strong>FRP 管理台</strong><span>工作台</span></div></div>
+      <div class="sidebar-section-label">工作区</div>
+      <button class="side-link active"><span class="side-icon">⌂</span>概览</button>
+      <button class="side-link" onclick="document.querySelector('.tunnel-list-section')?.scrollIntoView({behavior:'smooth'})"><span class="side-icon">↗</span>我的隧道</button>
+      <button class="side-link" onclick="document.querySelector('.ports-section')?.scrollIntoView({behavior:'smooth'})"><span class="side-icon">#</span>端口资源</button>
+      <div class="sidebar-section-label">工具</div>
+      <a class="side-link" href="/config/frpc.toml"><span class="side-icon">↓</span>下载配置</a>
+      <a class="side-link" href="/config/deploy-frpc.sh"><span class="side-icon">⚙</span>部署脚本</a>
+      <div class="sidebar-spacer"></div>
+    </aside>`;
+  const topBar = `<div class="workspace-topbar"><div><div class="breadcrumb">工作区 / 概览</div><h2>你好，${esc(data.user.username)}</h2></div><div class="topbar-actions"><span class="live-status"><i></i>服务正常</span><button class="secondary" onclick="loadDashboard()">刷新数据</button></div></div>`;
+  app.innerHTML = appLayoutHtml(`
+    <section class="workspace-hero"><div><div class="hero-overline">FRP WORKSPACE</div><h1>连接你的内网服务</h1><p>统一管理隧道、端口和客户端配置，让每条映射都清晰可控。</p></div><button onclick="openTunnelModal()">＋ 新建隧道</button></section>
+    <div class="workspace-stats">
+      <section class="workspace-stat highlight"><span>隧道总数</span><strong>${data.tunnels.length}</strong><small>${data.tunnels.filter(t => t.enabled).length} 条正在启用</small></section>
+      <section class="workspace-stat"><span>端口资源</span><strong>${ps.free || 0}</strong><small>可用 / 共 ${ps.total || 0} 个</small></section>
+      <section class="workspace-stat"><span>今日流量</span><strong>${fmtBytes(todayTraffic)}</strong><small>${trafficLimit ? `上限 ${fmtBytes(trafficLimit)}` : '当前不限额'}</small></section>
+      <section class="workspace-stat"><span>接入节点</span><strong>${esc(data.node?.region || '-')}</strong><small>${esc(data.frps.addr)}:${esc(data.frps.port)}</small></section>
     </div>
-    ${isAdmin ? '' : userDeployScriptAddressHtml(data.user)}
+    <div class="workspace-columns"><div class="workspace-primary">
     ${isAdmin ? '' : userFrpsDashboardHtml(data.frps_user_dashboard)}
-    ${isAdmin ? '' : `<section class="card"><div class="section-title"><h2>已分配端口</h2><p>绿色表示已经创建隧道</p></div><div class="ports">${portsHtml}</div></section>`}
-    <section class="card tunnel-config-entry"><div class="section-title"><h2>隧道配置</h2><p>在页面内弹出配置页，填写后创建新隧道。</p></div><button onclick="openTunnelModal()">新建隧道</button><p class="muted small">TCP/UDP 使用分配端口；HTTP/HTTPS/TCPMUX 使用自定义域名；STCP/XTCP 使用密钥。</p></section>
+    ${isAdmin ? '' : `<section class="card ports-section"><div class="section-title"><div><div class="section-kicker">RESOURCE POOL</div><h2>端口资源</h2></div><p>黄色表示已分配给隧道</p></div><div class="ports">${portsHtml}</div></section>`}
+    <section class="card tunnel-config-entry"><div class="section-title"><div><div class="section-kicker">QUICK ACTION</div><h2>开始创建映射</h2></div><p>支持 TCP / UDP / HTTP / HTTPS 等协议</p></div><button onclick="openTunnelModal()">新建隧道</button><span class="muted small">填写本地服务和公网访问方式，创建后下载最新 frpc 配置。</span></section>
     <div id="tunnelModal" class="modal-backdrop${tunnelModalOpen ? '' : ' hidden'}" role="dialog" aria-modal="true" aria-labelledby="tunnelModalTitle">
       <section class="modal-page card">
         <div class="section-title modal-title"><div><h2 id="tunnelModalTitle">新建隧道</h2><p>填写本地服务和公网访问方式。</p></div><button type="button" class="secondary modal-close" onclick="closeTunnelModal()" aria-label="关闭隧道配置">关闭 ×</button></div>
@@ -590,6 +796,12 @@ async function loadDashboard(){
       </section>
     </div>
     <section class="card tunnel-list-section"><div class="section-title"><div><h2>我的隧道</h2><p>一张卡片对应一条映射。修改配置后，请重新下载 frpc.toml 并重启客户端。</p></div><span class="section-count">${data.tunnels.length} 条隧道</span></div><div class="tunnel-card-grid">${tunnelRows}</div></section></div></div></div>`;
+    <section class="card tunnel-list-section"><div class="section-title"><div><div class="section-kicker">MY TUNNELS</div><h2>我的隧道</h2><p>一张卡片对应一条映射。修改配置后，请重新下载 frpc.toml 并重启客户端。</p></div><span class="section-count">${data.tunnels.length} 条隧道</span></div><div class="tunnel-card-grid">${tunnelRows}</div></section>
+    </div><aside class="workspace-aside">
+      <section class="side-info-card"><div class="section-kicker">ACCOUNT</div><h3>账号信息</h3><div class="info-line"><span>当前账号</span><strong>${esc(data.user.username)}</strong></div><div class="info-line"><span>所在节点</span><strong>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</strong></div><div class="info-line"><span>端口上限</span><strong>${esc(data.user.max_ports)}</strong></div><div class="info-line"><span>有效期</span><strong>${esc(data.user.expires_text)}</strong></div></section>
+      <section class="side-info-card dark-side"><div class="section-kicker">ACCESS POINT</div><h3>FRPS 接入点</h3><div class="endpoint-big">${esc(data.frps.addr)}</div><code>${esc(data.frps.port)}</code><div class="side-actions"><a class="btn" href="/config/frpc.toml">下载配置</a><a class="btn secondary" href="/config/deploy-frpc.sh">部署脚本</a></div></section>
+      ${userDeployScriptAddressHtml(data.user, {title:'部署地址', desc:'复制给需要安装客户端的服务器。'})}
+    </aside></div>`, 'dashboard', '概览');
   const proxyTypeSelect = document.querySelector('#proxyTypeSelect');
   if(tunnelFormDraft.proxy_type) proxyTypeSelect.value = tunnelFormDraft.proxy_type;
   const tunnelForm = document.querySelector('#tunnelForm');
@@ -632,8 +844,8 @@ function closeTunnelModal(){
   if(modal) modal.classList.add('hidden');
 }
 
-async function toggleTunnel(id){ await api('/api/tunnels/toggle', {method:'POST', body:{id}}).then(loadDashboard).catch(e=>show(e.message,true)); }
-async function deleteTunnel(id){ if(confirm('删除这个隧道？')) await api('/api/tunnels/delete', {method:'POST', body:{id}}).then(loadDashboard).catch(e=>show(e.message,true)); }
+async function toggleTunnel(id){ await api('/api/tunnels/toggle', {method:'POST', body:{id}}).then(()=>loadDashboard('tunnels')).catch(e=>show(e.message,true)); }
+async function deleteTunnel(id){ if(confirm('删除这个隧道？')) await api('/api/tunnels/delete', {method:'POST', body:{id}}).then(()=>loadDashboard('tunnels')).catch(e=>show(e.message,true)); }
 
 async function loadAdminProxies(page=adminProxyPage){
   clearAdminDashboardTimer();
@@ -652,16 +864,29 @@ async function loadAdminProxies(page=adminProxyPage){
   const pageSize = Number(dash.page_size || adminProxyPageSize);
   const pages = Math.max(1, Math.ceil(total / pageSize));
   adminProxyPage = Math.min(Math.max(1, Number(dash.page || adminProxyPage)), pages);
+  const monitorStats = {
+    trafficIn: Number(dash.traffic_in || 0),
+    trafficOut: Number(dash.traffic_out || 0),
+    trafficTotal: Number(dash.traffic_total || 0),
+    curConns: Number(dash.cur_conns || 0),
+    online: Number(dash.online_count || 0),
+  };
   const rows = (dash.proxies || []).map(p => `
     <tr>
       <td>${esc(p.username || '-')}</td><td>${esc(p.name || '-')}</td><td>${esc(p.type || '-')}</td>
       <td>${p.status === 'online' ? '<span class="ok">online</span>' : `<span class="bad">${esc(p.status || 'unknown')}</span>`}</td>
       <td>${esc(p.remote_port || (Array.isArray(p.custom_domains) ? p.custom_domains.join(', ') : p.custom_domains) || '-')}</td>
-      <td>${esc(p.cur_conns || 0)}</td><td>${fmtBytes(p.today_traffic_in)} / ${fmtBytes(p.today_traffic_out)}</td>
+      <td>${esc(p.cur_conns || 0)}</td><td>${fmtBytes(p.today_traffic_in)} / ${fmtBytes(p.today_traffic_out)}<br><span class="muted small">总流量：${fmtBytes(Number(p.today_traffic_in || 0) + Number(p.today_traffic_out || 0))}</span></td>
       <td>${esc(p.client_version || '-')}</td><td>${esc(p.last_start_time || '-')}</td><td>${esc(p.last_close_time || '-')}</td>
     </tr>`).join('') || emptyRow(10, dash.enabled ? '暂无映射数据' : (dash.error || 'frps dashboard 未接入'));
-  app.innerHTML = `
+  app.innerHTML = appLayoutHtml(`
     <section class="card dashboard-hero"><div><div class="eyebrow">FRPS MONITOR</div><h2>映射监控</h2><p>管理员全局视图；普通用户页面仍只显示自己的映射。</p></div><div class="hero-actions"><button onclick="loadAdminProxies(${adminProxyPage})">刷新</button><button class="secondary" onclick="loadAdminDashboard()">返回仪表盘</button></div></section>
+    <section class="monitor-summary-grid">
+      <section class="card monitor-summary-card monitor-summary-primary"><span>今日总流量</span><strong>${fmtBytes(monitorStats.trafficTotal)}</strong><small>入 ${fmtBytes(monitorStats.trafficIn)} · 出 ${fmtBytes(monitorStats.trafficOut)}</small></section>
+      <section class="card monitor-summary-card"><span>今日入站</span><strong>${fmtBytes(monitorStats.trafficIn)}</strong><small>所有节点汇总</small></section>
+      <section class="card monitor-summary-card"><span>今日出站</span><strong>${fmtBytes(monitorStats.trafficOut)}</strong><small>所有节点汇总</small></section>
+      <section class="card monitor-summary-card"><span>当前连接</span><strong>${monitorStats.curConns}</strong><small>在线映射 ${monitorStats.online} / ${total}</small></section>
+    </section>
     <section class="card admin-toolbar row">
       <label>用户筛选 <input id="adminProxyUserFilter" value="${esc(adminProxyUserFilter)}" placeholder="留空显示全部"></label>
       <label>每页显示 <select id="adminProxyPageSize"><option value="10">10</option><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
@@ -669,9 +894,9 @@ async function loadAdminProxies(page=adminProxyPage){
       <button class="secondary" id="adminProxyClear">清空</button>
       <span class="muted small">共 ${total} 条 · 第 ${adminProxyPage} / ${pages} 页</span>
     </section>
-    <section class="card"><table><thead><tr><th>用户</th><th>名称</th><th>类型</th><th>状态</th><th>公网端口/域名</th><th>连接数</th><th>今日入/出</th><th>客户端</th><th>启动时间</th><th>关闭时间</th></tr></thead><tbody>${rows}</tbody></table>
+    <section class="card"><table><thead><tr><th>用户</th><th>名称</th><th>类型</th><th>状态</th><th>公网端口/域名</th><th>连接数</th><th>今日入/出 / 总流量</th><th>客户端</th><th>启动时间</th><th>关闭时间</th></tr></thead><tbody>${rows}</tbody></table>
       <div class="pager"><button class="secondary" ${adminProxyPage <= 1 ? 'disabled' : ''} onclick="loadAdminProxies(${adminProxyPage - 1})">上一页</button><span class="muted small">第 ${adminProxyPage} / ${pages} 页</span><button class="secondary" ${adminProxyPage >= pages ? 'disabled' : ''} onclick="loadAdminProxies(${adminProxyPage + 1})">下一页</button></div>
-    </section>`;
+    </section>`, 'proxies', '映射监控');
   const sizeSel = document.querySelector('#adminProxyPageSize');
   if(sizeSel) sizeSel.value = String(adminProxyPageSize);
   document.querySelector('#adminProxyApply').onclick = () => {
@@ -725,12 +950,12 @@ async function loadAdmin(section=currentAdminSection){
       <td>${esc(u.expires_text)} ${u.expired ? '<span class="bad">已到期</span>' : ''}</td>
       <td>${u.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
       <td><code class="token" title="${esc(u.invite_key_used || '')}">${esc(u.invite_key_used || '后台创建')}</code></td>
-      <td class="actions">
-        <button onclick="adminToggle(${u.id})">${u.active ? '停用' : '启用'}</button>
-        <button onclick="adminExtend(${u.id})">续30天</button>
-        <button onclick="adminLimits(${u.id}, ${Number(u.traffic_limit_bytes || 0)}, ${Number(u.bandwidth_limit_kbps || 0)})">改套餐</button>
-        <button onclick="adminReset(${u.id})">重置密码</button>
-        <button class="danger" onclick="adminDelete(${u.id})">删除</button>
+      <td class="actions node-actions user-actions">
+        <button class="node-action" onclick="adminToggle(${u.id})">${u.active ? '停用' : '启用'}</button>
+        <button class="node-action" onclick="adminExtend(${u.id})">续30天</button>
+        <button class="node-action" onclick="adminLimits(${u.id}, ${Number(u.traffic_limit_bytes || 0)}, ${Number(u.bandwidth_limit_kbps || 0)})">改套餐</button>
+        <button class="node-action" onclick="adminReset(${u.id})">重置密码</button>
+        <button class="node-action node-action-danger" onclick="adminDelete(${u.id})">删除</button>
       </td>
     </tr>`).join('');
   const nodeRows = nodesSlice.map(n => `
@@ -739,7 +964,7 @@ async function loadAdmin(section=currentAdminSection){
       <td>${n.port_start}-${n.port_end}</td><td>${n.free_count}/${n.port_count}</td>
       <td>${n.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
       <td>${esc(n.note)}</td>
-      <td class="actions"><button onclick='editNode(${JSON.stringify(n)})'>编辑</button><button onclick="nodeToggle(${n.id})">${n.active ? '停用' : '启用'}</button><a class="btn" href="/config/frps.example.toml?node_id=${n.id}">frps配置</a><button class="danger" onclick="nodeDelete(${n.id})">删除</button></td>
+      <td class="actions node-actions"><button class="node-action" onclick='editNode(${JSON.stringify(n)})'>编辑</button><button class="node-action" onclick="nodeToggle(${n.id})">${n.active ? '停用' : '启用'}</button><a class="btn node-action" href="/config/frps.example.toml?node_id=${n.id}">frps配置</a><button class="node-action node-action-danger" onclick="nodeDelete(${n.id})">删除</button></td>
     </tr>`).join('') || emptyRow(9, '还没有节点');
   const keyRows = keysSlice.map(k => `
     <tr>
@@ -767,7 +992,7 @@ async function loadAdmin(section=currentAdminSection){
     </tr>`).join('') || emptyRow(8, '还没有软件授权码');
   const adminNodeOptions = nodeOptions((data.nodes || []).filter(n => n.active));
   const nodeHtml = `
-    <section class="card hidden" id="editNodeCard"><div class="section-title"><h2>编辑地区节点</h2><p>建议使用稳定域名，方便后期更换 VPS</p></div><form id="editNodeForm" class="grid">
+    <section class="card hidden" id="editNodeCard"><div class="section-title"><h2>编辑节点</h2><p>建议使用稳定域名，方便后期更换 VPS</p></div><form id="editNodeForm" class="grid">
       <input type="hidden" name="id">
       <div><label>地区</label><input name="region" required></div>
       <div><label>节点名</label><input name="name" required></div>
@@ -778,7 +1003,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>备注</label><input name="note"></div>
       <div style="align-self:end"><button>保存修改</button><button type="button" class="secondary" onclick="document.querySelector('#editNodeCard').classList.add('hidden')">取消</button></div>
     </form><p class="muted small">建议 frps 地址填写域名，例如 <code>hk.example.com</code>。后期更换 VPS 时优先改 DNS，用户的 frpc 配置可保持不变。</p></section>
-    <section class="card"><div class="section-title"><h2>新增地区节点</h2><p>每个节点独立端口池和 token</p></div><form id="nodeForm" class="grid">
+    <section class="card"><div class="section-title"><h2>新增节点</h2><p>每个节点独立端口池和 token</p></div><form id="nodeForm" class="grid">
       <div><label>地区</label><input name="region" placeholder="香港 / 日本 / 美国" required></div>
       <div><label>节点名</label><input name="name" placeholder="hk-1" required></div>
       <div><label>frps 域名/地址</label><input name="server_addr" placeholder="hk.example.com" required></div>
@@ -789,7 +1014,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>备注</label><input name="note" placeholder="线路/机房说明"></div>
       <div style="align-self:end"><button>创建节点</button></div>
     </form></section>
-    <section class="card" id="nodes"><div class="section-title"><h2>地区节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>ID</th><th>地区</th><th>节点</th><th>frps</th><th>端口池</th><th>剩余</th><th>状态</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table>${paginationHtml('nodes', nodesPage, (data.nodes || []).length, ADMIN_PAGE_SIZE)}</section>`;
+    <section class="card" id="nodes"><div class="section-title"><h2>节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>ID</th><th>地区</th><th>节点</th><th>frps</th><th>端口池</th><th>剩余</th><th>状态</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table>${paginationHtml('nodes', nodesPage, (data.nodes || []).length, ADMIN_PAGE_SIZE)}</section>`;
   const keysHtml = `
     <section class="card" id="keys"><div class="section-title"><h2>生成注册密钥</h2><p>注册密钥固定单次使用，适合批量发货</p></div><form id="inviteForm" class="grid">
       <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
@@ -812,10 +1037,10 @@ async function loadAdmin(section=currentAdminSection){
     </form><p class="panel-note small">客户不需要提供机器码；首次激活时授权服务器会自动绑定机器。批量生成后会自动复制并下载 txt。</p>
     <table><thead><tr><th>ID</th><th>授权码</th><th>备注</th><th>套餐</th><th>绑定机器</th><th>到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${softwareKeyRows}</tbody></table></section>` : ''}`;
   const usersHtml = `
-    <section class="card"><div class="section-title"><h2>创建用户</h2><p>管理员直开账号，可指定地区节点</p></div><form id="createUserForm" class="grid">
+    <section class="card"><div class="section-title"><h2>创建用户</h2><p>管理员直开账号，可指定接入节点</p></div><form id="createUserForm" class="grid">
       <div><label>用户名</label><input name="username" required></div>
       <div><label>初始密码</label><input name="password" type="password" required></div>
-      <div><label>地区节点</label><select name="node_id" required>${adminNodeOptions}</select></div>
+      <div><label>接入节点</label><select name="node_id" required>${adminNodeOptions}</select></div>
       <div><label>端口数量</label><input name="max_ports" type="number" value="5" min="1" max="100"></div>
       <div><label>今日流量上限 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
       <div><label>速率策略 MB/s</label><input name="bandwidth_limit_mbs" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限；仅后台可见</span></div>
@@ -825,11 +1050,11 @@ async function loadAdmin(section=currentAdminSection){
     <section class="card" id="users"><div class="section-title"><h2>用户列表</h2><p>管理状态、续期、注册密钥和删除账号</p></div>
       <form id="adminUserFilterForm" class="grid admin-user-filters">
         <div><label for="adminUserSearch">搜索用户</label><input id="adminUserSearch" name="search" value="${esc(adminUserSearch)}" placeholder="用户名、ID、注册密钥"></div>
-        <div><label for="adminUserNode">地区节点</label><select id="adminUserNode" name="node"><option value="">全部节点</option>${(data.nodes || []).map(n => `<option value="${n.id}" ${String(n.id)===String(adminUserNode)?'selected':''}>${esc(n.region)} / ${esc(n.name)}</option>`).join('')}</select></div>
+        <div><label for="adminUserNode">接入节点</label><select id="adminUserNode" name="node"><option value="">全部节点</option>${(data.nodes || []).map(n => `<option value="${n.id}" ${String(n.id)===String(adminUserNode)?'selected':''}>${esc(n.region)} / ${esc(n.name)}</option>`).join('')}</select></div>
         <div><label for="adminUserStatus">账号状态</label><select id="adminUserStatus" name="status"><option value="all" ${adminUserStatus==='all'?'selected':''}>全部状态</option><option value="active" ${adminUserStatus==='active'?'selected':''}>正常启用</option><option value="disabled" ${adminUserStatus==='disabled'?'selected':''}>已停用</option><option value="expired" ${adminUserStatus==='expired'?'selected':''}>已到期</option></select></div>
         <div class="form-actions"><button type="submit">筛选</button><button type="button" class="secondary" id="adminUserFilterReset">重置</button></div>
       </form>
-      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>ID</th><th>用户</th><th>角色</th><th>地区节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>到期</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>`;
+      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>ID</th><th>用户</th><th>角色</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>到期</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>`;
   const riskHtml = `
     <section class="card" id="risk"><div class="section-title"><h2>投诉处理 / 风控</h2><p>按端口定位用户并快速封禁</p></div>
       <form id="lookupPortForm" class="grid">
@@ -841,7 +1066,8 @@ async function loadAdmin(section=currentAdminSection){
     </section>
     <section class="card"><div class="section-title"><h2>审计日志</h2><p>最近 80 条关键操作和风控事件</p></div><table><thead><tr><th>ID</th><th>事件</th><th>用户</th><th>端口</th><th>协议</th><th>详情</th><th>时间</th></tr></thead><tbody>${logRows}</tbody></table>${paginationHtml('risk', riskPage, (data.logs || []).length, ADMIN_PAGE_SIZE)}</section>`;
   const sectionHtml = {users: usersHtml, keys: keysHtml, nodes: nodeHtml, risk: riskHtml}[currentAdminSection] || usersHtml;
-  app.innerHTML = sectionHtml;
+  const sectionTitles = {users:'用户管理', keys:'注册密钥', nodes:'新增节点', risk:'风控审计'};
+  app.innerHTML = appLayoutHtml(sectionHtml, currentAdminSection, sectionTitles[currentAdminSection] || '管理台');
   const adminUserFilterForm = document.querySelector('#adminUserFilterForm');
   if(adminUserFilterForm){
     adminUserFilterForm.onsubmit = (e) => {
@@ -1171,6 +1397,35 @@ function copySetupKey(){
   copyText(el.textContent || '');
 }
 
+async function loadAdminHealth(){
+  clearAdminDashboardTimer();
+  hideFlash();
+  currentAdminSection = 'health';
+  setNav();
+  let data;
+  try{ data = await api('/api/admin/dashboard'); }
+  catch(err){
+    if(err.message === 'unauthorized') return renderLogin();
+    show(err.message, true);
+    return;
+  }
+  const healthPageSize = nodeHealthPageSize();
+  nodeHealthPage = clampPage(nodeHealthPage, (data.nodes || []).length, healthPageSize);
+  const healthNodes = pageItems(data.nodes || [], nodeHealthPage, healthPageSize);
+  const nodeRows = healthNodes.map(n => `
+    <tr>
+      <td><b>${esc(n.name)}</b><span class="muted small">${esc(n.server_addr || '')}:${esc(n.server_port || '')}</span></td>
+      <td>${nodeStatusBadge(n)}<span class="muted small">${esc(n.auth_message || '')}</span></td>
+      <td>${Number(n.port_count || 0) - Number(n.free_count || 0)} / ${n.port_count || 0}</td>
+    </tr>`).join('') || emptyRow(3, '暂无节点');
+  app.innerHTML = appLayoutHtml(`
+    <section class="card dashboard-hero"><div><div class="eyebrow">NODE HEALTH</div><h2>节点健康</h2><p>检查 frps bind/auth 端口连通性，确认节点在线和端口池使用情况。</p></div><div class="hero-actions"><button onclick="loadAdminHealth()">立即刷新</button><button class="secondary" onclick="loadAdminDashboard()">返回仪表盘</button></div></section>
+    <section class="card node-health-card"><div class="section-title"><h2>节点健康状态</h2><p>每页 ${healthPageSize} 条</p></div>
+      <table class="compact-table"><thead><tr><th>节点</th><th>状态</th><th>端口使用</th></tr></thead><tbody>${nodeRows}</tbody></table>
+      ${paginationHtml('health', nodeHealthPage, (data.nodes || []).length, healthPageSize)}
+    </section>`, 'health', '节点健康');
+}
+
 async function loadAdminDashboard(auto=false){
   hideFlash();
   clearAdminDashboardTimer();
@@ -1192,15 +1447,6 @@ async function loadAdminDashboard(auto=false){
   const totalPorts = Number(portStats.total || 0);
   const freePorts = Number(portStats.free || Math.max(0, totalPorts - usedPorts));
   const portUsage = totalPorts > 0 ? ((usedPorts / totalPorts) * 100).toFixed(1) : '0.0';
-  const healthPageSize = nodeHealthPageSize();
-  nodeHealthPage = clampPage(nodeHealthPage, (data.nodes || []).length, healthPageSize);
-  const healthNodes = pageItems(data.nodes || [], nodeHealthPage, healthPageSize);
-  const nodeRows = healthNodes.map(n => `
-    <tr>
-      <td><b>${esc(n.name)}</b><span class="muted small">${esc(n.server_addr || '')}:${esc(n.server_port || '')}</span></td>
-      <td>${nodeStatusBadge(n)}<span class="muted small">${esc(n.auth_message || '')}</span></td>
-      <td>${Number(n.port_count || 0) - Number(n.free_count || 0)} / ${n.port_count || 0}</td>
-    </tr>`).join('') || emptyRow(3, '暂无节点');
   const setupHtml = data.has_setup_key ? `
     <div class="ops-item"><div class="label">一键添加节点密钥</div><div class="row"><code class="token" id="setupKeyValue">${esc(data.setup_key)}</code><button class="secondary" onclick="copySetupKey()">复制</button></div><p class="muted small">在新机器运行添加节点脚本时输入此密钥。</p></div>` :
     '<div class="ops-item"><div class="label">一键添加节点密钥</div><p class="muted small">未设置 FML_SETUP_KEY；需要一键添加节点时可在服务端配置。</p></div>';
@@ -1211,16 +1457,16 @@ async function loadAdminDashboard(auto=false){
   window.adminProxyTypeOptions = data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux'];
   const frpcUserOptions = frpcUsers.map(u => `<option value="${u.id}">${esc(u.username)} · ${esc(u.node_region || '-')} / ${esc(u.node_name || '-')} · 端口 ${u.port_count || 0} · 可用 ${(u.available_ports || []).length} · 隧道 ${u.tunnel_count || 0}</option>`).join('');
   const proxyTypeOptions = (data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux']).map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
-  app.innerHTML = `
+  app.innerHTML = appLayoutHtml(`
     <section class="dashboard-hero card">
       <div>
         <div class="eyebrow">ADMIN DASHBOARD</div>
         <h2>运行总览</h2>
-        <p>节点健康、主机资源、备份和运维入口集中在这里。最后检查：${esc(nowText)}</p>
+        <p>主机资源、备份和运维入口集中在这里。最后检查：${esc(nowText)}</p>
       </div>
       <div class="hero-actions">
         <button onclick="loadAdminDashboard()">立即刷新</button>
-        <button class="secondary" onclick="loadAdmin('nodes')">节点管理</button>
+        <button class="secondary" onclick="loadAdmin('nodes')">新增节点</button>
       </div>
     </section>
 
@@ -1254,11 +1500,6 @@ async function loadAdminDashboard(auto=false){
       </section>
     </div>
 
-    <section class="card node-health-card"><div class="section-title"><h2>节点健康</h2><p>检查 frps bind/auth 端口连通性 · 每页 ${healthPageSize} 条</p></div>
-      <table class="compact-table"><thead><tr><th>节点</th><th>状态</th><th>端口使用</th></tr></thead><tbody>${nodeRows}</tbody></table>
-      ${paginationHtml('health', nodeHealthPage, (data.nodes || []).length, healthPageSize)}
-    </section>
-
     <section class="card"><div class="section-title"><h2>Cloudflare R2 备份配置</h2><p>${r2Status} · ${esc(r2Source)}</p></div>
       <form id="r2ConfigForm" class="grid r2-form">
         <div><label>Account ID</label><input name="account_id" value="${esc(r2.account_id || '')}" placeholder="Cloudflare Account ID"></div>
@@ -1269,7 +1510,7 @@ async function loadAdminDashboard(auto=false){
         <div class="form-actions"><button>保存 R2 配置</button><button type="button" class="secondary" onclick="backupToR2()">保存后上传备份</button></div>
       </form>
       <p class="muted small">配置保存在本面板数据库中；Secret 不会明文回显。已有环境变量配置仍可作为兼容兜底。</p>
-    </section>`;
+    </section>`, 'admin-dashboard', '运行总览');
   const r2Form = document.querySelector('#r2ConfigForm');
   if(r2Form) r2Form.onsubmit = saveR2Config;
   const adminFrpcForm = document.querySelector('#adminFrpcForm');
