@@ -416,6 +416,7 @@ def node_public(row: sqlite3.Row) -> dict[str, Any]:
         "name": row["name"],
         "server_addr": row["server_addr"],
         "server_port": row["server_port"],
+        "bandwidth_mbps": int(row_val(row, "bandwidth_mbps", 0) or 0),
         "auth_token": row["auth_token"],
         "port_start": row["port_start"],
         "port_end": row["port_end"],
@@ -868,6 +869,7 @@ def init_db() -> None:
                 dashboard_url TEXT NOT NULL DEFAULT '',
                 dashboard_user TEXT NOT NULL DEFAULT '',
                 dashboard_password TEXT NOT NULL DEFAULT '',
+                bandwidth_mbps INTEGER NOT NULL DEFAULT 0,
                 active INTEGER NOT NULL DEFAULT 1,
                 note TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL
@@ -997,6 +999,9 @@ def init_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN traffic_limit_bytes INTEGER NOT NULL DEFAULT 0")
         if "bandwidth_limit_kbps" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0")
+        node_cols = {r["name"] for r in conn.execute("PRAGMA table_info(nodes)").fetchall()}
+        if "bandwidth_mbps" not in node_cols:
+            conn.execute("ALTER TABLE nodes ADD COLUMN bandwidth_mbps INTEGER NOT NULL DEFAULT 0")
         invite_cols = {r["name"] for r in conn.execute("PRAGMA table_info(invite_keys)").fetchall()}
         if "traffic_limit_bytes" not in invite_cols:
             conn.execute("ALTER TABLE invite_keys ADD COLUMN traffic_limit_bytes INTEGER NOT NULL DEFAULT 0")
@@ -2976,6 +2981,7 @@ class Handler(BaseHTTPRequestHandler):
             dashboard_url = str(data.get("dashboard_url", "")).strip().rstrip("/")[:300]
             dashboard_user = str(data.get("dashboard_user", "")).strip()[:80]
             dashboard_password = str(data.get("dashboard_password", "")).strip()[:200]
+            bandwidth_mbps = max(0, int(data.get("bandwidth_mbps", 0) or 0))
             if len(region) > 40:
                 raise ValueError("地区名称太长")
             if not name or len(name) > 40 or not name.replace("_", "").replace("-", "").isalnum():
@@ -2994,8 +3000,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("单节点端口池不要超过 20000 个")
             with db() as conn:
                 cur = conn.execute(
-                    "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, 1, note, now()),
+                    "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, 1, note, now()),
                 )
                 node_id = int(cur.lastrowid)
                 conn.executemany("INSERT OR IGNORE INTO ports(node_id, port, created_at) VALUES(?,?,?)", [(node_id, p, now()) for p in range(port_start, port_end + 1)])
@@ -3020,6 +3026,7 @@ class Handler(BaseHTTPRequestHandler):
             dashboard_url = str(data.get("dashboard_url", "")).strip().rstrip("/")[:300]
             dashboard_user = str(data.get("dashboard_user", "")).strip()[:80]
             dashboard_password = str(data.get("dashboard_password", "")).strip()[:200]
+            bandwidth_mbps = max(0, int(data.get("bandwidth_mbps", 0) or 0))
             active = 1 if str(data.get("active", "1")) in ("1", "true", "True", "on", "yes") else 0
             if len(region) > 40:
                 raise ValueError("地区名称太长")
@@ -3039,8 +3046,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"ok": False, "error": "节点不存在"}, 404)
                     return
                 conn.execute(
-                    "UPDATE nodes SET region=?, name=?, server_addr=?, server_port=?, auth_token=?, web_port=?, dashboard_url=?, dashboard_user=?, dashboard_password=?, active=?, note=? WHERE id=?",
-                    (region, name, server_addr, server_port, auth_token, web_port, dashboard_url, dashboard_user, dashboard_password, active, note, node_id),
+                    "UPDATE nodes SET region=?, name=?, server_addr=?, server_port=?, auth_token=?, web_port=?, dashboard_url=?, dashboard_user=?, dashboard_password=?, bandwidth_mbps=?, active=?, note=? WHERE id=?",
+                    (region, name, server_addr, server_port, auth_token, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, active, note, node_id),
                 )
             self.send_json({"ok": True, "message": f"节点 {region} / {name} 已更新"})
         except sqlite3.IntegrityError:
