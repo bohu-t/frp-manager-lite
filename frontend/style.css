@@ -712,3 +712,10 @@ body.is-app{background:#eef3fa;color:#172b49}
 .topbar-breadcrumb{display:inline-flex;align-items:center;gap:7px;font-size:18px!important;font-weight:700!important;color:#3478f6!important}
 .topbar-breadcrumb-icon{display:block;width:25px;height:25px;object-fit:contain;flex:0 0 25px}
 @media(max-width:600px){.topbar-welcome{gap:9px!important;flex-wrap:wrap}.topbar-greeting{font-size:14px!important}.topbar-breadcrumb{font-size:16px!important}.topbar-breadcrumb-icon{width:22px;height:22px;flex-basis:22px}}
+
+
+/* Welcome icon and larger topbar labels */
+.topbar-welcome-icon{display:block;width:27px;height:27px;flex:0 0 27px;}
+.topbar-greeting{font-size:18px!important;font-weight:650!important;color:#263b59!important;}
+.topbar-breadcrumb{font-size:18px!important;font-weight:700!important;}
+@media(max-width:600px){.topbar-welcome-icon{width:23px;height:23px;flex-basis:23px}.topbar-greeting{font-size:15px!important}.topbar-breadcrumb{font-size:16px!important}}
