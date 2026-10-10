@@ -5,6 +5,7 @@ let currentUser = null;
 let softwareLicense = null;
 let currentAdminSection = 'users';
 let adminDashboardTimer = null;
+let tunnelPreviewTimer = null;
 let csrfToken = null;
 let colorMode = localStorage.getItem('fml_color_mode') || 'light';
 let adminPages = {users:1, keys:1, nodes:1, risk:1};
@@ -639,6 +640,7 @@ function bindUserTunnelForm(){
 
 async function loadDashboard(view='overview'){
   clearAdminDashboardTimer();
+  if(tunnelPreviewTimer){ clearInterval(tunnelPreviewTimer); tunnelPreviewTimer = null; }
   hideFlash();
   let data;
   try{ data = await api('/api/dashboard'); }
@@ -681,6 +683,23 @@ async function loadDashboard(view='overview'){
       <div class="tunnel-card-actions"><button class="secondary" onclick="loadDashboard('tunnels')">刷新状态</button><button class="secondary" onclick="toggleTunnel(${t.id})">${t.enabled ? '停用' : '启用'}</button><button class="danger" onclick="deleteTunnel(${t.id})">删除</button></div>
     </article>`;
   }).join('') || `<div class="empty-state"><strong>还没有隧道</strong><p class="muted small">创建第一个隧道后，就能在这里查看本地服务、公网入口和运行状态。</p><button onclick="loadDashboard('tunnels')">新建隧道</button></div>`;
+  const tunnelPreviewRows = data.tunnels.map(t => {
+    const endpointRaw = tunnelEndpointText(t, data.frps);
+    const runtime = tunnelRuntimeStats(t, data.frps_user_dashboard);
+    const status = t.mapping_status || (t.enabled ? 'unknown' : 'disabled');
+    const statusLabel = status === 'online' ? '在线' : (status === 'registered' ? '已注册' : (status === 'disabled' ? '已停用' : '未连接'));
+    const statusClass = status === 'online' ? 'ok' : (status === 'registered' ? 'warn' : (status === 'disabled' ? 'muted' : 'bad'));
+    return `<article class="tunnel-preview-item">
+      <div class="tunnel-preview-top"><strong title="${esc(t.name)}">${esc(t.name)}</strong><span class="status-dot ${t.enabled ? 'is-online' : 'is-offline'}">${t.enabled ? '已启用' : '已停用'}</span></div>
+      <div class="tunnel-preview-grid">
+        <div><span>状态</span><b class="${statusClass}">${statusLabel}</b></div>
+        <div><span>本地服务</span><b title="${esc(t.local_ip)}:${esc(t.local_port)}">${esc(t.local_ip)}:${esc(t.local_port)}</b></div>
+        <div><span>公网地址</span><b title="${esc(endpointRaw)}">${esc(endpointRaw)}</b></div>
+        <div><span>今日流量</span><b>${fmtBytes(runtime.trafficIn + runtime.trafficOut)}</b></div>
+        <div><span>连接数</span><b>${runtime.available ? runtime.connections : '-'}</b></div>
+      </div>
+    </article>`;
+  }).join('') || `<div class="empty-state"><strong>还没有隧道</strong><p class="muted small">创建隧道后，这里会轮播展示隧道状态。</p></div>`;
   const portOptions = data.ports.map(p => `<option value="${p}">${p}${used.has(p) ? '（已用）' : ''}</option>`).join('');
   // Dropdown only for non-admin with reasonable port count; admin or huge lists get number input
   const portCount = ps.total || data.ports.length;
@@ -735,7 +754,18 @@ async function loadDashboard(view='overview'){
         <section class="card node-status-card node-map-panel"><div class="node-map-backdrop" aria-hidden="true"><div class="node-map-grid"></div><svg viewBox="0 0 900 340" preserveAspectRatio="xMidYMid slice"><defs><filter id="nodeMapBlur"><feGaussianBlur stdDeviation="2.4"/></filter><linearGradient id="nodeMapFill" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#80b8ef"/><stop offset="100%" stop-color="#5e8bd9"/></linearGradient></defs><g fill="url(#nodeMapFill)" opacity=".28" filter="url(#nodeMapBlur)"><path d="M74 85l40-27 58 8 21 22 49-8 24 27-21 25-37 2-18 35-42 4-12 37-29-10-6-44-29-20z"/><path d="M214 193l39 12 28 45-8 38-21 18-18-43-25-26z"/><path d="M405 74l36-19 54 11 27 25 50-7 24 22 51-5 37 25-20 21-52-6-16 30-31-5-20 23-41-14-19-32-40-5-15-25-35-2z"/><path d="M459 166l43 1 30 31-8 51-27 47-25-18-11-52-18-24z"/><path d="M631 228l43-15 48 15 26 25-28 24-49-8-28 15-22-22z"/><path d="M748 65l42-13 39 20-6 26-42 9-30-17z"/></g><g fill="none" stroke="#5e9fe8" stroke-width="2" stroke-dasharray="5 7" opacity=".55"><path d="M170 118Q350 5 520 115T740 130"/><path d="M170 118Q250 240 430 210T740 130"/></g><g fill="#fff" stroke="#4388ec" stroke-width="3"><circle cx="170" cy="118" r="8"/><circle cx="430" cy="210" r="7"/><circle cx="740" cy="130" r="10"/></g><circle cx="740" cy="130" r="19" fill="#4388ec" opacity=".14"/></svg></div><div class="node-map-heading"><div><div class="section-kicker">CURRENT NODE · NODE OVERVIEW</div><h2>当前节点</h2></div><span class="status-badge ${nodeStateClass}"><i></i>${nodeState}</span></div><div class="node-map-content node-compact-content"><div class="node-server-art"><img src="/server-icon.svg" alt="服务器图标"></div><div class="node-compact-details"><div class="node-compact-title"><strong>${esc(node.name || '未分配节点')}</strong><span class="status-badge ${nodeStateClass}"><i></i>${nodeState}</span></div><div class="node-compact-location"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span>${esc(nodeLocation)}</span></div><div class="node-compact-meta"><span>延迟：${esc(nodeLatency)}</span><span class="node-meta-separator">|</span><span>带宽：${node.bandwidth_mbps || node.bandwidth || node.bandwidth_mbps === 0 ? esc(node.bandwidth_mbps ?? node.bandwidth) + ' Mbps' : '未设置'}</span></div></div><button type="button" class="node-switch-button" onclick="openNodeSwitch()">⇄ 切换节点</button></div><div id="nodeSwitchModal" class="node-switch-modal hidden" role="dialog" aria-modal="true" aria-labelledby="nodeSwitchTitle"><div class="node-switch-dialog"><div class="section-title"><div><div class="section-kicker">CHANGE NODE</div><h2 id="nodeSwitchTitle">切换接入节点</h2><p>切换后会影响当前账号新建隧道的默认节点。</p></div><button class="secondary" type="button" onclick="closeNodeSwitch()">关闭 ×</button></div><div id="nodeSwitchList" class="node-switch-list"><p class="muted">正在加载可用节点…</p></div></div></div></section>
         <section class="card quick-actions-card"><div class="section-title"><div><div class="section-kicker">QUICK ACTIONS</div><h2>快捷操作</h2></div></div><div class="quick-actions-grid"><button class="quick-action" onclick="loadDashboard('tunnels')"><span>↗</span><b>管理隧道</b><small>查看和控制映射</small></button><button class="quick-action" onclick="loadDashboard('ports')"><span>#</span><b>查看端口</b><small>查看端口资源</small></button><a class="quick-action" href="/config/frpc.toml"><span>↓</span><b>下载配置</b><small>获取 frpc.toml</small></a><a class="quick-action" href="/config/deploy-frpc.sh"><span>⚙</span><b>部署脚本</b><small>安装客户端</small></a></div></section>
       </div>
-      <section class="card dashboard-tunnels-preview"><div class="section-title"><div><div class="section-kicker">MY TUNNELS</div><h2>我的隧道</h2><p>展示当前映射状态和今日真实流量；完整管理请进入“我的隧道”。</p></div><button class="secondary" onclick="loadDashboard('tunnels')">查看全部</button></div><div class="tunnel-card-grid">${tunnelRows}</div></section>`, 'dashboard', '概览');
+      <section class="card dashboard-tunnels-preview"><div class="section-title"><div><div class="section-kicker">MY TUNNELS</div><h2>我的隧道</h2></div><button class="secondary tunnel-preview-all" onclick="loadDashboard('tunnels')">查看全部隧道 ↗</button></div><div id="tunnelPreviewRotator" class="tunnel-preview-rotator">${tunnelPreviewRows}</div></section>`, 'dashboard', '概览');
+    const previewItems = [...document.querySelectorAll('#tunnelPreviewRotator .tunnel-preview-item')];
+    if(previewItems.length > 1){
+      let previewIndex = 0;
+      previewItems.forEach((item, index) => item.classList.toggle('is-active', index === 0));
+      tunnelPreviewTimer = setInterval(() => {
+        if(!document.querySelector('#tunnelPreviewRotator')){ clearInterval(tunnelPreviewTimer); tunnelPreviewTimer = null; return; }
+        previewItems[previewIndex].classList.remove('is-active');
+        previewIndex = (previewIndex + 1) % previewItems.length;
+        previewItems[previewIndex].classList.add('is-active');
+      }, 4000);
+    } else if(previewItems.length === 1){ previewItems[0].classList.add('is-active'); }
     return;
   }
   if(view === 'ports'){
