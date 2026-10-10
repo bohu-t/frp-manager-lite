@@ -688,36 +688,6 @@ async function loadDashboard(view='overview'){
     ? `<input name="remote_port" type="number" min="1" max="65535" placeholder="输入端口号">`
     : `<select name="remote_port">${portOptions}</select>`;
   const proxyTypeOptions = (data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux']).map(t => `<option value="${t}">${t}</option>`).join('');
-  app.innerHTML = `
-    <div class="user-dashboard-shell">
-      <aside class="user-dashboard-sidebar">
-        <div class="dashboard-brand"><span class="dashboard-brand-mark">F</span><span><strong>FRP Manager</strong><small>内网穿透管理平台</small></span></div>
-        <div class="dashboard-nav-label">工作空间</div>
-        <button class="dashboard-nav-item is-active" type="button" onclick="loadDashboard()"><span>▦</span>概览</button>
-        <button class="dashboard-nav-item" type="button" onclick="document.querySelector('.tunnel-list-section')?.scrollIntoView({behavior:'smooth'})"><span>⇄</span>我的隧道</button>
-        <a class="dashboard-nav-item" href="/config/frpc.toml"><span>↓</span>下载配置</a>
-        <div class="dashboard-sidebar-spacer"></div>
-        <div class="dashboard-sidebar-status"><span class="dashboard-status-light"></span><span><strong>服务面板</strong><small>已连接管理服务</small></span></div>
-        <button class="dashboard-nav-item dashboard-theme-control" type="button" onclick="toggleColorMode()"><span>◐</span>${colorModeLabel()}</button>
-        <button class="dashboard-nav-item" type="button" onclick="logout()"><span>↪</span>退出登录</button>
-      </aside>
-      <div class="user-dashboard-main">
-        <div class="dashboard-topbar"><div><span class="dashboard-eyebrow">工作空间 / 概览</span><h2>控制台概览</h2></div><div class="dashboard-user-chip"><span class="dashboard-avatar">${esc(String(data.user.username || 'U').slice(0,1).toUpperCase())}</span><span><strong>${esc(data.user.username)}</strong><small>普通用户</small></span></div></div>
-        <section class="dashboard-welcome"><div><span class="dashboard-eyebrow">FRP MANAGER LITE</span><h2>欢迎回来，${esc(data.user.username)} <span>👋</span></h2><p>在这里查看隧道、节点和流量使用情况。</p></div><button type="button" onclick="openTunnelModal()">＋ 创建隧道</button></section>
-        <section class="dashboard-metrics">
-          <article class="dashboard-metric"><span class="dashboard-metric-icon icon-blue">⇄</span><span class="dashboard-metric-label">我的隧道</span><strong>${data.tunnels.length}</strong><small>已创建的隧道总数</small></article>
-          <article class="dashboard-metric"><span class="dashboard-metric-icon icon-green">⌁</span><span class="dashboard-metric-label">当前节点</span><strong class="metric-node-name">${esc(data.node?.name || '未分配')}</strong><small>${esc(data.node?.region || '暂无节点地区')}</small></article>
-          <article class="dashboard-metric"><span class="dashboard-metric-icon icon-purple">↕</span><span class="dashboard-metric-label">今日流量</span><strong>${fmtBytes(todayTraffic)}</strong><small>${trafficLimit ? '限额 ' + fmtBytes(trafficLimit) : '当前账号不限额'}</small></article>
-          <article class="dashboard-metric"><span class="dashboard-metric-icon icon-orange">◷</span><span class="dashboard-metric-label">账号有效期</span><strong class="metric-expiry">${esc(data.user.expires_text || '未设置')}</strong><small>账号到期时间</small></article>
-        </section>
-        <div class="dashboard-content-grid">
-          <section class="dashboard-node-panel"><div class="dashboard-panel-heading"><div><h3>当前节点</h3><p>账号关联的 FRPS 接入节点</p></div><span class="dashboard-node-badge">${esc(data.node?.region || '节点信息')}</span></div><div class="dashboard-node-body"><div class="dashboard-node-illustration"><span>⌘</span><i></i><i></i><i></i></div><div class="dashboard-node-details"><strong>${esc(data.node?.name || '暂未分配节点')}</strong><span>${esc(data.node?.server_addr || data.frps?.addr || '—')}</span><div class="dashboard-node-meta"><span class="dashboard-status-light"></span>节点信息已同步</div></div></div><div class="dashboard-node-footer"><span>FRPS 端口</span><strong>${esc(data.frps?.port || '—')}</strong></div></section>
-          <section class="dashboard-quick-panel"><div class="dashboard-panel-heading"><div><h3>快捷操作</h3><p>常用功能，一键直达</p></div></div><div class="dashboard-quick-actions"><button type="button" onclick="openTunnelModal()"><span class="quick-icon">＋</span><span><strong>创建隧道</strong><small>添加新的映射规则</small></span><b>›</b></button><a href="/config/frpc.toml"><span class="quick-icon">↓</span><span><strong>下载配置</strong><small>获取 frpc 配置文件</small></span><b>›</b></a><button type="button" onclick="document.querySelector('.proxy-card-grid')?.scrollIntoView({behavior:'smooth'})"><span class="quick-icon">⌁</span><span><strong>流量与映射</strong><small>查看当前代理运行情况</small></span><b>›</b></button></div></section>
-        </div>
-        <div class="dashboard-existing-content">
-    <div class="grid">
-      <section class="card stat"><div class="label">当前账号</div><div class="num">${esc(data.user.username)}</div><p>地区节点：<b>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</b></p><p>端口上限：${esc(data.user.max_ports)} · 到期：<b>${esc(data.user.expires_text)}</b></p><p>${trafficLine}</p></section>
-      <section class="card stat"><div class="label">FRPS 接入点</div><div class="num" style="font-size:20px">${esc(data.frps.addr)}</div><p>端口：<code>${esc(data.frps.port)}</code></p><p class="row"><a class="btn" href="/config/frpc.toml">下载 frpc.toml</a><a class="btn secondary" href="/config/deploy-frpc.sh">下载部署脚本</a></p><p class="muted small">全协议：${(data.allowed_proxy_types || []).join(' / ')}</p></section>
   const accountCard = `<section class="card user-account-card"><div class="section-title"><div><div class="section-kicker">ACCOUNT</div><h2>账号信息</h2></div></div><div class="account-summary-grid"><div><span>当前账号</span><strong>${esc(data.user.username)}</strong></div><div><span>接入节点</span><strong>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</strong></div><div><span>端口上限</span><strong>${esc(data.user.max_ports)}</strong></div><div><span>有效期</span><strong>${esc(data.user.expires_text)}</strong></div><div><span>FRPS 地址</span><strong>${esc(data.frps.addr)}:${esc(data.frps.port)}</strong></div></div></section>`;
   if(view === 'overview'){
     const node = data.node || {};
@@ -798,7 +768,6 @@ async function loadDashboard(view='overview'){
         <p class="muted small">HTTP/HTTPS/TCPMUX 需要 frps 已配置 vhostHTTPPort / vhostHTTPSPort / tcpmuxHTTPConnectPort 等对应能力。</p>
       </section>
     </div>
-    <section class="card tunnel-list-section"><div class="section-title"><div><h2>我的隧道</h2><p>一张卡片对应一条映射。修改配置后，请重新下载 frpc.toml 并重启客户端。</p></div><span class="section-count">${data.tunnels.length} 条隧道</span></div><div class="tunnel-card-grid">${tunnelRows}</div></section></div></div></div>`;
     <section class="card tunnel-list-section"><div class="section-title"><div><div class="section-kicker">MY TUNNELS</div><h2>我的隧道</h2><p>一张卡片对应一条映射。修改配置后，请重新下载 frpc.toml 并重启客户端。</p></div><span class="section-count">${data.tunnels.length} 条隧道</span></div><div class="tunnel-card-grid">${tunnelRows}</div></section>
     </div><aside class="workspace-aside">
       <section class="side-info-card"><div class="section-kicker">ACCOUNT</div><h3>账号信息</h3><div class="info-line"><span>当前账号</span><strong>${esc(data.user.username)}</strong></div><div class="info-line"><span>所在节点</span><strong>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</strong></div><div class="info-line"><span>端口上限</span><strong>${esc(data.user.max_ports)}</strong></div><div class="info-line"><span>有效期</span><strong>${esc(data.user.expires_text)}</strong></div></section>
