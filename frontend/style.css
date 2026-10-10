@@ -744,3 +744,23 @@ body.is-app{background:#eef3fa;color:#172b49}
 .overview-stat-copy>strong{font-size:clamp(15px,1.35vw,21px);line-height:1.2;overflow-wrap:anywhere}
 .overview-stat-copy>small{font-size:11px;color:#7e91ae;line-height:1.35}
 @media(max-width:760px){.overview-stat-icon{flex-basis:40px;width:40px;height:40px}.overview-stat-main{gap:9px}.overview-stat-copy>strong{font-size:16px}}
+
+
+/* Reduce current-node card height by about half and keep metadata compact */
+.node-map-panel{padding:9px 16px!important}
+.node-map-panel .node-compact-content{min-height:56px!important;gap:14px!important}
+.node-server-art{flex-basis:48px!important;width:48px!important;height:48px!important;border-radius:10px!important}
+.node-server-art img{width:44px!important;height:44px!important}
+.node-compact-details{gap:4px!important}
+.node-compact-title>strong{font-size:16px!important}
+.node-map-panel .node-switch-button{padding:8px 12px!important}
+.node-compact-meta{align-items:center;gap:4px 8px!important}
+.node-meta-separator{color:#b3c0d2!important}
+@media(max-width:600px){
+  .node-map-panel{padding:8px 10px!important}
+  .node-map-panel .node-compact-content{min-height:48px!important;gap:9px!important}
+  .node-server-art{flex-basis:42px!important;width:42px!important;height:42px!important}
+  .node-server-art img{width:38px!important;height:38px!important}
+  .node-compact-title>strong{font-size:14px!important}
+  .node-map-panel .node-switch-button{padding:7px 9px!important}
+}
