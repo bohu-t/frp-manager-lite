@@ -1365,7 +1365,7 @@ function editNode(n){
   const card = document.querySelector('#editNodeCard');
   const f = document.querySelector('#editNodeForm');
   card.classList.remove('hidden');
-  for(const k of ['id','region','name','server_addr','server_port','auth_token','note']) f.elements[k].value = n[k] ?? '';
+  for(const k of ['id','region','name','server_addr','server_port','auth_token','note','bandwidth_mbps']) f.elements[k].value = n[k] ?? '';
   f.elements.active.value = n.active ? '1' : '0';
   card.scrollIntoView({behavior:'smooth', block:'start'});
 }
