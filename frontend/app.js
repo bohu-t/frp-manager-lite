@@ -691,8 +691,12 @@ async function loadDashboard(view='overview'){
   const accountCard = `<section class="card user-account-card"><div class="section-title"><div><div class="section-kicker">ACCOUNT</div><h2>账号信息</h2></div></div><div class="account-summary-grid"><div><span>当前账号</span><strong>${esc(data.user.username)}</strong></div><div><span>接入节点</span><strong>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</strong></div><div><span>端口上限</span><strong>${esc(data.user.max_ports)}</strong></div><div><span>有效期</span><strong>${esc(data.user.expires_text)}</strong></div><div><span>FRPS 地址</span><strong>${esc(data.frps.addr)}:${esc(data.frps.port)}</strong></div></div></section>`;
   if(view === 'overview'){
     const node = data.node || {};
-    const nodeState = node.active ? '已启用' : '已停用';
+    const nodeState = node.active ? '在线' : '离线';
     const nodeStateClass = node.active ? 'ok' : 'bad';
+    const nodeLocation = node.region || '位置未设置';
+    const nodeOwner = data.user?.username || '当前账号';
+    const nodeLatency = Number.isFinite(Number(node.latency_ms)) && node.latency_ms !== null ? `${Math.round(Number(node.latency_ms))} ms` : '暂未测量';
+
     app.innerHTML = appLayoutHtml(`
       <section class="workspace-hero user-dashboard-welcome"><div><div class="hero-overline">FRP WORKSPACE</div><h1>欢迎回来，${esc(data.user.username)}</h1><p>管理你的内网服务映射，查看节点、流量和隧道运行状态。</p></div><div class="hero-actions"><button onclick="loadDashboard('tunnels')">＋ 新建隧道</button><a class="btn secondary" href="/config/frpc.toml">下载配置</a></div></section>
       <div class="workspace-stats user-overview-stats">
@@ -702,7 +706,7 @@ async function loadDashboard(view='overview'){
         <section class="workspace-stat"><span>账号有效期</span><strong>${esc(data.user.expires_text || '-')}</strong><small>${data.user.expired ? '账号已到期' : '到期日期'}</small></section>
       </div>
       <div class="user-dashboard-grid">
-        <section class="card node-status-card"><div class="section-title"><div><div class="section-kicker">CURRENT NODE</div><h2>当前节点</h2></div><span class="status-badge ${nodeStateClass}">${nodeState}</span></div><div class="node-status-main"><div class="node-status-icon">${esc(String(node.region || node.name || 'N').slice(0,1))}</div><div><strong>${esc(node.name || '-')}</strong><span>${esc(node.region || '未设置地区')}</span></div></div><div class="node-detail-list"><div><span>FRPS 地址</span><b>${esc(data.frps.addr)}:${esc(data.frps.port)}</b></div><div><span>节点控制台</span><b>${node.dashboard_configured ? '已配置' : '未接入'}</b></div></div></section>
+        <section class="card node-status-card node-map-panel"><div class="node-map-backdrop" aria-hidden="true"><div class="node-map-grid"></div><svg viewBox="0 0 900 340" preserveAspectRatio="xMidYMid slice"><defs><filter id="nodeMapBlur"><feGaussianBlur stdDeviation="2.4"/></filter><linearGradient id="nodeMapFill" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#80b8ef"/><stop offset="100%" stop-color="#5e8bd9"/></linearGradient></defs><g fill="url(#nodeMapFill)" opacity=".28" filter="url(#nodeMapBlur)"><path d="M74 85l40-27 58 8 21 22 49-8 24 27-21 25-37 2-18 35-42 4-12 37-29-10-6-44-29-20z"/><path d="M214 193l39 12 28 45-8 38-21 18-18-43-25-26z"/><path d="M405 74l36-19 54 11 27 25 50-7 24 22 51-5 37 25-20 21-52-6-16 30-31-5-20 23-41-14-19-32-40-5-15-25-35-2z"/><path d="M459 166l43 1 30 31-8 51-27 47-25-18-11-52-18-24z"/><path d="M631 228l43-15 48 15 26 25-28 24-49-8-28 15-22-22z"/><path d="M748 65l42-13 39 20-6 26-42 9-30-17z"/></g><g fill="none" stroke="#5e9fe8" stroke-width="2" stroke-dasharray="5 7" opacity=".55"><path d="M170 118Q350 5 520 115T740 130"/><path d="M170 118Q250 240 430 210T740 130"/></g><g fill="#fff" stroke="#4388ec" stroke-width="3"><circle cx="170" cy="118" r="8"/><circle cx="430" cy="210" r="7"/><circle cx="740" cy="130" r="10"/></g><circle cx="740" cy="130" r="19" fill="#4388ec" opacity=".14"/></svg></div><div class="node-map-heading"><div><div class="section-kicker">CURRENT NODE · NODE OVERVIEW</div><h2>当前节点</h2></div><span class="status-badge ${nodeStateClass}"><i></i>${nodeState}</span></div><div class="node-map-content"><div class="node-info-card"><div class="node-info-title"><span class="node-info-icon">⌁</span><div><strong>${esc(node.name || '未分配节点')}</strong><small>${esc(node.region || '位置未设置')}</small></div></div><div class="node-info-row"><span>位置</span><b>⌖ ${esc(nodeLocation)}</b></div><div class="node-info-row"><span>延迟</span><b class="node-latency">${esc(nodeLatency)}</b></div><div class="node-info-row"><span>负责账号</span><b>${esc(nodeOwner)}</b></div><div class="node-info-row"><span>FRPS 地址</span><b>${esc(data.frps?.addr || node.server_addr || '-')}${data.frps?.port ? ':'+esc(data.frps.port) : ''}</b></div><button type="button" class="node-switch-button" onclick="openNodeSwitch()">⇄ 切换节点</button></div><div class="node-map-label"><span class="node-map-pulse"></span><strong>${esc(node.name || '当前节点')}</strong><small>${esc(nodeLocation)}</small></div></div><div id="nodeSwitchModal" class="node-switch-modal hidden" role="dialog" aria-modal="true" aria-labelledby="nodeSwitchTitle"><div class="node-switch-dialog"><div class="section-title"><div><div class="section-kicker">CHANGE NODE</div><h2 id="nodeSwitchTitle">切换接入节点</h2><p>切换后会影响当前账号新建隧道的默认节点。</p></div><button class="secondary" type="button" onclick="closeNodeSwitch()">关闭 ×</button></div><div id="nodeSwitchList" class="node-switch-list"><p class="muted">正在加载可用节点…</p></div></div></div></section>
         <section class="card quick-actions-card"><div class="section-title"><div><div class="section-kicker">QUICK ACTIONS</div><h2>快捷操作</h2></div></div><div class="quick-actions-grid"><button class="quick-action" onclick="loadDashboard('tunnels')"><span>↗</span><b>管理隧道</b><small>查看和控制映射</small></button><button class="quick-action" onclick="loadDashboard('ports')"><span>#</span><b>查看端口</b><small>查看端口资源</small></button><a class="quick-action" href="/config/frpc.toml"><span>↓</span><b>下载配置</b><small>获取 frpc.toml</small></a><a class="quick-action" href="/config/deploy-frpc.sh"><span>⚙</span><b>部署脚本</b><small>安装客户端</small></a></div></section>
       </div>
       ${accountCard}
@@ -1491,3 +1495,31 @@ async function loadAdminDashboard(auto=false){
 }
 
 loadMe();
+
+
+async function openNodeSwitch(){
+  const modal=document.getElementById('nodeSwitchModal');
+  const list=document.getElementById('nodeSwitchList');
+  if(!modal||!list)return;
+  modal.classList.remove('hidden');
+  list.innerHTML='<p class="muted">正在加载可用节点…</p>';
+  try{
+    const result=await api('/api/nodes');
+    const nodes=(result.nodes||[]).filter(n=>n.active);
+    if(!nodes.length){list.innerHTML='<p class="muted">目前没有可切换的在线节点。</p>';return;}
+    const current=nodes.find(n=>String(n.id)===String(currentDashboardNodeId));
+    list.innerHTML=nodes.map(n=>`<button type="button" class="node-switch-option ${String(n.id)===String(currentDashboardNodeId)?'is-current':''}" onclick="switchDashboardNode(${Number(n.id)})"><span class="node-option-pin">⌖</span><span class="node-option-copy"><strong>${esc(n.name)}</strong><small>${esc(n.region||'位置未设置')} · ${esc(n.server_addr||'')}</small></span><span class="node-option-status">${String(n.id)===String(currentDashboardNodeId)?'当前节点':'选择此节点'}</span></button>`).join('');
+  }catch(err){list.innerHTML='<p class="error">'+esc(err.message||'节点列表加载失败')+'</p>';}
+}
+function closeNodeSwitch(){document.getElementById('nodeSwitchModal')?.classList.add('hidden');}
+let currentDashboardNodeId=null;
+async function switchDashboardNode(nodeId){
+  if(!nodeId||String(nodeId)===String(currentDashboardNodeId)){closeNodeSwitch();return;}
+  if(!confirm('确定切换接入节点？已有隧道不会自动迁移，切换前请确认目标节点资源。'))return;
+  try{
+    await api('/api/user/node/switch',{method:'POST',body:{node_id:nodeId}});
+    closeNodeSwitch();
+    show('接入节点已切换，建议重新下载 frpc 配置。');
+    await loadDashboard();
+  }catch(err){show(err.message,true);}
+}
