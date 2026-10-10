@@ -831,15 +831,24 @@ def frps_admin_dashboard(page: int = 1, page_size: int = 20, username: str = "")
         with db() as conn:
             nodes = dashboard_nodes_for_user(conn)
         if not nodes:
-            return {"enabled": False, "error": "frps dashboard 未接入面板", "proxies": [], "total": 0, "page": page, "page_size": page_size}
+            return {"enabled": False, "error": "frps dashboard 未接入面板", "proxies": [], "total": 0, "page": page, "page_size": page_size, "traffic_in": 0, "traffic_out": 0, "traffic_total": 0, "cur_conns": 0, "online_count": 0}
         proxies = frps_all_proxies(nodes)
         if username:
             proxies = [p for p in proxies if p.get("username") == username]
         total = len(proxies)
+        traffic_in = sum(int(p.get("today_traffic_in") or 0) for p in proxies)
+        traffic_out = sum(int(p.get("today_traffic_out") or 0) for p in proxies)
+        stats = {
+            "traffic_in": traffic_in,
+            "traffic_out": traffic_out,
+            "traffic_total": traffic_in + traffic_out,
+            "cur_conns": sum(int(p.get("cur_conns") or 0) for p in proxies),
+            "online_count": sum(1 for p in proxies if p.get("status") == "online"),
+        }
         start = (page - 1) * page_size
-        return {"enabled": True, "proxies": proxies[start:start + page_size], "total": total, "page": page, "page_size": page_size, "users": sorted({p.get("username") or "" for p in proxies if p.get("username")})}
+        return {"enabled": True, "proxies": proxies[start:start + page_size], "total": total, "page": page, "page_size": page_size, "users": sorted({p.get("username") or "" for p in proxies if p.get("username")}), **stats}
     except Exception as e:
-        return {"enabled": False, "error": f"读取 frps dashboard 失败：{e.__class__.__name__}", "proxies": [], "total": 0, "page": page, "page_size": page_size}
+        return {"enabled": False, "error": f"读取 frps dashboard 失败：{e.__class__.__name__}", "proxies": [], "total": 0, "page": page, "page_size": page_size, "traffic_in": 0, "traffic_out": 0, "traffic_total": 0, "cur_conns": 0, "online_count": 0}
 
 
 def init_db() -> None:
