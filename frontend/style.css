@@ -648,3 +648,11 @@ body.is-app{background:#eef3fa;color:#172b49}
 .node-option-copy small{color:#7890b3;font-size:10px;overflow-wrap:anywhere}
 .node-option-status{color:#2878eb;font-size:10px;white-space:nowrap}
 @media(max-width:760px){.node-map-panel{padding:16px;min-height:280px}.node-map-content{min-height:0}.node-info-card{width:100%;box-sizing:border-box}.node-map-label{right:5%;top:8%;opacity:.86;transform:scale(.9);transform-origin:top right}.node-map-backdrop{opacity:.42}.node-map-heading h2{font-size:15px}}
+
+/* Keep the five overview metrics compact and on one desktop row. */
+@media(min-width:1101px){
+  .user-overview-stats{grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+  .user-overview-stats .workspace-stat{padding:12px 14px}
+  .user-overview-stats .workspace-stat strong{margin:3px 0 1px;font-size:20px}
+  .user-overview-stats .workspace-stat span,.user-overview-stats .workspace-stat small{font-size:11px}
+}

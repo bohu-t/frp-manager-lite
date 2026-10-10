@@ -352,7 +352,7 @@ function appSidebarHtml(kind='dashboard'){
 
 function appLayoutHtml(content, kind='dashboard', topTitle='工作区'){
   const username = currentUser?.username || '用户';
-  return `<div class="app-shell">${appSidebarHtml(kind)}<main class="workspace-main"><div class="workspace-topbar"><div class="topbar-welcome"><span>欢迎回来，${esc(username)}</span><span class="topbar-breadcrumb">/ ${esc(topTitle)}</span></div><div class="topbar-actions"><span class="live-status"><i></i>服务正常</span><button class="topbar-icon-button" data-nav="${kind === 'admin-dashboard' ? 'admin-dashboard' : (kind.startsWith('dashboard-') ? kind : 'dashboard')}" title="刷新数据">↻</button><div class="topbar-user"><span class="topbar-avatar">${esc(String(username).slice(0,1).toUpperCase())}</span><span class="topbar-username">${esc(username)}</span><button class="logout-topbar" type="button" data-nav="logout">退出登录</button></div></div></div>${content}</main></div>`;
+  return `<div class="app-shell">${appSidebarHtml(kind)}<main class="workspace-main"><div class="workspace-topbar"><div class="topbar-welcome"><span>欢迎回来，${esc(username)}</span><span class="topbar-breadcrumb">/ ${esc(topTitle)}</span></div></div>${content}</main></div>`;
 }
 
 function setNav(){
@@ -742,7 +742,6 @@ async function loadDashboard(view='overview'){
       <a class="side-link" href="/config/deploy-frpc.sh"><span class="side-icon">⚙</span>部署脚本</a>
       <div class="sidebar-spacer"></div>
     </aside>`;
-  const topBar = `<div class="workspace-topbar"><div><div class="breadcrumb">工作区 / 概览</div><h2>你好，${esc(data.user.username)}</h2></div><div class="topbar-actions"><span class="live-status"><i></i>服务正常</span><button class="secondary" onclick="loadDashboard()">刷新数据</button></div></div>`;
   app.innerHTML = appLayoutHtml(`
     <section class="workspace-hero"><div><div class="hero-overline">FRP WORKSPACE</div><h1>连接你的内网服务</h1><p>统一管理隧道、端口和客户端配置，让每条映射都清晰可控。</p></div><button onclick="openTunnelModal()">＋ 新建隧道</button></section>
     <div class="workspace-stats">
