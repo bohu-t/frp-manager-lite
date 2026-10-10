@@ -699,7 +699,6 @@ async function loadDashboard(view='overview'){
     const nodeLatency = Number.isFinite(Number(node.latency_ms)) && node.latency_ms !== null ? `${Math.round(Number(node.latency_ms))} ms` : '暂未测量';
 
     app.innerHTML = appLayoutHtml(`
-      <section class="workspace-hero user-dashboard-welcome"><div><div class="hero-overline">FRP WORKSPACE</div><p>管理你的内网服务映射，查看节点、流量和隧道运行状态。</p></div><div class="hero-actions"><button onclick="loadDashboard('tunnels')">＋ 新建隧道</button><a class="btn secondary" href="/config/frpc.toml">下载配置</a></div></section>
       <div class="workspace-stats user-overview-stats">
         <section class="workspace-stat highlight"><span>隧道数量</span><strong>${data.tunnels.length}</strong><small>${data.tunnels.filter(t => t.enabled).length} 条正在运行</small></section>
         <section class="workspace-stat"><span>当前节点</span><strong>${esc(node.region || node.name || '-')}</strong><small>${esc(node.name || '未分配节点')}</small></section>
