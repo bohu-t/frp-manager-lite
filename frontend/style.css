@@ -410,3 +410,72 @@ table{width:100%;min-width:900px;border-collapse:separate;border-spacing:0;borde
 @media(max-width:1100px){.auth-visual-content{padding:42px}.auth-visual h1{font-size:32px}.monitor-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.workspace-main{padding-left:18px;padding-right:18px}.workspace-topbar{margin-left:-18px;margin-right:-18px}.workspace-columns{grid-template-columns:1fr}.workspace-aside{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.workspace-aside>.side-info-card:first-child{margin-top:16px}.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.workspace-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.wrap{padding:0 14px 32px}.monitor-summary-grid{grid-template-columns:1fr 1fr;gap:9px}.monitor-summary-card{padding:13px}.monitor-summary-card strong{font-size:20px}.auth-topbar-inner{padding:0 14px}.auth-topbar-tools>span{display:none}.auth-main{display:block;min-height:calc(100vh - 56px)}.auth-visual{display:none}.auth-form-area{min-height:calc(100vh - 56px);padding:24px 14px;align-items:flex-start}.auth-form-wrap{padding-top:18px}.auth-mobile-brand{display:flex;align-items:center;justify-content:center;gap:9px;margin:0 0 22px;color:var(--ink);font-size:18px}.auth-mobile-brand .auth-brand-mark{width:40px;height:40px}.auth-form-card{padding:22px 18px}.app-sidebar{position:relative;left:auto;top:auto;bottom:auto;width:auto;height:auto;min-height:0;padding:0;border-right:0;border-bottom:1px solid #1e293b}.sidebar-brand{padding:0 10px}.sidebar-section-label,.sidebar-spacer,.sidebar-user{display:none}.app-sidebar .side-link{display:none}.workspace-main{margin-left:0;padding:0 0 32px}.workspace-topbar{position:relative;align-items:flex-start;flex-direction:column;height:auto;min-height:56px;margin:0 -14px 16px;padding:11px 14px;gap:9px}.topbar-actions{width:100%;justify-content:flex-end}.topbar-welcome{font-size:13px}.workspace-hero,.dashboard-hero{align-items:flex-start;flex-direction:column;padding:20px;min-height:0}.workspace-hero h1,.dashboard-hero h2{font-size:21px}.workspace-hero button,.dashboard-hero button{width:100%}.workspace-stats{grid-template-columns:1fr 1fr;gap:9px}.workspace-stat{padding:13px}.workspace-stat strong{font-size:21px}.workspace-aside{display:block}.metric-grid{grid-template-columns:1fr 1fr}.user-dashboard-grid{grid-template-columns:1fr}.account-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ops-list{grid-template-columns:1fr}.admin-toolbar{align-items:stretch;flex-direction:column}.tunnel-route{grid-template-columns:1fr}.tunnel-card-actions{display:grid;grid-template-columns:1fr 1fr}.tunnel-card-actions button:last-child{grid-column:1/-1}.deploy-script-grid{grid-template-columns:1fr}.copy-line{display:block}.copy-line button{width:100%;margin-top:7px}.card{padding:16px}.section-title{align-items:flex-start;flex-direction:column;gap:6px}.topbar-username{display:none}.live-status{margin-right:auto}.modal-backdrop{padding:60px 12px 20px}.modal-title .modal-close{width:100%}}
 @media(max-width:520px){.auth-form-area{padding-left:10px;padding-right:10px}.auth-form-card{padding:24px 18px}.metric-grid{grid-template-columns:1fr}.user-dashboard-welcome h1{font-size:22px}.quick-actions-grid{grid-template-columns:1fr 1fr}.account-summary-grid{grid-template-columns:1fr}.topbar-actions{align-items:center;flex-wrap:wrap}.logout-topbar{display:inline-flex}}
+
+
+/* Dashboard layout hardening: keep the user sidebar visible alongside the workspace. */
+body:has(.user-dashboard-shell) .user-dashboard-shell{
+  display:grid !important;
+  grid-template-columns:238px minmax(0,1fr) !important;
+  align-items:stretch;
+  width:100%;
+  min-width:0;
+  margin:0 !important;
+  overflow:visible;
+}
+body:has(.user-dashboard-shell) .user-dashboard-sidebar{
+  display:flex !important;
+  position:sticky;
+  left:auto;
+  top:0;
+  z-index:30;
+  width:auto !important;
+  min-width:0;
+  height:100vh;
+  min-height:620px;
+  align-self:start;
+  flex-direction:column;
+  padding:25px 16px;
+  overflow-y:auto;
+  overflow-x:hidden;
+  box-sizing:border-box;
+  background:#142746 !important;
+  color:#dbe7fb !important;
+}
+body:has(.user-dashboard-shell) .user-dashboard-main{
+  display:block;
+  min-width:0;
+  width:100%;
+  padding:24px 28px 40px;
+  box-sizing:border-box;
+}
+body:has(.user-dashboard-shell) .dashboard-nav-item{
+  display:flex !important;
+  flex:0 0 auto;
+  visibility:visible !important;
+  opacity:1 !important;
+  color:#bdcce2;
+}
+body:has(.user-dashboard-shell) .dashboard-nav-item.is-active{
+  background:#28446d;
+  color:#fff;
+}
+@media(max-width:760px){
+  body:has(.user-dashboard-shell) .user-dashboard-shell{
+    grid-template-columns:minmax(0,1fr) !important;
+  }
+  body:has(.user-dashboard-shell) .user-dashboard-sidebar{
+    position:relative;
+    top:auto;
+    width:100% !important;
+    height:auto;
+    min-height:0;
+    flex-direction:row;
+    align-items:center;
+    overflow-x:auto;
+    overflow-y:hidden;
+    padding:13px 14px;
+  }
+  body:has(.user-dashboard-shell) .user-dashboard-main{
+    padding:20px 14px 30px;
+  }
+}
