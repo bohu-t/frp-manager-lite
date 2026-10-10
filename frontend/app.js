@@ -352,7 +352,7 @@ function appSidebarHtml(kind='dashboard'){
 
 function appLayoutHtml(content, kind='dashboard', topTitle='工作区'){
   const username = currentUser?.username || '用户';
-  return `<div class="app-shell">${appSidebarHtml(kind)}<main class="workspace-main"><div class="workspace-topbar"><div class="topbar-welcome"><span>欢迎使用 FRP 管理台</span><span class="topbar-breadcrumb">/ ${esc(topTitle)}</span></div><div class="topbar-actions"><span class="live-status"><i></i>服务正常</span><button class="topbar-icon-button" data-nav="${kind === 'admin-dashboard' ? 'admin-dashboard' : (kind.startsWith('dashboard-') ? kind : 'dashboard')}" title="刷新数据">↻</button><div class="topbar-user"><span class="topbar-avatar">${esc(String(username).slice(0,1).toUpperCase())}</span><span class="topbar-username">${esc(username)}</span><button class="logout-topbar" type="button" data-nav="logout">退出登录</button></div></div></div>${content}</main></div>`;
+  return `<div class="app-shell">${appSidebarHtml(kind)}<main class="workspace-main"><div class="workspace-topbar"><div class="topbar-welcome"><span>欢迎回来，${esc(username)}</span><span class="topbar-breadcrumb">/ ${esc(topTitle)}</span></div><div class="topbar-actions"><span class="live-status"><i></i>服务正常</span><button class="topbar-icon-button" data-nav="${kind === 'admin-dashboard' ? 'admin-dashboard' : (kind.startsWith('dashboard-') ? kind : 'dashboard')}" title="刷新数据">↻</button><div class="topbar-user"><span class="topbar-avatar">${esc(String(username).slice(0,1).toUpperCase())}</span><span class="topbar-username">${esc(username)}</span><button class="logout-topbar" type="button" data-nav="logout">退出登录</button></div></div></div>${content}</main></div>`;
 }
 
 function setNav(){
@@ -699,7 +699,7 @@ async function loadDashboard(view='overview'){
     const nodeLatency = Number.isFinite(Number(node.latency_ms)) && node.latency_ms !== null ? `${Math.round(Number(node.latency_ms))} ms` : '暂未测量';
 
     app.innerHTML = appLayoutHtml(`
-      <section class="workspace-hero user-dashboard-welcome"><div><div class="hero-overline">FRP WORKSPACE</div><h1>欢迎回来，${esc(data.user.username)}</h1><p>管理你的内网服务映射，查看节点、流量和隧道运行状态。</p></div><div class="hero-actions"><button onclick="loadDashboard('tunnels')">＋ 新建隧道</button><a class="btn secondary" href="/config/frpc.toml">下载配置</a></div></section>
+      <section class="workspace-hero user-dashboard-welcome"><div><div class="hero-overline">FRP WORKSPACE</div><p>管理你的内网服务映射，查看节点、流量和隧道运行状态。</p></div><div class="hero-actions"><button onclick="loadDashboard('tunnels')">＋ 新建隧道</button><a class="btn secondary" href="/config/frpc.toml">下载配置</a></div></section>
       <div class="workspace-stats user-overview-stats">
         <section class="workspace-stat highlight"><span>隧道数量</span><strong>${data.tunnels.length}</strong><small>${data.tunnels.filter(t => t.enabled).length} 条正在运行</small></section>
         <section class="workspace-stat"><span>当前节点</span><strong>${esc(node.region || node.name || '-')}</strong><small>${esc(node.name || '未分配节点')}</small></section>
