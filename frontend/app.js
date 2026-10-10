@@ -691,6 +691,7 @@ async function loadDashboard(view='overview'){
   const accountCard = `<section class="card user-account-card"><div class="section-title"><div><div class="section-kicker">ACCOUNT</div><h2>账号信息</h2></div></div><div class="account-summary-grid"><div><span>当前账号</span><strong>${esc(data.user.username)}</strong></div><div><span>接入节点</span><strong>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</strong></div><div><span>端口上限</span><strong>${esc(data.user.max_ports)}</strong></div><div><span>有效期</span><strong>${esc(data.user.expires_text)}</strong></div><div><span>FRPS 地址</span><strong>${esc(data.frps.addr)}:${esc(data.frps.port)}</strong></div></div></section>`;
   if(view === 'overview'){
     const node = data.node || {};
+    currentDashboardNodeId = node.id ?? null;
     const nodeState = node.active ? '在线' : '离线';
     const nodeStateClass = node.active ? 'ok' : 'bad';
     const nodeLocation = node.region || '位置未设置';
