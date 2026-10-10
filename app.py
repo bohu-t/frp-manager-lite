@@ -2607,6 +2607,31 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "error": "software_license_required", "license": sw_license}, 402)
             return
 
+        if path == "/api/user/node/switch":
+            if user["role"] == "admin":
+                self.send_json({"ok": False, "error": "管理员账号不能通过用户面板切换节点"}, 403)
+                return
+            try:
+                target_node_id = int(data.get("node_id", 0))
+            except (TypeError, ValueError):
+                self.send_json({"ok": False, "error": "节点编号无效"}, 400)
+                return
+            with db() as conn:
+                target = conn.execute("SELECT id, name, active FROM nodes WHERE id=?", (target_node_id,)).fetchone()
+                if not target or not target["active"]:
+                    self.send_json({"ok": False, "error": "目标节点不存在或已停用"}, 400)
+                    return
+                if int(user["node_id"] or 0) == target_node_id:
+                    self.send_json({"ok": True, "message": "当前已使用该节点"})
+                    return
+                existing_tunnels = conn.execute("SELECT COUNT(*) FROM tunnels WHERE user_id=?", (user["id"],)).fetchone()[0]
+                if existing_tunnels:
+                    self.send_json({"ok": False, "error": "该账号已有隧道。为避免破坏现有映射，暂不自动迁移；请先删除或迁移现有隧道后再切换节点。"}, 409)
+                    return
+                conn.execute("UPDATE users SET node_id=? WHERE id=?", (target_node_id, user["id"]))
+            audit("user_node_switch", user, target_node_id, None, "", str(target["name"]))
+            self.send_json({"ok": True, "message": f"已切换到节点 {target['name']}"})
+            return
         if path == "/api/tunnels/create":
             self.tunnel_create(user, data)
         elif path == "/api/tunnels/toggle":
