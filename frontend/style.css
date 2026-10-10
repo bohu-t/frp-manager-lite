@@ -693,3 +693,14 @@ body.is-app{background:#eef3fa;color:#172b49}
 .node-map-panel .node-compact-content{position:relative;z-index:1;min-height:0!important;margin:0!important;align-items:center!important}
 .node-map-panel .node-server-art,.node-map-panel .node-compact-details,.node-map-panel .node-switch-button{position:relative;z-index:1}
 @media(max-width:600px){.node-map-panel{padding:10px 12px!important}}
+
+
+/* Refine node card spacing: comfortable proportions and less empty space below */
+.node-map-panel{padding:18px 22px!important;margin:10px 0 12px!important;min-height:0!important}
+.node-map-panel .node-compact-content{min-height:112px!important;gap:22px!important}
+.node-server-art{flex-basis:96px!important;width:96px!important;height:96px!important;background:rgba(255,255,255,.72)!important;border-radius:16px!important}
+.node-server-art img{width:88px!important;height:88px!important}
+.node-compact-details{gap:9px!important}
+.node-compact-title>strong{font-size:18px!important}
+.node-map-panel .node-switch-button{padding:11px 16px!important}
+@media(max-width:600px){.node-map-panel{padding:14px!important}.node-map-panel .node-compact-content{gap:12px!important;min-height:88px!important}.node-server-art{flex-basis:68px!important;width:68px!important;height:68px!important}.node-server-art img{width:62px!important;height:62px!important}}
