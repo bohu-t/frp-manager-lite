@@ -690,7 +690,7 @@ async function loadDashboard(view='overview'){
     const statusLabel = status === 'online' ? '在线' : (status === 'registered' ? '已注册' : (status === 'disabled' ? '已停用' : '未连接'));
     const statusClass = status === 'online' ? 'ok' : (status === 'registered' ? 'warn' : (status === 'disabled' ? 'muted' : 'bad'));
     return `<article class="tunnel-preview-item">
-      <div class="tunnel-preview-top"><strong title="${esc(t.name)}">${esc(t.name)}</strong><span class="status-dot ${t.enabled ? 'is-online' : 'is-offline'}">${t.enabled ? '已启用' : '已停用'}</span></div>
+      <div class="tunnel-preview-top"><strong title="${esc(t.name)}">${esc(t.name)}</strong><span class="status-dot ${status === 'online' ? 'is-online' : 'is-offline'}">${statusLabel}</span></div>
       <div class="tunnel-preview-grid">
         <div><span>状态</span><b class="${statusClass}">${statusLabel}</b></div>
         <div><span>本地服务</span><b title="${esc(t.local_ip)}:${esc(t.local_port)}">${esc(t.local_ip)}:${esc(t.local_port)}</b></div>
