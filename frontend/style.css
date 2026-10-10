@@ -764,3 +764,21 @@ body.is-app{background:#eef3fa;color:#172b49}
   .node-compact-title>strong{font-size:14px!important}
   .node-map-panel .node-switch-button{padding:7px 9px!important}
 }
+
+/* Overview tunnel carousel, aligned with the current-node card width. */
+.dashboard-tunnels-preview{width:100%;box-sizing:border-box}
+.dashboard-tunnels-preview>.section-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.dashboard-tunnels-preview .section-title h2{margin:3px 0}
+.tunnel-preview-all{flex:0 0 auto;white-space:nowrap}
+.tunnel-preview-rotator{position:relative;min-width:0;min-height:100px}
+.tunnel-preview-item{display:none;width:100%;box-sizing:border-box;padding:14px 16px;border:1px solid #e2eaf5;border-radius:10px;background:linear-gradient(120deg,#fbfdff,#f5f9ff)}
+.tunnel-preview-item.is-active{display:block;animation:tunnelPreviewFade .28s ease}
+.tunnel-preview-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.tunnel-preview-top>strong{min-width:0;overflow:hidden;color:#1c3558;font-size:15px;text-overflow:ellipsis;white-space:nowrap}
+.tunnel-preview-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.tunnel-preview-grid>div{display:flex;flex-direction:column;gap:5px;min-width:0}
+.tunnel-preview-grid>div>span{color:#8293ad;font-size:11px}
+.tunnel-preview-grid>div>b{overflow:hidden;color:#294466;font-size:12px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.tunnel-preview-grid>div>b.ok{color:#16834b}.tunnel-preview-grid>div>b.warn{color:#b7791f}.tunnel-preview-grid>div>b.bad{color:#d14343}.tunnel-preview-grid>div>b.muted{color:#8293ad}
+@keyframes tunnelPreviewFade{from{opacity:.35;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:760px){.tunnel-preview-item{padding:12px}.tunnel-preview-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.dashboard-tunnels-preview>.section-title{align-items:flex-start}.tunnel-preview-all{font-size:11px;padding:8px 10px}}
