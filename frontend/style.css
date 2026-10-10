@@ -734,3 +734,13 @@ body.is-app{background:#eef3fa;color:#172b49}
 .tunnel-usage-track{height:6px;overflow:hidden;border-radius:99px;background:#e5edf8}
 .tunnel-usage-track>span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#1296db,#3478f6);transition:width .25s ease}
 @media(max-width:760px){.tunnel-count-icon{flex-basis:44px;width:44px;height:44px}.tunnel-count-main{gap:10px}.tunnel-count-copy>strong{font-size:22px}}
+
+/* Dashboard statistic icons */
+.user-overview-stats .overview-icon-stat{display:flex;align-items:center}
+.overview-stat-main{display:flex;align-items:center;gap:12px;min-width:0;width:100%}
+.overview-stat-icon{display:block;flex:0 0 52px;width:52px;height:52px}
+.overview-stat-copy{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0}
+.overview-stat-copy>span{color:#7185a5;font-size:12px}
+.overview-stat-copy>strong{font-size:clamp(15px,1.35vw,21px);line-height:1.2;overflow-wrap:anywhere}
+.overview-stat-copy>small{font-size:11px;color:#7e91ae;line-height:1.35}
+@media(max-width:760px){.overview-stat-icon{flex-basis:40px;width:40px;height:40px}.overview-stat-main{gap:9px}.overview-stat-copy>strong{font-size:16px}}
