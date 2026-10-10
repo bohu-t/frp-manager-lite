@@ -330,20 +330,23 @@ function navButton(label, action, cls='secondary', section=''){
 
 function appSidebarHtml(kind='dashboard'){
   const isAdmin = currentUser?.role === 'admin';
+  const username = currentUser?.username || '用户';
   const items = isAdmin ? [
     ['admin-dashboard','⌂','运行总览'],['admin','♙','用户管理','users'],['admin','▦','注册密钥','keys'],['admin','⌁','新增节点','nodes'],['admin-health','♥','节点健康','health'],['admin-proxies','◌','映射监控','proxies'],['admin','⚠','风控审计','risk']
   ] : [
-    ['dashboard','⌂','概览'],['dashboard-tunnels','↗','我的隧道'],['dashboard-ports','#','端口资源'],['dashboard-config','↓','下载配置']
+    ['dashboard','⌂','概览'],['dashboard-tunnels','⇄','隧道管理'],['dashboard-ports','#','端口资源'],['dashboard-config','↓','配置下载']
   ];
   const links = items.map(([action, icon, label, section]) => {
     const active = kind === action || (section && kind === section) ? ' active' : '';
-    const click = '';
-    return `<button class="side-link${active}" data-nav="${action}"${section ? ` data-section="${section}"` : ''}${click}><span class="side-icon">${icon}</span>${label}</button>`;
+    return `<button class="side-link${active}" data-nav="${action}"${section ? ` data-section="${section}"` : ''}><span class="side-icon">${icon}</span><span class="side-link-label">${label}</span><span class="side-link-arrow">›</span></button>`;
   }).join('');
   return `<aside class="app-sidebar">
-    <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>FRP 管理台</strong><span>管理系统</span></div></div>
-    <div class="sidebar-section-label">工作区</div>${links}
+    <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>FRP 管理台</strong><span>内网穿透管理平台</span></div></div>
+    <div class="sidebar-section-label">工作空间</div>${links}
+    ${isAdmin ? '' : `<div class="sidebar-section-label sidebar-tools-label">快速工具</div><a class="side-link sidebar-download-link" href="/config/deploy-frpc.sh"><span class="side-icon">⚙</span><span class="side-link-label">客户端部署</span><span class="side-link-arrow">↗</span></a>`}
     <div class="sidebar-spacer"></div>
+    <div class="sidebar-service-status"><span class="sidebar-service-dot"></span><span><strong>服务运行中</strong><small>FRP 管理服务</small></span></div>
+    <div class="sidebar-user-card"><span class="sidebar-user-avatar">${esc(String(username).slice(0,1).toUpperCase())}</span><span class="sidebar-user-copy"><strong>${esc(username)}</strong><small>${isAdmin ? '系统管理员' : '普通用户'}</small></span><button type="button" data-nav="logout" title="退出登录" aria-label="退出登录">↗</button></div>
   </aside>`;
 }
 
