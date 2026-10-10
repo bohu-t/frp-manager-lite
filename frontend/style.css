@@ -682,3 +682,14 @@ body.is-app{background:#eef3fa;color:#172b49}
 .node-map-panel .node-switch-button{flex:0 0 auto;width:auto;min-width:112px;margin:0;padding:10px 14px;white-space:nowrap}
 @media(max-width:600px){.node-map-panel{padding:13px!important}.node-map-panel .node-compact-content{gap:11px}.node-server-art{flex-basis:54px;width:54px;height:54px;border-radius:11px}.node-server-art img{width:48px;height:48px}.node-compact-title>strong{font-size:15px}.node-compact-meta{gap:4px 10px}.node-map-panel .node-switch-button{min-width:0;padding:9px 10px;font-size:11px}}
 @media(max-width:420px){.node-map-panel .node-compact-content{flex-wrap:wrap}.node-compact-details{flex-basis:calc(100% - 70px)}.node-map-panel .node-switch-button{margin-left:auto}}
+
+
+/* Restore the world map artwork while keeping the current-node card compact and top-aligned */
+.node-map-panel{position:relative!important;overflow:hidden;background:linear-gradient(110deg,rgba(248,251,255,.96) 0%,rgba(239,247,255,.86) 58%,rgba(226,239,255,.78) 100%)!important;padding:12px 18px!important;min-height:0!important}
+.node-map-panel>.node-map-backdrop{display:block!important;inset:0!important;z-index:0!important;opacity:.58!important;pointer-events:none!important}
+.node-map-panel>.node-map-backdrop .node-map-grid{opacity:.6}
+.node-map-panel>.node-map-backdrop svg{width:100%!important;height:100%!important;inset:0!important;opacity:.9}
+.node-map-panel>.node-map-heading{display:none!important}
+.node-map-panel .node-compact-content{position:relative;z-index:1;min-height:0!important;margin:0!important;align-items:center!important}
+.node-map-panel .node-server-art,.node-map-panel .node-compact-details,.node-map-panel .node-switch-button{position:relative;z-index:1}
+@media(max-width:600px){.node-map-panel{padding:10px 12px!important}}
