@@ -715,6 +715,7 @@ async function renderLogin(){
     try{
       const data = await api('/api/login', {method:'POST', body:{username:fd.get('username'), password:fd.get('password')}});
       currentUser = data.user; setNav(); await loadDashboard();
+      if(currentUser && currentUser.role !== 'admin') showLegalNotice();
     }catch(err){
       if(err.message === 'software_license_required'){
         softwareLicense = err.data?.license || softwareLicense;
@@ -1057,6 +1058,17 @@ async function loadDashboard(view='overview'){
           </div>
           <div class="ports ports-modal-list">${portsHtml}</div>
         </section>
+      </div>
+      <div id="legalNoticeModal" class="modal-backdrop modal-center hidden" role="dialog" aria-modal="true" aria-labelledby="legalNoticeTitle" onclick="if(event.target===this)closeLegalNotice()">
+        <section class="modal-page card legal-notice-modal">
+          <div class="section-title modal-title"><div><div class="section-kicker">NOTICE</div><h2 id="legalNoticeTitle">${stIcon('risk')}使用须知 · 合规提醒</h2></div></div>
+          <div class="legal-notice-body">
+            <p><strong>请勿将本服务用于任何违法违规用途。</strong></p>
+            <p>本平台仅用于合法的内网穿透与远程访问。严禁用于：搭建或传播违法违规内容、未授权访问/入侵他人系统、网络攻击、诈骗、赌博、侵权等行为。</p>
+            <p>一经发现违规使用，账号将被立即封停，并保留依法向有关部门举报、配合调查的权利。因用户自身行为产生的一切法律责任由用户自行承担。</p>
+          </div>
+          <div class="form-actions" style="justify-content:flex-end"><button type="button" onclick="closeLegalNotice()">我已知晓</button></div>
+        </section>
       </div>`, 'dashboard', '概览');
     Object.keys(trafficChartCache).forEach(k => delete trafficChartCache[k]);
     renderTrafficUsage(trafficRange);
@@ -1331,6 +1343,7 @@ async function loadAdmin(section=currentAdminSection){
         <button class="node-action" onclick="adminExtend(${u.id})">续30天</button>
         <button class="node-action" onclick="openAdminLimits(${u.id}, ${Number(u.traffic_limit_bytes || 0)}, ${Number(u.bandwidth_limit_kbps || 0)}, '${esc(u.username)}')">流量限制</button>
         <button class="node-action" onclick="adminReset(${u.id})">重置密码</button>
+        <button class="node-action" onclick="adminResetToken(${u.id})">重置令牌</button>
         <button class="node-action node-action-danger" onclick="adminDelete(${u.id})">删除</button>
       </td>
     </tr>`).join('');
@@ -1791,6 +1804,7 @@ function openAdminLimits(id, trafficBytes=0, bandwidthKbps=0, username=''){
 }
 function closeAdminLimits(){ document.querySelector('#adminLimitsModal')?.classList.add('hidden'); }
 async function adminReset(id){ if(confirm('重置该用户密码？')) await api('/api/admin/users/reset-password', {method:'POST', body:{id}}).then(r=>{show(r.message); loadAdmin();}).catch(e=>show(e.message,true)); }
+async function adminResetToken(id){ if(confirm('重置该用户的面板令牌？重置后该用户需重新下载 frpc 配置。')) await api('/api/admin/users/reset-token', {method:'POST', body:{id}}).then(r=>{show(r.message||'已重置令牌'); loadAdmin();}).catch(e=>show(e.message,true)); }
 async function adminDelete(id){ if(confirm('删除用户会释放端口并删除隧道，确定？')) await api('/api/admin/users/delete', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
 async function inviteToggle(id){ await api('/api/admin/invite-keys/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
 async function inviteDelete(id){ if(confirm('删除这个注册密钥？')) await api('/api/admin/invite-keys/delete', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
@@ -1829,9 +1843,10 @@ function nodeStatusBadge(n){
 
 
 function copySetupKey(){
-  const el = document.querySelector('#setupKeyValue');
-  if(!el){ show('没有可复制的密钥', true); return; }
-  copyText(el.textContent || '');
+  const el = document.querySelector('#setupKeyForm input[name="setup_key"]') || document.querySelector('#setupKeyValue');
+  const val = el ? (el.value !== undefined ? el.value : (el.textContent || '')) : '';
+  if(!val){ show('没有可复制的密钥', true); return; }
+  copyText(val);
 }
 
 async function loadAdminHealth(){
@@ -1846,19 +1861,43 @@ async function loadAdminHealth(){
     show(err.message, true);
     return;
   }
+  const allNodes = data.nodes || [];
+  const onlineNodes = allNodes.filter(n => n.active && n.auth_status === 'online').length;
+  const badNodes = allNodes.filter(n => n.active && n.auth_status !== 'online').length;
+  const offNodes = allNodes.filter(n => !n.active).length;
+  const totalPorts = allNodes.reduce((s,n) => s + Number(n.port_count || 0), 0);
+  const usedPorts = allNodes.reduce((s,n) => s + (Number(n.port_count || 0) - Number(n.free_count || 0)), 0);
+  const freePorts = allNodes.reduce((s,n) => s + Number(n.free_count || 0), 0);
   const healthPageSize = nodeHealthPageSize();
-  nodeHealthPage = clampPage(nodeHealthPage, (data.nodes || []).length, healthPageSize);
-  const healthNodes = pageItems(data.nodes || [], nodeHealthPage, healthPageSize);
-  const nodeRows = healthNodes.map(n => `
+  nodeHealthPage = clampPage(nodeHealthPage, allNodes.length, healthPageSize);
+  const healthNodes = pageItems(allNodes, nodeHealthPage, healthPageSize);
+  const nodeRows = healthNodes.map(n => {
+    const used = Number(n.port_count || 0) - Number(n.free_count || 0);
+    const latency = (n.auth_latency_ms !== undefined && n.auth_latency_ms !== null) ? `${n.auth_latency_ms} ms` : '—';
+    const checked = n.auth_checked_at ? fmtTs(n.auth_checked_at) : '—';
+    return `
     <tr>
-      <td><b>${esc(n.name)}</b><span class="muted small">${esc(n.server_addr || '')}:${esc(n.server_port || '')}</span></td>
+      <td><b>${esc(n.name || '-')}</b><span class="muted small">${esc(n.region || '未设置地区')} · #${esc(n.id)}</span></td>
+      <td><code>${esc(n.server_addr || '-')}:${esc(n.server_port ?? '-')}</code></td>
       <td>${nodeStatusBadge(n)}<span class="muted small">${esc(n.auth_message || '')}</span></td>
-      <td>${Number(n.port_count || 0) - Number(n.free_count || 0)} / ${n.port_count || 0}</td>
-    </tr>`).join('') || emptyRow(3, '暂无节点');
+      <td>${latency}<span class="muted small">检查 ${checked}</span></td>
+      <td>${n.port_start != null ? `${esc(n.port_start)} - ${esc(n.port_end)}` : '—'}</td>
+      <td>${used} / ${esc(n.port_count || 0)}<span class="muted small">空闲 ${esc(n.free_count || 0)}</span></td>
+      <td>${n.bandwidth_mbps ? esc(n.bandwidth_mbps) + ' Mbps' : '未设置'}</td>
+      <td>${n.dashboard_configured ? '<span class="ok">已接入</span>' : '<span class="muted">未接入</span>'}</td>
+      <td>${esc(n.note || '—')}</td>
+    </tr>`;
+  }).join('') || emptyRow(9, '暂无节点');
   app.innerHTML = appLayoutHtml(`
-    <section class="card node-health-card"><div class="section-title"><h2>${stIcon('pulse')}节点健康状态</h2><p>每页 ${healthPageSize} 条</p></div>
-      <table class="compact-table"><thead><tr><th>节点</th><th>状态</th><th>端口使用</th></tr></thead><tbody>${nodeRows}</tbody></table>
-      ${paginationHtml('health', nodeHealthPage, (data.nodes || []).length, healthPageSize)}
+    <section class="monitor-summary-grid">
+      <section class="card monitor-summary-card monitor-summary-primary"><span>节点总数</span><strong>${allNodes.length}</strong><small>在线 ${onlineNodes} · 停用 ${offNodes}</small></section>
+      <section class="card monitor-summary-card"><span>认证正常</span><strong>${onlineNodes}</strong><small>auth/bind 端口可连通</small></section>
+      <section class="card monitor-summary-card"><span>认证异常</span><strong>${badNodes}</strong><small>启用但端口不可达</small></section>
+      <section class="card monitor-summary-card"><span>端口池</span><strong>${usedPorts} / ${totalPorts}</strong><small>空闲 ${freePorts} 个</small></section>
+    </section>
+    <section class="card node-health-card"><div class="section-title"><div><h2>${stIcon('pulse')}节点健康状态</h2><p>检查 frps bind/auth 端口连通性，确认节点在线和端口池使用情况。</p></div><button class="secondary" type="button" onclick="loadAdminHealth()">重新检查</button></div>
+      <table class="compact-table"><thead><tr><th>节点</th><th>frps 接入</th><th>认证状态</th><th>延迟</th><th>端口池</th><th>端口使用</th><th>带宽</th><th>流量监控</th><th>备注</th></tr></thead><tbody>${nodeRows}</tbody></table>
+      ${paginationHtml('health', nodeHealthPage, allNodes.length, healthPageSize)}
     </section>`, 'health', '节点健康');
 }
 
@@ -1947,9 +1986,9 @@ async function loadAdminDashboard(auto=false){
   const totalPorts = Number(portStats.total || 0);
   const freePorts = Number(portStats.free || Math.max(0, totalPorts - usedPorts));
   const portUsage = totalPorts > 0 ? ((usedPorts / totalPorts) * 100).toFixed(1) : '0.0';
-  const setupHtml = data.has_setup_key ? `
-    <div class="ops-item"><div class="label">一键添加节点密钥</div><div class="row"><code class="token" id="setupKeyValue">${esc(data.setup_key)}</code><button class="secondary" onclick="copySetupKey()">复制</button></div><p class="muted small">在新机器运行添加节点脚本时输入此密钥。</p></div>` :
-    '<div class="ops-item"><div class="label">一键添加节点密钥</div><p class="muted small">未设置 FML_SETUP_KEY；需要一键添加节点时可在服务端配置。</p></div>';
+  const setupKeySourceLabel = data.setup_key_source === 'db' ? '面板自定义' : (data.setup_key_source === 'env' ? '环境变量 FML_SETUP_KEY' : '未设置');
+  const setupHtml = `
+    <div class="ops-item"><div class="label">一键添加节点密钥</div><form id="setupKeyForm" class="row setup-key-form"><input name="setup_key" value="${esc(data.setup_key || '')}" placeholder="自定义密钥（留空则清除，回退到环境变量）" autocomplete="off" spellcheck="false"><button type="submit">保存</button><button type="button" class="secondary" onclick="copySetupKey()">复制</button></form><p class="muted small">当前来源：${setupKeySourceLabel}；在新机器运行添加节点脚本时输入此密钥。</p></div>`;
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
   const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
   const frpcUsers = data.frpc_users || [];
@@ -2063,6 +2102,18 @@ async function loadAdminDashboard(auto=false){
   renderHostCharts();
   const r2Form = document.querySelector('#r2ConfigForm');
   if(r2Form) r2Form.onsubmit = saveR2Config;
+  const setupKeyForm = document.querySelector('#setupKeyForm');
+  if(setupKeyForm){
+    setupKeyForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const val = String(new FormData(e.target).get('setup_key') || '').trim();
+      try{
+        const r = await api('/api/admin/setup-key', {method:'POST', body:{setup_key: val}});
+        show(r.message || '已保存');
+        await loadAdminDashboard();
+      }catch(err){ show(err.message, true); }
+    };
+  }
   const adminFrpcForm = document.querySelector('#adminFrpcForm');
   if(adminFrpcForm){ adminFrpcForm.onsubmit = submitAdminFrpc; renderAdminDeployScriptAddress(); renderAdminFrpcRows(); }
   adminDashboardTimer = setTimeout(() => loadAdminDashboard(true), refreshSeconds * 1000);
@@ -2088,6 +2139,8 @@ async function openNodeSwitch(){
 function closeNodeSwitch(){document.getElementById('nodeSwitchModal')?.classList.add('hidden');}
 function openPortsModal(){ const m = document.getElementById('portsModal'); if(m) m.classList.remove('hidden'); }
 function closePortsModal(){ document.getElementById('portsModal')?.classList.add('hidden'); }
+function showLegalNotice(){ const m = document.getElementById('legalNoticeModal'); if(m) m.classList.remove('hidden'); }
+function closeLegalNotice(){ document.getElementById('legalNoticeModal')?.classList.add('hidden'); }
 document.addEventListener('keydown', (e) => { if(e.key === 'Escape') closePortsModal(); });
 function initRenewForm(){
   const form = document.querySelector('#renewForm');

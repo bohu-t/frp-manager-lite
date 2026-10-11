@@ -11,6 +11,7 @@ import collections
 import hashlib
 import hmac
 import io
+import ipaddress
 import json
 import urllib.error
 import urllib.request
@@ -188,6 +189,28 @@ def db() -> sqlite3.Connection:
     except Exception:
         pass
     return conn
+
+
+def effective_setup_key() -> str:
+    """面板自定义的一键添加节点密钥优先，否则回退到环境变量 FML_SETUP_KEY。"""
+    try:
+        with db() as conn:
+            v = setting_get(conn, "setup_key", "")
+        if v:
+            return v
+    except Exception:
+        pass
+    return FML_SETUP_KEY
+
+
+def setup_key_source() -> str:
+    try:
+        with db() as conn:
+            if setting_get(conn, "setup_key", ""):
+                return "db"
+    except Exception:
+        pass
+    return "env" if FML_SETUP_KEY else "none"
 
 
 def password_hash(password: str) -> str:
@@ -1717,18 +1740,60 @@ def make_csrf_token() -> str:
     return token
 
 
-def validate_csrf(token: str | None) -> bool:
+def validate_csrf(token: str | None, cookie_header: str | None = None) -> bool:
     if not token:
+        return False
+    # 双提交（double-submit）：请求头里的 token 必须与 fml_csrf Cookie 一致，
+    # 防止攻击者用自己领取的 token 去伪造跨站请求。没有该 Cookie 一律拒绝。
+    try:
+        morsel = SimpleCookie(cookie_header or "").get("fml_csrf")
+    except Exception:
+        morsel = None
+    if not morsel or not hmac.compare_digest(str(morsel.value), str(token)):
         return False
     with db() as conn:
         row = conn.execute("SELECT token FROM csrf_tokens WHERE token=? AND expires_at>?", (token, now())).fetchone()
     return bool(row)
 
 
+def _ip_in_cidrs(ip: str, cidrs: list[str]) -> bool:
+    try:
+        addr = ipaddress.ip_address(str(ip))
+    except ValueError:
+        return False
+    for c in cidrs:
+        c = (c or "").strip()
+        if not c:
+            continue
+        try:
+            if "/" in c:
+                if addr in ipaddress.ip_network(c, strict=False):
+                    return True
+            elif addr == ipaddress.ip_address(c):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+# 只有来自受信任代理（默认：回环 + 内网）的连接才采信 X-Real-IP / X-Forwarded-For，
+# 否则直接使用 TCP 对端地址，避免公网客户端伪造 IP 绕过登录限流。
+TRUSTED_PROXIES = [c for c in os.getenv(
+    "FML_TRUSTED_PROXIES",
+    "127.0.0.0/8,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
+).split(",") if c.strip()]
+
+
 def client_ip(handler: BaseHTTPRequestHandler) -> str:
-    # If behind a trusted reverse proxy, let Nginx/Caddy pass the real client IP.
-    # Do not use arbitrary X-Forwarded-For here unless the proxy sanitizes it.
-    return handler.headers.get("X-Real-IP") or handler.client_address[0]
+    peer = handler.client_address[0]
+    if _ip_in_cidrs(peer, TRUSTED_PROXIES):
+        xri = (handler.headers.get("X-Real-IP") or "").strip()
+        if xri:
+            return xri
+        xff = (handler.headers.get("X-Forwarded-For") or "").strip()
+        if xff:
+            return xff.split(",")[0].strip()
+    return peer
 
 
 def rate_limit_check(key: str, limit: int, window: int = RATE_WINDOW) -> tuple[bool, int]:
@@ -2320,8 +2385,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "error": str(e)}, 400)
             return
         setup_key = str(data.get("setup_key", ""))
-        if not FML_SETUP_KEY or not hmac.compare_digest(setup_key, FML_SETUP_KEY):
-            self.send_json({"ok": False, "error": "setup_key 无效，请在面板上设置 FML_SETUP_KEY"}, 403)
+        expected_setup_key = effective_setup_key()
+        if not expected_setup_key or not hmac.compare_digest(setup_key, expected_setup_key):
+            self.send_json({"ok": False, "error": "setup_key 无效，请在面板「运行总览 · 运维入口」设置"}, 403)
             return
         try:
             region = str(data.get("region", "")).strip() or "默认地区"
@@ -2376,7 +2442,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "error": str(e)}, 400)
             return
         csrf = self.headers.get("X-CSRF-Token")
-        if not validate_csrf(csrf):
+        if not validate_csrf(csrf, self.headers.get("Cookie")):
             self.send_json({"ok": False, "error": "CSRF token 无效，请刷新页面"}, 403)
             return
         try:
@@ -2602,7 +2668,8 @@ class Handler(BaseHTTPRequestHandler):
         if not token:
             q = urllib.parse.parse_qs(urlparse(self.path).query)
             token = str((q.get("setup_key") or q.get("token") or [""])[0])
-        if not FML_SETUP_KEY or not hmac.compare_digest(str(token), FML_SETUP_KEY):
+        expected_setup_key = effective_setup_key()
+        if not expected_setup_key or not hmac.compare_digest(str(token), expected_setup_key):
             self.send_json({"ok": False, "error": "forbidden"}, 403)
             return
         q = urllib.parse.parse_qs(urlparse(self.path).query)
@@ -2781,7 +2848,7 @@ class Handler(BaseHTTPRequestHandler):
                             "active": bool(k["active"]), "expires_at": k["expires_at"], "expires_text": fmt_time(k["expires_at"]),
                             "expired": bool(k["expires_at"] and k["expires_at"] <= now()), "activated_at": k["activated_at"], "last_check_at": k["last_check_at"], "created_at": k["created_at"],
                         })
-            self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "invite_keys": invite_keys, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": (FML_SETUP_KEY if FML_SETUP_KEY else ""), "has_setup_key": bool(FML_SETUP_KEY)})
+            self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "invite_keys": invite_keys, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": effective_setup_key(), "has_setup_key": bool(effective_setup_key()), "setup_key_source": setup_key_source()})
             return
         if path == "/api/admin/frps-proxies":
             if not self.require_admin():
@@ -2848,10 +2915,17 @@ class Handler(BaseHTTPRequestHandler):
             node_list = attach_node_auth_port_status([
                 {
                     "id": n["id"],
+                    "region": n.get("region", ""),
                     "name": n["name"],
                     "active": n["active"],
                     "server_addr": n["server_addr"],
                     "server_port": n["server_port"],
+                    "port_start": n.get("port_start"),
+                    "port_end": n.get("port_end"),
+                    "bandwidth_mbps": n.get("bandwidth_mbps", 0),
+                    "dashboard_configured": bool(n.get("dashboard_configured")),
+                    "note": n.get("note", ""),
+                    "created_at": n.get("created_at", 0),
                     "port_count": n.get("port_count", 0),
                     "free_count": n.get("free_count", 0),
                 }
@@ -2872,8 +2946,9 @@ class Handler(BaseHTTPRequestHandler):
                 "traffic_today": traffic_today,
                 "host": host_stats_with_history(),
                 "nodes": node_list,
-                "setup_key": (FML_SETUP_KEY if FML_SETUP_KEY else ""),
-                "has_setup_key": bool(FML_SETUP_KEY),
+                "setup_key": effective_setup_key(),
+                "has_setup_key": bool(effective_setup_key()),
+                "setup_key_source": setup_key_source(),
                 "r2": r2_public,
                 "r2_configured": r2_public["configured"],
                 "frpc_users": frpc_users,
@@ -2890,7 +2965,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         csrf = self.headers.get("X-CSRF-Token")
-        if not validate_csrf(csrf):
+        if not validate_csrf(csrf, self.headers.get("Cookie")):
             self.send_json({"ok": False, "error": "CSRF token 无效或已过期，请刷新页面重试"}, 403)
             return
 
@@ -2913,6 +2988,12 @@ class Handler(BaseHTTPRequestHandler):
             if not ok_rate:
                 self.send_json({"ok": False, "error": f"登录尝试过多，请 {retry_after} 秒后再试", "retry_after": retry_after}, 429)
                 return
+            try_login_user = str(data.get("username", "")).strip().lower()
+            if try_login_user:
+                ok_user, retry_user = rate_limit_check(f"login-user:{try_login_user}", LOGIN_RATE_LIMIT)
+                if not ok_user:
+                    self.send_json({"ok": False, "error": f"该账号登录尝试过多，请 {retry_user} 秒后再试", "retry_after": retry_user}, 429)
+                    return
             with db() as conn:
                 user = conn.execute("SELECT * FROM users WHERE username=?", (str(data.get("username", "")),)).fetchone()
             if not user or not verify_password(str(data.get("password", "")), user["password_hash"]):
@@ -3029,6 +3110,8 @@ class Handler(BaseHTTPRequestHandler):
             self.admin_update_user_limits(data)
         elif path == "/api/admin/users/reset-password":
             self.admin_reset_password(data)
+        elif path == "/api/admin/users/reset-token":
+            self.admin_reset_token(user, data)
         elif path == "/api/admin/users/delete":
             self.admin_delete_user(user, data)
         elif path == "/api/admin/users/ban":
@@ -3037,6 +3120,8 @@ class Handler(BaseHTTPRequestHandler):
             self.admin_lookup_port(data)
         elif path == "/api/admin/r2/config":
             self.admin_r2_config_save(user, data)
+        elif path == "/api/admin/setup-key":
+            self.admin_setup_key(user, data)
         elif path == "/api/admin/backup/r2":
             self.admin_backup_r2(user)
         elif path == "/api/admin/backup/restore":
@@ -3198,6 +3283,20 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
         self.send_json({"ok": True, "message": f"用户 {row['username']} 新密码：{new_password}", "password": new_password})
 
+    def admin_reset_token(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        user_id = int(data.get("id", 0))
+        new_token = secrets.token_urlsafe(24)
+        with db() as conn:
+            row = conn.execute("SELECT username FROM users WHERE id=? AND role!='admin'", (user_id,)).fetchone()
+            if not row:
+                self.send_json({"ok": False, "error": "用户不存在或不允许重置管理员"}, 404)
+                return
+            conn.execute("UPDATE users SET token=? WHERE id=?", (new_token, user_id))
+        audit("user_token_reset", admin, None, None, "", f"重置用户 {row['username']} 的面板令牌")
+        self.send_json({"ok": True, "message": f"已重置 {row['username']} 的面板令牌，请让该用户重新下载 frpc 配置"})
+
     def admin_delete_user(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
         if not self.require_admin():
             return
@@ -3296,6 +3395,18 @@ class Handler(BaseHTTPRequestHandler):
         with db() as conn:
             conn.execute("UPDATE software_license_keys SET machine_id='', activated_at=0, last_check_at=0 WHERE id=?", (key_id,))
         self.send_json({"ok": True, "message": "已解绑软件授权"})
+
+    def admin_setup_key(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        key = str(data.get("setup_key", "")).strip()
+        if key and not (6 <= len(key) <= 128):
+            self.send_json({"ok": False, "error": "密钥长度需在 6-128 之间"}, 400)
+            return
+        with db() as conn:
+            setting_set(conn, "setup_key", key)
+        audit("setup_key_update", admin, None, None, "", "设置一键添加节点密钥" if key else "清除一键添加节点密钥")
+        self.send_json({"ok": True, "message": "已保存自定义密钥" if key else "已清除（回退到环境变量 FML_SETUP_KEY）", "setup_key": effective_setup_key(), "has_setup_key": bool(effective_setup_key()), "setup_key_source": setup_key_source()})
 
     def admin_invite_create(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
         if not self.require_admin():

@@ -1111,3 +1111,13 @@ html[data-theme="dark"] .key-kind.renew{background:#3a2a08;color:#fcd34d}
 .modal-backdrop.modal-center{align-items:center;padding:24px 18px}
 .admin-limits-modal{width:min(560px,100%)}
 @media(max-width:760px){.modal-backdrop.modal-center{padding:16px 12px}}
+
+/* --- Legal notice modal (normal users on login) + setup key form --- */
+.legal-notice-modal{width:min(560px,100%)}
+.legal-notice-body{display:grid;gap:10px;margin:2px 0 6px;color:#3b4a63;font-size:13px;line-height:1.7}
+.legal-notice-body p{margin:0}
+.legal-notice-body strong{color:#b91c1c}
+.setup-key-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.setup-key-form input{flex:1;min-width:0}
+html[data-theme="dark"] .legal-notice-body{color:#cbd5e1}
+html[data-theme="dark"] .legal-notice-body strong{color:#fca5a5}
