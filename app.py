@@ -33,7 +33,7 @@ import urllib.parse
 import threading
 
 APP_NAME = "frp-manager-lite"
-APP_VERSION = os.getenv("FML_PANEL_VERSION", "1.0.4")  # 面板版本，不是 frp 版本
+APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.0.0")  # 面板版本，不是 frp 版本
 FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0.66.0"))
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -2443,7 +2443,7 @@ def upload_to_r2(object_key: str, body: bytes, content_type: str = "application/
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "frp-manager-lite-api/0.3"
+    server_version = "frp-manager-lite-api/2.0.0"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("[%s] %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), fmt % args))
