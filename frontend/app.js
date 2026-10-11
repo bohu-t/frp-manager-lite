@@ -739,6 +739,26 @@ async function measureClientLatency(){
   live.title = {node:'用户→节点实测', cloudflare:'浏览器↔Cloudflare 就近节点', panel:'浏览器→面板'}[src] || '';
 }
 
+async function measureNodeLatencyByAddr(addr){
+  const host = String(addr || '').trim();
+  if(!/^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/.test(host)) return null;
+  return await probeLatency(`${location.protocol}//${host}/__fml_ping`);
+}
+
+// Fill every [data-latency-node] element with a real user→node round trip measured
+// in the browser (falls back to the pre-rendered server-side value on failure).
+async function fillNodeLatencies(){
+  const els = Array.from(document.querySelectorAll('[data-latency-node]'));
+  if(!els.length) return;
+  const addrs = Array.from(new Set(els.map(e => e.dataset.latencyNode).filter(Boolean)));
+  const results = {};
+  await Promise.all(addrs.map(async a => { results[a] = await measureNodeLatencyByAddr(a); }));
+  els.forEach(e => {
+    const ms = results[e.dataset.latencyNode];
+    if(ms != null){ e.textContent = `${Math.round(ms)} ms`; e.title = '用户→节点实测'; }
+  });
+}
+
 async function renderLogin(){
   clearAdminDashboardTimer();
   currentUser = null; setNav(); hideFlash();
@@ -2018,13 +2038,14 @@ async function loadAdminHealth(){
   const nodeRows = healthNodes.map(n => {
     const used = Number(n.port_count || 0) - Number(n.free_count || 0);
     const latency = (n.auth_latency_ms !== undefined && n.auth_latency_ms !== null) ? `${n.auth_latency_ms} ms` : '—';
+    const latencyCell = `<span data-latency-node="${esc(n.server_addr || '')}">${esc(latency)}</span>`;
     const checked = n.auth_checked_at ? fmtTs(n.auth_checked_at) : '—';
     return `
     <tr>
       <td><b>${esc(n.name || '-')}</b><span class="muted small">${esc(n.region || '未设置地区')} · #${esc(n.id)}</span></td>
       <td><code>${esc(n.server_addr || '-')}:${esc(n.server_port ?? '-')}</code></td>
       <td>${nodeStatusBadge(n)}<span class="muted small">${esc(n.auth_message || '')}</span></td>
-      <td>${latency}<span class="muted small">检查 ${checked}</span></td>
+      <td>${latencyCell}<span class="muted small">检查 ${checked}</span></td>
       <td>${n.port_start != null ? `${esc(n.port_start)} - ${esc(n.port_end)}` : '—'}</td>
       <td>${used} / ${esc(n.port_count || 0)}<span class="muted small">空闲 ${esc(n.free_count || 0)}</span></td>
       <td>${n.bandwidth_mbps ? esc(n.bandwidth_mbps) + ' Mbps' : '未设置'}</td>
@@ -2043,6 +2064,7 @@ async function loadAdminHealth(){
       <table class="compact-table"><thead><tr><th>节点</th><th>frps 接入</th><th>认证状态</th><th>延迟</th><th>端口池</th><th>端口使用</th><th>带宽</th><th>流量监控</th><th>备注</th></tr></thead><tbody>${nodeRows}</tbody></table>
       ${paginationHtml('health', nodeHealthPage, allNodes.length, healthPageSize)}
     </section>`, 'health', '节点健康');
+  fillNodeLatencies();
 }
 
 /* --- Admin host resource charts (2D line/area, no external libs) --- */
@@ -2285,9 +2307,10 @@ async function loadAdminDashboard(auto=false){
   const nodeRows = (data.nodes || []).map(n => {
     const ok = !!n.auth_port_ok;
     const latency = n.auth_latency_ms == null ? '—' : `${n.auth_latency_ms} ms`;
+    const latencyEl = `<b data-latency-node="${esc(n.server_addr || '')}">${esc(latency)}</b>`;
     const statusText = ok ? '在线' : (n.active ? '不可达' : '已停用');
     const portText = `端口 ${Number(n.port_count || 0)} / 空闲 ${Number(n.free_count || 0)}`;
-    return `<div class="admin-node-row"><span class="admin-node-dot ${ok ? 'ok' : 'bad'}" title="${esc(n.auth_message || statusText)}"></span><div class="admin-node-copy"><strong>${esc(n.name || '-')}</strong><small>${esc(n.server_addr || '-')}:${esc(n.server_port ?? '-')}</small></div><div class="admin-node-meta"><b>${esc(latency)}</b><small>${esc(statusText)} · ${esc(portText)}</small></div></div>`;
+    return `<div class="admin-node-row"><span class="admin-node-dot ${ok ? 'ok' : 'bad'}" title="${esc(n.auth_message || statusText)}"></span><div class="admin-node-copy"><strong>${esc(n.name || '-')}</strong><small>${esc(n.server_addr || '-')}:${esc(n.server_port ?? '-')}</small></div><div class="admin-node-meta">${latencyEl}<small>${esc(statusText)} · ${esc(portText)}</small></div></div>`;
   }).join('') || '<div class="empty-state"><strong>还没有节点</strong><p class="muted small">先去「节点管理」添加一个 frps 节点。</p></div>';
   app.innerHTML = appLayoutHtml(`
 
@@ -2340,6 +2363,7 @@ async function loadAdminDashboard(auto=false){
     `, 'admin-dashboard', '运行总览');
   adminHostHistory = hostHistory;
   renderHostCharts();
+  fillNodeLatencies();
   adminDashboardTimer = setTimeout(() => loadAdminDashboard(true), refreshSeconds * 1000);
 }
 
