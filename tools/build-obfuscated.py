@@ -168,33 +168,32 @@ def main():
     # Obfuscate Python source
     obfuscate_file(ENTRY_SOURCE, ENTRY_TARGET, seed)
 
-    # Frontend: copy JS/CSS/HTML as-is — browser code can't be hidden anyway
+    # Frontend: copy all static assets (js/css/html/svg/ico/…) — browser code
+    # can't be hidden anyway. app.js gets light minification; everything else
+    # is copied verbatim so icons and other assets are never dropped.
     for f in FRONTEND_SRC.iterdir():
         if not f.is_file():
             continue
-        if f.name == "app.js" or f.suffix in {".html", ".css"}:
-            if f.name == "app.js":
-                # Light minification: strip comments and blank lines only
-                js_content = f.read_text()
-                # Remove // comments (but not URLs with //)
-                lines = []
-                for line in js_content.split('\n'):
-                    stripped = line.strip()
-                    if stripped.startswith('//'):
-                        continue
-                    if not stripped and not line.endswith('\n'):
-                        continue
-                    lines.append(line.strip('\t'))
-                minified = '\n'.join(lines)
-                target = FRONTEND_DST / f.name
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(minified)
-                print(f"  minified: {f.name} ({len(js_content)} → {len(minified)} chars)")
-            else:
-                target = FRONTEND_DST / f.name
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(f.read_bytes())
-                print(f"  copied: {f.name}")
+        target = FRONTEND_DST / f.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if f.name == "app.js":
+            # Light minification: strip comments and blank lines only
+            js_content = f.read_text()
+            # Remove // comments (but not URLs with //)
+            lines = []
+            for line in js_content.split('\n'):
+                stripped = line.strip()
+                if stripped.startswith('//'):
+                    continue
+                if not stripped and not line.endswith('\n'):
+                    continue
+                lines.append(line.strip('\t'))
+            minified = '\n'.join(lines)
+            target.write_text(minified)
+            print(f"  minified: {f.name} ({len(js_content)} → {len(minified)} chars)")
+        else:
+            target.write_bytes(f.read_bytes())
+            print(f"  copied: {f.name}")
 
     # Copy .env.example, README, deploy/
     for f in [".env.example", "README.md", "DEPLOY.md", "deploy"]:
