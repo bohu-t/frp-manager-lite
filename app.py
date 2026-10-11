@@ -2505,6 +2505,15 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path.startswith("/api/"):
             self.api_get(path)
+        elif path == "/__fml_ping":
+            # Public node-side latency probe (no auth, no DB). When this panel is
+            # served under an frps node's public host, the browser measures a real
+            # user→node round trip by fetching this endpoint.
+            self.send_body(b"", 204, "text/plain", headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+                "Timing-Allow-Origin": "*",
+            })
         elif path == "/config/frpc.toml":
             self.download_frpc()
         elif path == "/config/deploy-frpc.sh":
