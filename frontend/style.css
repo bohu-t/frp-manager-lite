@@ -1104,8 +1104,10 @@ html[data-theme="dark"] .ports-modal .ports span.used{background:#3a2a08;border-
 .key-kind{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap}
 .key-kind.register{background:#eaf2ff;color:#2563eb}
 .key-kind.renew{background:#fef3c7;color:#b45309}
+.key-kind.reset{background:#ede9fe;color:#6d28d9}
 html[data-theme="dark"] .key-kind.register{background:#1e3a8a;color:#bfdbfe}
 html[data-theme="dark"] .key-kind.renew{background:#3a2a08;color:#fcd34d}
+html[data-theme="dark"] .key-kind.reset{background:#2e1065;color:#c4b5fd}
 
 /* --- Centered modal variant (admin limits dialog) --- */
 .modal-backdrop.modal-center{align-items:center;padding:24px 18px}
@@ -1121,3 +1123,5 @@ html[data-theme="dark"] .key-kind.renew{background:#3a2a08;color:#fcd34d}
 .setup-key-form input{flex:1;min-width:0}
 html[data-theme="dark"] .legal-notice-body{color:#cbd5e1}
 html[data-theme="dark"] .legal-notice-body strong{color:#fca5a5}
+.auth-switch .auth-link{color:var(--primary);font-weight:500;text-decoration:none;cursor:pointer;transition:color .15s ease}.auth-switch .auth-link:hover{text-decoration:underline}html[data-theme="dark"] .auth-switch .auth-link{color:#60a5fa}
+.admin-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px;align-items:start}.admin-settings-grid>.card{margin:0}.admin-settings-grid .admin-ops-card{grid-column:1/-1}@media(max-width:900px){.admin-settings-grid{grid-template-columns:1fr}.admin-settings-grid .admin-ops-card{grid-column:auto}}

@@ -22,6 +22,8 @@ let tunnelModalOpen = false;
 let adminFrpcModalOpen = false;
 let tunnelFormDraft = {};
 let adminFrpcUsers = [];
+let adminSmtp = {};
+let adminCurrentPage = 'dashboard';
 let adminFrpcDraftRows = [{name:'web', proxy_type:'tcp', local_ip:'127.0.0.1', local_port:'80', remote_port:'', custom_domains:'', secret_key:''}];
 const ADMIN_PAGE_SIZE = 10;
 const systemDarkQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
@@ -351,6 +353,7 @@ const QICON_MEM = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><rect x="96" 
 const QICON_KEY = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="392" cy="384" r="216" fill="#F5A623"/><circle cx="392" cy="384" r="88" fill="#FFFFFF"/><rect x="536" y="360" width="368" height="48" rx="24" fill="#F5A623"/><rect x="780" y="408" width="48" height="104" rx="24" fill="#F5A623"/><rect x="664" y="408" width="48" height="80" rx="24" fill="#F5A623"/></svg>';
 const QICON_NODE = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><rect x="96" y="168" width="832" height="256" rx="44" fill="#2C6DD2"/><circle cx="216" cy="296" r="32" fill="#FFFFFF"/><rect x="304" y="278" width="420" height="36" rx="18" fill="#FFFFFF"/><circle cx="740" cy="744" r="208" fill="#20C997"/><rect x="684" y="720" width="112" height="48" rx="24" fill="#FFFFFF"/><rect x="716" y="688" width="48" height="112" rx="24" fill="#FFFFFF"/></svg>';
 const QICON_RISK = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><path d="M512 96l352 128v256c0 224-160 384-352 448-192-64-352-224-352-448V224z" fill="#F45B5B"/><rect x="480" y="312" width="64" height="248" rx="32" fill="#FFFFFF"/><circle cx="512" cy="648" r="44" fill="#FFFFFF"/></svg>';
+const QICON_SETTINGS = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="512" cy="512" r="168" fill="#5B8DEF"/><circle cx="512" cy="512" r="72" fill="#FFFFFF"/><g fill="#5B8DEF"><rect x="488" y="232" width="48" height="96" rx="24"/><rect x="488" y="696" width="48" height="96" rx="24"/><rect x="232" y="488" width="96" height="48" rx="24"/><rect x="696" y="488" width="96" height="48" rx="24"/><rect x="308" y="318" width="48" height="96" rx="24" transform="rotate(-45 332 366)"/><rect x="668" y="318" width="48" height="96" rx="24" transform="rotate(45 692 366)"/><rect x="308" y="610" width="48" height="96" rx="24" transform="rotate(45 332 658)"/><rect x="668" y="610" width="48" height="96" rx="24" transform="rotate(-45 692 658)"/></g></svg>';
 
 /* --- UI icon set (monochrome stroke icons, inherit currentColor) --- */
 const UIICONS = {
@@ -590,7 +593,7 @@ function appSidebarHtml(kind='dashboard'){
   const isAdmin = currentUser?.role === 'admin';
   const username = currentUser?.username || '用户';
   const items = isAdmin ? [
-    ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','key','注册密钥','keys'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk']
+    ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','key','注册密钥','keys'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
   ] : [
     ['dashboard','home','概览'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
   ];
@@ -630,6 +633,7 @@ function setNav(){
     navButton('节点健康', 'admin-health', 'secondary', 'health'),
     navButton('映射监控', 'admin-proxies', 'secondary', 'proxies'),
     navButton('风控', 'admin', 'secondary', 'risk'),
+    navButton('设置', 'admin-settings', 'secondary'),
   ].join('') : '';
   const mainNav = licenseRequired && isAdmin ? navButton('软件授权', 'license') : (
     licenseRequired ? '' : (isAdmin ? navButton('仪表盘', 'admin-dashboard') : navButton('概览', 'dashboard'))
@@ -664,6 +668,7 @@ nav.addEventListener('click', async (e) => {
     if(action === 'license') return renderLicenseActivate();
     if(action === 'dashboard') return loadDashboard();
     if(action === 'admin-dashboard') return loadAdminDashboard();
+    if(action === 'admin-settings') return loadAdminSettings();
     if(action === 'admin-proxies') return loadAdminProxies();
     if(action === 'admin-health') return loadAdminHealth();
     if(action === 'admin') return loadAdmin(section);
@@ -691,6 +696,7 @@ app.addEventListener('click', async (e) => {
     if(action === 'dashboard-editor') return loadDashboard('editor');
     if(action === 'dashboard-profile') return loadDashboard('profile');
     if(action === 'admin-dashboard') return loadAdminDashboard();
+    if(action === 'admin-settings') return loadAdminSettings();
     if(action === 'admin-proxies') return loadAdminProxies();
     if(action === 'admin-health') return loadAdminHealth();
     if(action === 'admin') return loadAdmin(section);
@@ -708,7 +714,7 @@ async function renderLogin(){
         <div class="input-group"><label class="input-label" for="loginPassword">密码</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('lock')}</span><input id="loginPassword" class="input-ios auth-password-input" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required><button type="button" class="auth-password-toggle" onclick="togglePasswordVisibility('loginPassword', this)" aria-label="显示密码" title="显示密码">${iconSvg('eye')}</button></div></div>
         <p><button class="wide auth-submit">登录</button></p>
       </form>`,
-      `<div class="auth-switch"><span>没有账号？</span><button class="secondary" onclick="renderRegister()">使用密钥注册</button></div>`, nodes);
+      `<div class="auth-switch"><a class="auth-link" href="#" onclick="renderRegister();return false;">没有账号？</a><a class="auth-link" href="#" onclick="renderForgotPassword();return false;">忘记密码？</a></div>`, nodes);
   document.querySelector('#loginForm').onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -749,6 +755,49 @@ async function renderRegister(){
       renderLogin();
     }catch(err){ show(err.message, true); }
   };
+}
+
+async function renderForgotPassword(){
+  clearAdminDashboardTimer();
+  currentUser = null; setNav(); hideFlash();
+  app.innerHTML = authShell('找回密码', '输入用户名获取邮箱验证码，设置新密码', `
+      <form id="forgotForm" class="stack-form auth-login-form">
+        <div class="input-group"><label class="input-label" for="forgotUsername">用户名</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('user')}</span><input id="forgotUsername" class="input-ios" name="username" autocomplete="username" placeholder="请输入用户名" required></div></div>
+        <div class="input-group"><label class="input-label" for="forgotCode">邮箱验证码</label><div class="row" style="gap:8px"><input id="forgotCode" class="input-ios" name="code" inputmode="numeric" maxlength="6" placeholder="6 位验证码" required style="flex:1;min-width:0"><button type="button" class="secondary" id="sendCodeBtn" onclick="sendResetCode()">获取验证码</button></div><p class="muted small" style="margin:6px 0 0">验证码会发送到账号绑定的邮箱</p></div>
+        <div class="input-group"><label class="input-label" for="forgotPassword">新密码</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('lock')}</span><input id="forgotPassword" class="input-ios auth-password-input" name="password" type="password" autocomplete="new-password" minlength="6" placeholder="请输入新密码（至少 6 位）" required><button type="button" class="auth-password-toggle" onclick="togglePasswordVisibility('forgotPassword', this)" aria-label="显示密码" title="显示密码">${iconSvg('eye')}</button></div></div>
+        <div class="input-group"><label class="input-label" for="forgotPassword2">确认新密码</label><input id="forgotPassword2" class="input-ios" name="password2" type="password" autocomplete="new-password" minlength="6" placeholder="再次输入新密码" required></div>
+        <p class="row"><button>重置密码</button><button type="button" class="secondary" onclick="renderLogin()">返回登录</button></p>
+      </form>`,
+      '<div class="auth-switch"><span>收不到邮件？</span><span>请联系管理员绑定邮箱</span></div>');
+  document.querySelector('#forgotForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const p1 = String(form.elements.password.value || '');
+    const p2 = String(form.elements.password2.value || '');
+    if(p1 !== p2){ show('两次输入的密码不一致', true); return; }
+    try{
+      const r = await api('/api/password/reset-by-code', {method:'POST', body:{username: form.elements.username.value, code: form.elements.code.value, password: p1}});
+      show(r.message || '密码已重置，请登录');
+      renderLogin();
+    }catch(err){ show(err.message, true); }
+  };
+}
+
+async function sendResetCode(){
+  const u = document.querySelector('#forgotUsername');
+  const btn = document.querySelector('#sendCodeBtn');
+  const name = u ? u.value.trim() : '';
+  if(!name){ show('请先填写用户名', true); return; }
+  if(btn) btn.disabled = true;
+  try{
+    const r = await api('/api/password/request-code', {method:'POST', body:{username:name}});
+    show(r.message || '验证码已发送');
+    let n = 60;
+    if(btn){
+      btn.textContent = n + 's';
+      const t = setInterval(() => { n--; if(n <= 0){ clearInterval(t); btn.disabled = false; btn.textContent = '获取验证码'; } else { btn.textContent = n + 's'; } }, 1000);
+    }
+  }catch(err){ if(btn) btn.disabled = false; show(err.message, true); }
 }
 
 async function loadMe(){
@@ -1138,7 +1187,12 @@ async function loadDashboard(view='overview'){
             <div class="info-line"><span>端口上限</span><strong>${esc(data.user.max_ports ?? '-')}</strong></div>
             <div class="info-line"><span>接入节点</span><strong>${esc(data.node?.region || data.node?.name || '-')}</strong></div>
             <div class="info-line"><span>FRPS 接入点</span><strong>${esc(data.frps.addr)}:${esc(data.frps.port)}</strong></div>
+            <div class="info-line"><span>邮箱</span><strong>${esc(data.user.email || '未设置')}</strong></div>
           </div>
+          <form id="userEmailForm" class="grid" style="margin-top:12px">
+            <div style="grid-column:1/-1"><label>设置邮箱（用于「忘记密码」接收验证码）</label><input name="email" type="email" value="${esc(data.user.email || '')}" placeholder="user@example.com"></div>
+            <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存邮箱</button></div>
+          </form>
         </section>
         <section class="card profile-tools">
           <div class="section-title"><div><div class="section-kicker">RENEW</div><h2>${stIcon('key')}账号续期</h2><p>输入管理员发放的续期密钥，为当前账号延长有效期。</p></div></div>
@@ -1151,6 +1205,7 @@ async function loadDashboard(view='overview'){
         </section>
       </div>`, 'dashboard-profile', '个人中心');
     initRenewForm();
+    initUserEmailForm();
     return;
   }
   const sideNav = `<aside class="app-sidebar">
@@ -1333,7 +1388,7 @@ async function loadAdmin(section=currentAdminSection){
   const logsSlice = pageItems(data.logs || [], riskPage, ADMIN_PAGE_SIZE);
   const rows = usersSlice.map(u => `
     <tr>
-      <td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${esc(u.node_region || '-')} / ${esc(u.node_name || '-')}</td><td>${u.port_count}/${u.max_ports}</td><td>${u.tunnel_count}</td>
+      <td>${u.id}</td><td>${esc(u.username)}</td><td>${u.email ? esc(u.email) : '—'}</td><td>${esc(u.role)}</td><td>${esc(u.node_region || '-')} / ${esc(u.node_name || '-')}</td><td>${u.port_count}/${u.max_ports}</td><td>${u.tunnel_count}</td>
       <td>${fmtBytes(u.traffic_limit_bytes)} / ${u.bandwidth_limit_kbps ? `${(Number(u.bandwidth_limit_kbps) / 1024).toFixed(1)} MB/s` : '不限'}</td>
       <td>${esc(u.expires_text)} ${u.expired ? '<span class="bad">已到期</span>' : ''}</td>
       <td>${u.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
@@ -1344,6 +1399,7 @@ async function loadAdmin(section=currentAdminSection){
         <button class="node-action" onclick="openAdminLimits(${u.id}, ${Number(u.traffic_limit_bytes || 0)}, ${Number(u.bandwidth_limit_kbps || 0)}, '${esc(u.username)}')">流量限制</button>
         <button class="node-action" onclick="adminReset(${u.id})">重置密码</button>
         <button class="node-action" onclick="adminResetToken(${u.id})">重置令牌</button>
+        <button class="node-action" onclick="openAdminEmail(${u.id}, '${esc(u.email || '')}', '${esc(u.username)}')">设邮箱</button>
         <button class="node-action node-action-danger" onclick="adminDelete(${u.id})">删除</button>
       </td>
     </tr>`).join('');
@@ -1355,18 +1411,20 @@ async function loadAdmin(section=currentAdminSection){
       <td>${esc(n.note)}</td>
       <td class="actions node-actions"><button class="node-action" onclick='editNode(${JSON.stringify(n)})'>编辑</button><button class="node-action" onclick="nodeToggle(${n.id})">${n.active ? '停用' : '启用'}</button><a class="btn node-action" href="/config/frps.example.toml?node_id=${n.id}">frps配置</a><button class="node-action node-action-danger" onclick="nodeDelete(${n.id})">删除</button></td>
     </tr>`).join('') || emptyRow(9, '还没有节点');
+  const KEY_KIND_LABEL = {register: '注册', renew: '续期', reset: '重置'};
   const keyRows = keysSlice.map(k => {
-    const isRenew = k.kind === 'renew';
+    const kind = ['register', 'renew', 'reset'].includes(k.kind) ? k.kind : 'register';
+    const isRegister = kind === 'register';
     return `
     <tr>
       <td>${k.id}</td>
-      <td>${isRenew ? '<span class="key-kind renew">续期</span>' : '<span class="key-kind register">注册</span>'}</td>
+      <td><span class="key-kind ${kind}">${KEY_KIND_LABEL[kind]}</span></td>
       <td><code class="token" title="${esc(k.key)}">${esc(k.key)}</code></td>
       <td>${esc(k.note)}</td>
       <td>${k.used_count}/${k.max_uses}</td>
-      <td>${isRenew ? '-' : k.max_ports}</td>
-      <td>${isRenew ? '-' : `${fmtBytes(k.traffic_limit_bytes)} / ${k.bandwidth_limit_kbps ? `${(Number(k.bandwidth_limit_kbps) / 1024).toFixed(1)} MB/s` : '不限'}`}</td>
-      <td>${isRenew ? `+${k.user_expires_days} 天` : (k.user_expires_days === 0 ? '永不过期' : `${k.user_expires_days} 天`)}</td>
+      <td>${isRegister ? k.max_ports : '-'}</td>
+      <td>${isRegister ? `${fmtBytes(k.traffic_limit_bytes)} / ${k.bandwidth_limit_kbps ? `${(Number(k.bandwidth_limit_kbps) / 1024).toFixed(1)} MB/s` : '不限'}` : '-'}</td>
+      <td>${kind === 'renew' ? `+${k.user_expires_days} 天` : (isRegister ? (k.user_expires_days === 0 ? '永不过期' : `${k.user_expires_days} 天`) : '-')}</td>
       <td>${esc(k.expires_text)} ${k.expired ? '<span class="bad">已过期</span>' : ''}</td>
       <td>${k.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
       <td class="actions"><button onclick="copyText('${k.key}')">复制</button><button onclick="inviteToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button class="danger" onclick="inviteDelete(${k.id})">删除</button></td>
@@ -1431,7 +1489,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>密钥有效期天数</label><input name="key_expires_days" type="number" value="30" min="0" max="3650"><span class="muted small">0 表示密钥永不过期</span></div>
       <div style="grid-column:1/-1;display:flex;justify-content:flex-start"><button>生成续期密钥</button></div>
     </form></section>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('key')}密钥列表</h2><p>注册密钥用于新用户注册，续期密钥用于老用户延长有效期</p></div><a class="btn" href="/admin/export/invite-keys.csv">导出未使用密钥 CSV</a></div><table><thead><tr><th>ID</th><th>类型</th><th>密钥</th><th>备注</th><th>使用</th><th>端口</th><th>流量/速率策略</th><th>有效期/续期</th><th>密钥到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table>${paginationHtml('keys', keysPage, (data.invite_keys || []).length, ADMIN_PAGE_SIZE)}</section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('key')}密钥列表</h2><p>注册 / 续期密钥，单次使用</p></div><a class="btn" href="/admin/export/invite-keys.csv">导出未使用密钥 CSV</a></div><table><thead><tr><th>ID</th><th>类型</th><th>密钥</th><th>备注</th><th>使用</th><th>端口</th><th>流量/速率策略</th><th>有效期/续期</th><th>密钥到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table>${paginationHtml('keys', keysPage, (data.invite_keys || []).length, ADMIN_PAGE_SIZE)}</section>
     ${data.software_license_authority ? `<section class="card" id="software-licenses"><div class="section-title"><h2>${stIcon('license')}服务器软件授权码</h2><p>卖家后台使用：先批量生成授权码发给客户；客户输入授权码后自动绑定他的部署服务器。</p></div><form id="softwareLicenseForm" class="grid">
       <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
       <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
@@ -1458,7 +1516,7 @@ async function loadAdmin(section=currentAdminSection){
         <div><label for="adminUserStatus">账号状态</label><select id="adminUserStatus" name="status"><option value="all" ${adminUserStatus==='all'?'selected':''}>全部状态</option><option value="active" ${adminUserStatus==='active'?'selected':''}>正常启用</option><option value="disabled" ${adminUserStatus==='disabled'?'selected':''}>已停用</option><option value="expired" ${adminUserStatus==='expired'?'selected':''}>已到期</option></select></div>
         <div class="form-actions"><button type="submit">筛选</button><button type="button" class="secondary" id="adminUserFilterReset">重置</button></div>
       </form>
-      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>ID</th><th>用户</th><th>角色</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>到期</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>
+      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>ID</th><th>用户</th><th>邮箱</th><th>角色</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>到期</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>
     <div id="adminLimitsModal" class="modal-backdrop modal-center hidden" role="dialog" aria-modal="true" aria-labelledby="adminLimitsTitle" onclick="if(event.target===this)closeAdminLimits()">
       <section class="modal-page card admin-limits-modal">
         <div class="section-title modal-title">
@@ -1470,6 +1528,19 @@ async function loadAdmin(section=currentAdminSection){
           <div><label>今日流量上限 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
           <div><label>速率策略 MB/s</label><input name="bandwidth_limit_mbs" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限；仅后台可见</span></div>
           <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存</button><button type="button" class="secondary" onclick="closeAdminLimits()">取消</button></div>
+        </form>
+      </section>
+    </div>
+    <div id="adminEmailModal" class="modal-backdrop modal-center hidden" role="dialog" aria-modal="true" aria-labelledby="adminEmailTitle" onclick="if(event.target===this)closeAdminEmail()">
+      <section class="modal-page card admin-limits-modal">
+        <div class="section-title modal-title">
+          <div><div class="section-kicker">EMAIL</div><h2 id="adminEmailTitle">${stIcon('cloud')}设置用户邮箱</h2><p id="adminEmailUser">用于「忘记密码」接收验证码。</p></div>
+          <button type="button" class="secondary modal-close" onclick="closeAdminEmail()">关闭 ×</button>
+        </div>
+        <form id="adminEmailForm" class="grid">
+          <input type="hidden" name="id">
+          <div style="grid-column:1/-1"><label>邮箱地址</label><input name="email" type="email" placeholder="user@example.com（留空则清除）"></div>
+          <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存</button><button type="button" class="secondary" onclick="closeAdminEmail()">取消</button></div>
         </form>
       </section>
     </div>`;
@@ -1601,6 +1672,19 @@ async function loadAdmin(section=currentAdminSection){
       }catch(err){ show(err.message, true); }
     };
   }
+  const adminEmailForm = document.querySelector('#adminEmailForm');
+  if(adminEmailForm){
+    adminEmailForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(e.target));
+      try{
+        const r = await api('/api/admin/users/email', {method:'POST', body});
+        closeAdminEmail();
+        show(r.message || '邮箱已更新');
+        await loadAdmin();
+      }catch(err){ show(err.message, true); }
+    };
+  }
   const lookupPortForm = document.querySelector('#lookupPortForm');
   if(lookupPortForm){
     lookupPortForm.onsubmit = async (e) => {
@@ -1642,7 +1726,7 @@ async function backupToR2(){
   if(!confirm('现在生成全量备份并上传到 Cloudflare R2？')) return;
   await api('/api/admin/backup/r2', {method:'POST', body:{}}).then(r=>{
     show(`${r.message}：${r.object_key}`);
-    loadAdminDashboard();
+    reloadAdminCurrentPage();
   }).catch(e=>show(e.message,true));
 }
 
@@ -1652,7 +1736,7 @@ async function saveR2Config(e){
   try{
     const r = await api('/api/admin/r2/config', {method:'POST', body:Object.fromEntries(fd)});
     show(r.message || 'R2 配置已保存');
-    await loadAdminDashboard();
+    await reloadAdminCurrentPage();
   }catch(err){ show(err.message, true); }
 }
 
@@ -1762,7 +1846,7 @@ async function submitAdminFrpc(e){
     show(r.message || '隧道已创建并下载 frpc 配置和部署脚本');
     adminFrpcDraftRows = [{name:'web', proxy_type:'tcp', local_ip:'127.0.0.1', local_port:'80', remote_port:'', custom_domains:'', secret_key:''}];
     closeAdminFrpcModal();
-    await loadAdminDashboard();
+    await reloadAdminCurrentPage();
   }catch(err){ show(err.message, true); }
 }
 function fileToDataUrl(file){
@@ -1783,7 +1867,7 @@ async function restoreFullBackup(){
     const dataUrl = await fileToDataUrl(file);
     const r = await api('/api/admin/backup/restore', {method:'POST', body:{filename:file.name, content_base64:dataUrl, confirm:'RESTORE'}});
     show(`${r.message}；恢复前备份：${r.restore && r.restore.pre_restore_backup ? r.restore.pre_restore_backup : '已保存'}`);
-    await loadAdminDashboard();
+    await reloadAdminCurrentPage();
   }catch(err){ show(err.message, true); }
 }
 
@@ -1803,6 +1887,17 @@ function openAdminLimits(id, trafficBytes=0, bandwidthKbps=0, username=''){
   modal.classList.remove('hidden');
 }
 function closeAdminLimits(){ document.querySelector('#adminLimitsModal')?.classList.add('hidden'); }
+function openAdminEmail(id, email, username){
+  const modal = document.querySelector('#adminEmailModal');
+  if(!modal) return;
+  const form = modal.querySelector('#adminEmailForm');
+  form.elements.id.value = id;
+  form.elements.email.value = email || '';
+  const label = modal.querySelector('#adminEmailUser');
+  if(label) label.textContent = username ? `用户 ${username} · 用于「忘记密码」接收验证码` : '用于「忘记密码」接收验证码。';
+  modal.classList.remove('hidden');
+}
+function closeAdminEmail(){ document.querySelector('#adminEmailModal')?.classList.add('hidden'); }
 async function adminReset(id){ if(confirm('重置该用户密码？')) await api('/api/admin/users/reset-password', {method:'POST', body:{id}}).then(r=>{show(r.message); loadAdmin();}).catch(e=>show(e.message,true)); }
 async function adminResetToken(id){ if(confirm('重置该用户的面板令牌？重置后该用户需重新下载 frpc 配置。')) await api('/api/admin/users/reset-token', {method:'POST', body:{id}}).then(r=>{show(r.message||'已重置令牌'); loadAdmin();}).catch(e=>show(e.message,true)); }
 async function adminDelete(id){ if(confirm('删除用户会释放端口并删除隧道，确定？')) await api('/api/admin/users/delete', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
@@ -1841,6 +1936,13 @@ function nodeStatusBadge(n){
   return '<span class="bad">异常</span>';
 }
 
+
+async function sendSmtpTest(){
+  const to = (adminSmtp && (adminSmtp.from_addr || adminSmtp.user)) || '';
+  if(!to){ show('请先填写并保存发件账号', true); return; }
+  try{ const r = await api('/api/admin/smtp-test', {method:'POST', body:{to}}); show(r.message || '测试邮件已发送'); }
+  catch(err){ show(err.message, true); }
+}
 
 function copySetupKey(){
   const el = document.querySelector('#setupKeyForm input[name="setup_key"]') || document.querySelector('#setupKeyValue');
@@ -1966,9 +2068,143 @@ function renderHostCharts(){
   });
 }
 
+function reloadAdminCurrentPage(){
+  return adminCurrentPage === 'settings' ? loadAdminSettings() : loadAdminDashboard();
+}
+
+function adminOpsCardHtml(setupHtml){
+  return `<section class="card admin-ops-card">
+        <div class="section-title"><div><div class="section-kicker">OPERATIONS</div><h2>${stIcon('tools')}运维入口</h2></div></div>
+        <div class="ops-list">
+          ${setupHtml}
+          <div class="ops-item"><div class="label">下载模块</div><p class="muted small">为普通用户生成 frpc.toml 与 deploy-frpc.sh。</p><p class="row"><button onclick="openAdminFrpcModal()">为用户生成配置</button></p></div>
+          <div class="ops-item"><div class="label">全量备份</div><p class="muted small">导出数据库与前端配置文件。</p><p class="row"><a class="btn" href="/admin/backup/full.zip">下载全量备份</a></p></div>
+        </div>
+      </section>`;
+}
+
+function adminSmtpCardHtml(smtp){
+  return `<section class="card admin-smtp-card">
+        <div class="section-title"><div><div class="section-kicker">MAIL</div><h2>${stIcon('cloud')}邮件设置</h2><p>用于「忘记密码」邮箱验证码；Gmail 用应用专用密码，推荐 587 + STARTTLS</p></div><span class="status-badge ${smtp.configured ? 'ok' : 'bad'}"><i></i>${smtp.configured ? '已配置' : '未配置'}</span></div>
+        <form id="smtpForm" class="grid">
+          <div><label>SMTP 服务器</label><input name="host" value="${esc(smtp.host || '')}" placeholder="smtp.gmail.com"></div>
+          <div><label>端口</label><input name="port" type="number" value="${esc(smtp.port || 587)}" min="1" max="65535"></div>
+          <div><label>账号</label><input name="user" value="${esc(smtp.user || '')}" placeholder="you@gmail.com"></div>
+          <div><label>密码 / 应用专用密码</label><input name="password" type="password" placeholder="${smtp.password_set ? '已设置，留空不修改' : '应用专用密码'}"></div>
+          <div><label>发件人地址</label><input name="from_addr" value="${esc(smtp.from_addr || '')}" placeholder="留空则用账号"></div>
+          <div><label>加密方式</label><select name="ssl"><option value="0"${smtp.ssl ? '' : ' selected'}>STARTTLS（587）</option><option value="1"${smtp.ssl ? ' selected' : ''}>SSL（465）</option></select></div>
+          <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存</button><button type="button" class="secondary" onclick="sendSmtpTest()">发送测试邮件</button></div>
+        </form>
+      </section>`;
+}
+
+function adminBackupCardHtml(r2, r2Status, r2Source){
+  return `<section class="card admin-backup-card">
+        <div class="section-title"><div><div class="section-kicker">BACKUP</div><h2>${stIcon('backup')}备份与恢复</h2></div><span class="section-count">R2 ${r2.configured ? '已配置' : '未配置'}</span></div>
+        <div class="ops-list">
+          <div class="ops-item"><div class="label">恢复全量备份</div><p class="row"><input id="restoreBackupFile" type="file" accept=".zip,application/zip"><button class="danger" onclick="restoreFullBackup()">恢复备份</button></p><p class="muted small">会要求输入 RESTORE，并在恢复前自动保存当前备份。</p></div>
+          <div class="ops-item"><div class="label">Cloudflare R2</div><p class="muted small">${r2Status} · ${esc(r2Source)}</p><p class="row"><button class="secondary" onclick="backupToR2()">上传备份到 R2</button></p></div>
+        </div>
+      </section>`;
+}
+
+function adminR2CardHtml(r2, r2Status, r2Source){
+  return `<section class="card"><div class="section-title"><h2>${stIcon('cloud')}Cloudflare R2 备份配置</h2><p>${r2Status} · ${esc(r2Source)}</p></div>
+      <form id="r2ConfigForm" class="grid r2-form">
+        <div><label>Account ID</label><input name="account_id" value="${esc(r2.account_id || '')}" placeholder="Cloudflare Account ID"></div>
+        <div><label>Access Key ID</label><input name="access_key_id" value="${esc(r2.access_key_id || '')}" placeholder="R2 API Token Access Key ID"></div>
+        <div><label>Secret Access Key</label><input name="secret_access_key" type="password" placeholder="${r2.secret_set ? '已设置，留空则不修改' : 'R2 Secret Access Key'}"></div>
+        <div><label>Bucket</label><input name="bucket" value="${esc(r2.bucket || '')}" placeholder="bucket-name"></div>
+        <div><label>备份目录 Prefix</label><input name="prefix" value="${esc(r2.prefix || 'frp-manager-lite/backups')}" placeholder="frp-manager-lite/backups"></div>
+        <div class="form-actions"><button>保存 R2 配置</button><button type="button" class="secondary" onclick="backupToR2()">保存后上传备份</button></div>
+      </form>
+      <p class="muted small">配置保存在本面板数据库中；Secret 不会明文回显。已有环境变量配置仍可作为兼容兜底。</p>
+    </section>`;
+}
+
+function adminFrpcModalHtml(frpcUserOptions){
+  return `<div id="adminFrpcModal" class="modal-backdrop${adminFrpcModalOpen ? '' : ' hidden'}" role="dialog" aria-modal="true" aria-labelledby="adminFrpcModalTitle">
+      <section class="modal-page card admin-frpc-modal">
+        <div class="section-title modal-title"><div><h2 id="adminFrpcModalTitle">为用户配置并下载 frpc</h2><p>选择普通用户，可一次添加多条隧道；TCP/UDP 公网端口从该用户已分配端口中选择。</p></div><button type="button" class="secondary modal-close" onclick="closeAdminFrpcModal()" aria-label="关闭 frpc 配置">关闭 ×</button></div>
+        ${frpcUserOptions ? `<form id="adminFrpcForm">
+          <div class="grid"><div><label>用户</label><select name="user_id" required onchange="saveAdminFrpcDraft(); renderAdminFrpcRows(); renderAdminDeployScriptAddress();">${frpcUserOptions}</select></div></div>
+          <div id="adminDeployScriptAddress">${adminDeployScriptAddressHtml()}</div>
+          <div id="adminFrpcRows" class="admin-frpc-rows"></div>
+          <div class="form-actions"><button>创建隧道并下载</button><button type="button" class="secondary" onclick="addAdminFrpcRow()">添加一条隧道</button><button type="button" class="secondary" onclick="downloadAdminFrpcOnly()">只下载现有配置</button></div>
+        </form>` : '<p class="muted">暂无普通用户，先创建用户后再下载 frpc 配置。</p>'}
+      </section>
+    </div>`;
+}
+
+function wireAdminSettingsForms(){
+  const r2Form = document.querySelector('#r2ConfigForm');
+  if(r2Form) r2Form.onsubmit = saveR2Config;
+  const setupKeyForm = document.querySelector('#setupKeyForm');
+  if(setupKeyForm){
+    setupKeyForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const val = String(new FormData(e.target).get('setup_key') || '').trim();
+      try{
+        const r = await api('/api/admin/setup-key', {method:'POST', body:{setup_key: val}});
+        show(r.message || '已保存');
+        await reloadAdminCurrentPage();
+      }catch(err){ show(err.message, true); }
+    };
+  }
+  const smtpForm = document.querySelector('#smtpForm');
+  if(smtpForm){
+    smtpForm.onsubmit = async (e) => {
+      e.preventDefault();
+      try{
+        const r = await api('/api/admin/smtp-config', {method:'POST', body:Object.fromEntries(new FormData(e.target))});
+        show(r.message || '邮件设置已保存');
+        await reloadAdminCurrentPage();
+      }catch(err){ show(err.message, true); }
+    };
+  }
+  const adminFrpcForm = document.querySelector('#adminFrpcForm');
+  if(adminFrpcForm){ adminFrpcForm.onsubmit = submitAdminFrpc; renderAdminDeployScriptAddress(); renderAdminFrpcRows(); }
+}
+
+async function loadAdminSettings(){
+  hideFlash();
+  clearAdminDashboardTimer();
+  adminCurrentPage = 'settings';
+  setNav();
+  let data;
+  try{ data = await api('/api/admin/dashboard'); }
+  catch(err){
+    if(err.message === 'unauthorized') return renderLogin();
+    show(err.message, true);
+    return;
+  }
+  const smtp = data.smtp || {}; adminSmtp = smtp;
+  const r2 = data.r2 || {};
+  const setupKeySourceLabel = data.setup_key_source === 'db' ? '面板自定义' : (data.setup_key_source === 'env' ? '环境变量 FML_SETUP_KEY' : '未设置');
+  const setupHtml = `
+    <div class="ops-item"><div class="label">一键添加节点密钥</div><form id="setupKeyForm" class="row setup-key-form"><input name="setup_key" value="${esc(data.setup_key || '')}" placeholder="自定义密钥（留空则清除，回退到环境变量）" autocomplete="off" spellcheck="false"><button type="submit">保存</button><button type="button" class="secondary" onclick="copySetupKey()">复制</button></form><p class="muted small">当前来源：${setupKeySourceLabel}；在新机器运行添加节点脚本时输入此密钥。</p></div>`;
+  const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
+  const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
+  const frpcUsers = data.frpc_users || [];
+  adminFrpcUsers = frpcUsers;
+  window.adminProxyTypeOptions = data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux'];
+  const frpcUserOptions = frpcUsers.map(u => `<option value="${u.id}">${esc(u.username)} · ${esc(u.node_region || '-')} / ${esc(u.node_name || '-')} · 端口 ${u.port_count || 0} · 可用 ${(u.available_ports || []).length} · 隧道 ${u.tunnel_count || 0}</option>`).join('');
+  app.innerHTML = appLayoutHtml(`
+    <div class="admin-settings-grid">
+      ${adminOpsCardHtml(setupHtml)}
+      ${adminSmtpCardHtml(smtp)}
+      ${adminBackupCardHtml(r2, r2Status, r2Source)}
+    </div>
+    ${adminR2CardHtml(r2, r2Status, r2Source)}
+    ${adminFrpcModalHtml(frpcUserOptions)}
+  `, 'admin-settings', '设置');
+  wireAdminSettingsForms();
+}
+
 async function loadAdminDashboard(auto=false){
   hideFlash();
   clearAdminDashboardTimer();
+  adminCurrentPage = 'dashboard';
   let data;
   try{ data = await api('/api/admin/dashboard'); }
   catch(err){
@@ -1981,6 +2217,7 @@ async function loadAdminDashboard(auto=false){
   const portStats = data.port_stats || {};
   const userStats = data.user_stats || {};
   const host = data.host || {};
+  const smtp = data.smtp || {}; adminSmtp = smtp;
   const r2 = data.r2 || {};
   const usedPorts = Number(portStats.used || 0);
   const totalPorts = Number(portStats.total || 0);
@@ -2039,15 +2276,7 @@ async function loadAdminDashboard(auto=false){
           <button class="quick-action" onclick="loadAdmin('health')"><span class="quick-action-icon">${QICON_SERVER}</span><b>节点健康</b><small>连通性检查</small></button>
           <button class="quick-action" onclick="loadAdminProxies()"><span class="quick-action-icon">${QICON_TUNNEL}</span><b>映射监控</b><small>隧道状态</small></button>
           <button class="quick-action" onclick="loadAdmin('risk')"><span class="quick-action-icon">${QICON_RISK}</span><b>风控审计</b><small>登录与封禁</small></button>
-        </div>
-      </section>
-
-      <section class="card admin-ops-card">
-        <div class="section-title"><div><div class="section-kicker">OPERATIONS</div><h2>${stIcon('tools')}运维入口</h2></div></div>
-        <div class="ops-list">
-          ${setupHtml}
-          <div class="ops-item"><div class="label">下载模块</div><p class="muted small">为普通用户生成 frpc.toml 与 deploy-frpc.sh。</p><p class="row"><button onclick="openAdminFrpcModal()">为用户生成配置</button></p></div>
-          <div class="ops-item"><div class="label">全量备份</div><p class="muted small">导出数据库与前端配置文件。</p><p class="row"><a class="btn" href="/admin/backup/full.zip">下载全量备份</a></p></div>
+          <button class="quick-action" onclick="loadAdminSettings()"><span class="quick-action-icon">${QICON_SETTINGS}</span><b>设置</b><small>运维 · 邮件 · 备份</small></button>
         </div>
       </section>
 
@@ -2065,57 +2294,10 @@ async function loadAdminDashboard(auto=false){
           <div><span>封禁记录</span><b>${data.ban_count || 0}</b></div>
         </div>
       </section>
-
-      <section class="card admin-backup-card">
-        <div class="section-title"><div><div class="section-kicker">BACKUP</div><h2>${stIcon('backup')}备份与恢复</h2></div><span class="section-count">R2 ${r2.configured ? '已配置' : '未配置'}</span></div>
-        <div class="ops-list">
-          <div class="ops-item"><div class="label">恢复全量备份</div><p class="row"><input id="restoreBackupFile" type="file" accept=".zip,application/zip"><button class="danger" onclick="restoreFullBackup()">恢复备份</button></p><p class="muted small">会要求输入 RESTORE，并在恢复前自动保存当前备份。</p></div>
-          <div class="ops-item"><div class="label">Cloudflare R2</div><p class="muted small">${r2Status} · ${esc(r2Source)}</p><p class="row"><button class="secondary" onclick="backupToR2()">上传备份到 R2</button></p></div>
-        </div>
-      </section>
     </div>
-
-    <div id="adminFrpcModal" class="modal-backdrop${adminFrpcModalOpen ? '' : ' hidden'}" role="dialog" aria-modal="true" aria-labelledby="adminFrpcModalTitle">
-      <section class="modal-page card admin-frpc-modal">
-        <div class="section-title modal-title"><div><h2 id="adminFrpcModalTitle">为用户配置并下载 frpc</h2><p>选择普通用户，可一次添加多条隧道；TCP/UDP 公网端口从该用户已分配端口中选择。</p></div><button type="button" class="secondary modal-close" onclick="closeAdminFrpcModal()" aria-label="关闭 frpc 配置">关闭 ×</button></div>
-        ${frpcUserOptions ? `<form id="adminFrpcForm">
-          <div class="grid"><div><label>用户</label><select name="user_id" required onchange="saveAdminFrpcDraft(); renderAdminFrpcRows(); renderAdminDeployScriptAddress();">${frpcUserOptions}</select></div></div>
-          <div id="adminDeployScriptAddress">${adminDeployScriptAddressHtml()}</div>
-          <div id="adminFrpcRows" class="admin-frpc-rows"></div>
-          <div class="form-actions"><button>创建隧道并下载</button><button type="button" class="secondary" onclick="addAdminFrpcRow()">添加一条隧道</button><button type="button" class="secondary" onclick="downloadAdminFrpcOnly()">只下载现有配置</button></div>
-        </form>` : '<p class="muted">暂无普通用户，先创建用户后再下载 frpc 配置。</p>'}
-      </section>
-    </div>
-
-    <section class="card"><div class="section-title"><h2>${stIcon('cloud')}Cloudflare R2 备份配置</h2><p>${r2Status} · ${esc(r2Source)}</p></div>
-      <form id="r2ConfigForm" class="grid r2-form">
-        <div><label>Account ID</label><input name="account_id" value="${esc(r2.account_id || '')}" placeholder="Cloudflare Account ID"></div>
-        <div><label>Access Key ID</label><input name="access_key_id" value="${esc(r2.access_key_id || '')}" placeholder="R2 API Token Access Key ID"></div>
-        <div><label>Secret Access Key</label><input name="secret_access_key" type="password" placeholder="${r2.secret_set ? '已设置，留空则不修改' : 'R2 Secret Access Key'}"></div>
-        <div><label>Bucket</label><input name="bucket" value="${esc(r2.bucket || '')}" placeholder="bucket-name"></div>
-        <div><label>备份目录 Prefix</label><input name="prefix" value="${esc(r2.prefix || 'frp-manager-lite/backups')}" placeholder="frp-manager-lite/backups"></div>
-        <div class="form-actions"><button>保存 R2 配置</button><button type="button" class="secondary" onclick="backupToR2()">保存后上传备份</button></div>
-      </form>
-      <p class="muted small">配置保存在本面板数据库中；Secret 不会明文回显。已有环境变量配置仍可作为兼容兜底。</p>
-    </section>`, 'admin-dashboard', '运行总览');
+    `, 'admin-dashboard', '运行总览');
   adminHostHistory = hostHistory;
   renderHostCharts();
-  const r2Form = document.querySelector('#r2ConfigForm');
-  if(r2Form) r2Form.onsubmit = saveR2Config;
-  const setupKeyForm = document.querySelector('#setupKeyForm');
-  if(setupKeyForm){
-    setupKeyForm.onsubmit = async (e) => {
-      e.preventDefault();
-      const val = String(new FormData(e.target).get('setup_key') || '').trim();
-      try{
-        const r = await api('/api/admin/setup-key', {method:'POST', body:{setup_key: val}});
-        show(r.message || '已保存');
-        await loadAdminDashboard();
-      }catch(err){ show(err.message, true); }
-    };
-  }
-  const adminFrpcForm = document.querySelector('#adminFrpcForm');
-  if(adminFrpcForm){ adminFrpcForm.onsubmit = submitAdminFrpc; renderAdminDeployScriptAddress(); renderAdminFrpcRows(); }
   adminDashboardTimer = setTimeout(() => loadAdminDashboard(true), refreshSeconds * 1000);
 }
 
@@ -2142,6 +2324,20 @@ function closePortsModal(){ document.getElementById('portsModal')?.classList.add
 function showLegalNotice(){ const m = document.getElementById('legalNoticeModal'); if(m) m.classList.remove('hidden'); }
 function closeLegalNotice(){ document.getElementById('legalNoticeModal')?.classList.add('hidden'); }
 document.addEventListener('keydown', (e) => { if(e.key === 'Escape') closePortsModal(); });
+function initUserEmailForm(){
+  const form = document.querySelector('#userEmailForm');
+  if(!form) return;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const email = String(new FormData(form).get('email') || '').trim();
+    try{
+      const r = await api('/api/user/email', {method:'POST', body:{email}});
+      show(r.message || '邮箱已更新');
+      await loadDashboard('profile');
+    }catch(err){ show(err.message, true); }
+  };
+}
+
 function initRenewForm(){
   const form = document.querySelector('#renewForm');
   if(!form) return;

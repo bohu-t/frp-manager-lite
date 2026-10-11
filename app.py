@@ -213,6 +213,126 @@ def setup_key_source() -> str:
     return "env" if FML_SETUP_KEY else "none"
 
 
+def smtp_config(conn: sqlite3.Connection) -> dict[str, Any]:
+    return {
+        "host": setting_get(conn, "smtp_host", ""),
+        "port": int(setting_get(conn, "smtp_port", "0") or 0),
+        "user": setting_get(conn, "smtp_user", ""),
+        "password": setting_get(conn, "smtp_password", ""),
+        "from_addr": setting_get(conn, "smtp_from", ""),
+        "ssl": setting_get(conn, "smtp_ssl", "1") == "1",
+    }
+
+
+def smtp_configured(conn: sqlite3.Connection) -> bool:
+    c = smtp_config(conn)
+    return bool(c["host"] and c["user"] and c["password"])
+
+
+def smtp_public(cfg: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "host": cfg.get("host", ""),
+        "port": cfg.get("port", 0),
+        "user": cfg.get("user", ""),
+        "from_addr": cfg.get("from_addr", ""),
+        "ssl": bool(cfg.get("ssl")),
+        "password_set": bool(cfg.get("password")),
+        "configured": bool(cfg.get("host") and cfg.get("user") and cfg.get("password")),
+    }
+
+
+def mask_email(addr: str) -> str:
+    addr = str(addr or "")
+    if "@" not in addr:
+        return addr
+    name, _, dom = addr.partition("@")
+    masked = name[:2] + "*" * max(0, len(name) - 2) if len(name) > 2 else name[:1] + "*"
+    return f"{masked}@{dom}"
+
+
+def send_email(to_addr: str, subject: str, body: str) -> tuple[bool, str]:
+    try:
+        with db() as conn:
+            cfg = smtp_config(conn)
+    except Exception as e:
+        return False, f"读取邮件配置失败：{e}"
+    if not (cfg["host"] and cfg["user"] and cfg["password"]):
+        return False, "邮件服务未配置"
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.header import Header
+    from email.utils import formataddr
+    port = cfg["port"] or (465 if cfg["ssl"] else 587)
+    sender = cfg["from_addr"] or cfg["user"]
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = Header(subject, "utf-8")
+    msg["From"] = formataddr(("Frp 管理台", sender))
+    msg["To"] = to_addr
+    try:
+        if cfg["ssl"]:
+            server = smtplib.SMTP_SSL(cfg["host"], port, timeout=15)
+        else:
+            server = smtplib.SMTP(cfg["host"], port, timeout=15)
+            server.ehlo()
+            try:
+                server.starttls()
+            except Exception:
+                pass
+        server.login(cfg["user"], cfg["password"])
+        server.sendmail(sender, [to_addr], msg.as_string())
+        server.quit()
+        return True, "已发送"
+    except Exception as e:
+        return False, f"发送失败：{e.__class__.__name__}: {e}"
+
+
+def create_email_code(username: str, email: str) -> str:
+    code = f"{secrets.randbelow(1000000):06d}"
+    with db() as conn:
+        conn.execute("DELETE FROM email_codes WHERE username=? OR expires_at<=?", (username, now()))
+        conn.execute("INSERT INTO email_codes(username, email, code, expires_at, attempts, used, created_at) VALUES(?,?,?,?,0,0,?)",
+                     (username, email, code, now() + 600, now()))
+    return code
+
+
+def verify_email_code(username: str, code: str) -> tuple[bool, str]:
+    code = str(code or "").strip()
+    with db() as conn:
+        row = conn.execute("SELECT * FROM email_codes WHERE username=? ORDER BY id DESC LIMIT 1", (username,)).fetchone()
+        if not row:
+            return False, "请先获取验证码"
+        if int(row["used"]):
+            return False, "验证码已使用，请重新获取"
+        if int(row["expires_at"]) <= now():
+            return False, "验证码已过期，请重新获取"
+        if int(row["attempts"]) >= 5:
+            return False, "验证码尝试次数过多，请重新获取"
+        if not hmac.compare_digest(str(row["code"]), code):
+            conn.execute("UPDATE email_codes SET attempts=attempts+1 WHERE id=?", (row["id"],))
+            return False, "验证码错误"
+        conn.execute("UPDATE email_codes SET used=1 WHERE id=?", (row["id"],))
+    return True, "ok"
+
+
+def reset_password_by_code(username: str, code: str, new_password: str) -> tuple[bool, str]:
+    username = str(username or "").strip()
+    if not username:
+        return False, "请输入用户名"
+    if len(new_password) < 6:
+        return False, "新密码至少 6 位"
+    ok, msg = verify_email_code(username, code)
+    if not ok:
+        return False, msg
+    with db() as conn:
+        urow = conn.execute("SELECT id FROM users WHERE username=? AND role!='admin'", (username,)).fetchone()
+        if not urow:
+            return False, "用户不存在或不允许重置管理员密码"
+        conn.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash(new_password), urow["id"]))
+        conn.execute("DELETE FROM sessions WHERE user_id=?", (urow["id"],))
+    audit("password_reset", None, None, None, "", f"用户 {username} 通过邮箱验证码修改密码")
+    return True, "密码已重置，请用新密码登录"
+
+
 def password_hash(password: str) -> str:
     salt = secrets.token_bytes(16)
     rounds = 180_000
@@ -398,6 +518,7 @@ def public_user(user: sqlite3.Row) -> dict[str, Any]:
         "role": user["role"],
         "token": user["token"],
         "invite_key_used": row_val(user, "invite_key_used"),
+        "email": row_val(user, "email", "") or "",
         "max_ports": user["max_ports"],
         "traffic_limit_bytes": int(row_val(user, "traffic_limit_bytes", 0) or 0),
         "active": bool(user["active"]),
@@ -521,6 +642,8 @@ def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int | None) 
             conn.execute("UPDATE users SET node_id=? WHERE node_id IS NULL", (default_node_id,))
     if "invite_key_used" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN invite_key_used TEXT NOT NULL DEFAULT ''")
+    if "email" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
     if "traffic_limit_bytes" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN traffic_limit_bytes INTEGER NOT NULL DEFAULT 0")
     if "bandwidth_limit_kbps" not in user_cols:
@@ -1168,6 +1291,7 @@ def init_db() -> None:
                 role TEXT NOT NULL DEFAULT 'user',
                 token TEXT NOT NULL UNIQUE,
                 invite_key_used TEXT NOT NULL DEFAULT '',
+                email TEXT NOT NULL DEFAULT '',
                 max_ports INTEGER NOT NULL DEFAULT 5,
                 traffic_limit_bytes INTEGER NOT NULL DEFAULT 0,
                 bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0,
@@ -1256,6 +1380,16 @@ def init_db() -> None:
                 created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
                 created_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS email_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                email TEXT NOT NULL DEFAULT '',
+                code TEXT NOT NULL,
+                expires_at INTEGER NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                used INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS software_license (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 license_key TEXT NOT NULL,
@@ -1294,6 +1428,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0")
         if "invite_key_used" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN invite_key_used TEXT NOT NULL DEFAULT ''")
+        if "email" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
         if "traffic_limit_bytes" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN traffic_limit_bytes INTEGER NOT NULL DEFAULT 0")
         if "bandwidth_limit_kbps" not in cols:
@@ -1526,7 +1662,9 @@ def create_invite_key(note: str, max_uses: int, max_ports: int, user_expires_day
 def create_invite_keys_batch(note: str, max_uses: int, max_ports: int, user_expires_days: int, key_expires_days: int, created_by: int, count: int, traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0, kind: str = "register") -> tuple[bool, str, list[str]]:
     note = note.strip()[:120]
     max_uses = 1  # 注册/续期密钥按业务规则只能使用一次
-    kind = "renew" if str(kind).lower() == "renew" else "register"
+    kind = str(kind).lower()
+    if kind not in ("register", "renew", "reset"):
+        kind = "register"
     if count < 1 or count > 500:
         return False, "单次生成数量必须在 1-500 之间", []
     if kind == "register" and (max_ports < 1 or max_ports > 100):
@@ -1539,7 +1677,7 @@ def create_invite_keys_batch(note: str, max_uses: int, max_ports: int, user_expi
         return False, "流量/网速限制不能小于 0", []
     keys: list[str] = []
     key_expires_at = 0 if key_expires_days == 0 else now() + key_expires_days * 86400
-    prefix = "RNW-" if kind == "renew" else "FML-"
+    prefix = {"renew": "RNW-", "reset": "RST-"}.get(kind, "FML-")
     with db() as conn:
         for _ in range(count):
             key = prefix + secrets.token_urlsafe(18).replace("-", "").replace("_", "")[:24].upper()
@@ -1594,6 +1732,38 @@ def register_with_invite(username: str, password: str, invite_key: str, node_id:
             conn.rollback()
             return False, "注册密钥已使用"
     return True, f"注册成功，地区节点：{node['region']} / {node['name']}，已分配 {max_ports} 个端口，到期时间：{fmt_time(user_expires_at)}"
+
+
+def reset_password_with_key(username: str, new_password: str, raw_key: str) -> tuple[bool, str]:
+    username = str(username or "").strip()
+    key = str(raw_key or "").strip().upper()
+    if not username:
+        return False, "请输入用户名"
+    if len(new_password) < 6:
+        return False, "新密码至少 6 位"
+    if not key:
+        return False, "请输入重置密钥"
+    with db() as conn:
+        row = conn.execute("SELECT * FROM invite_keys WHERE key=?", (key,)).fetchone()
+        if not row or (row_val(row, "kind", "register") or "register") != "reset":
+            return False, "重置密钥无效"
+        if row["used_count"] >= 1:
+            return False, "重置密钥已使用"
+        if not row["active"]:
+            return False, "重置密钥已停用"
+        if row["expires_at"] and row["expires_at"] <= now():
+            return False, "重置密钥已过期"
+        urow = conn.execute("SELECT id FROM users WHERE username=? AND role!='admin'", (username,)).fetchone()
+        if not urow:
+            return False, "用户不存在或不允许重置管理员密码"
+        claimed = conn.execute("UPDATE invite_keys SET used_count=used_count+1, active=0 WHERE id=? AND used_count=0 AND active=1", (row["id"],)).rowcount
+        if claimed != 1:
+            conn.rollback()
+            return False, "重置密钥已使用"
+        conn.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash(new_password), urow["id"]))
+        conn.execute("DELETE FROM sessions WHERE user_id=?", (urow["id"],))
+    audit("password_reset", None, None, None, "", f"用户 {username} 通过重置密钥修改密码")
+    return True, "密码已重置，请用新密码登录"
 
 
 def renew_user_with_key(user: sqlite3.Row, raw_key: str) -> tuple[bool, str]:
@@ -2635,16 +2805,17 @@ class Handler(BaseHTTPRequestHandler):
         with db() as conn:
             for k in conn.execute("SELECT * FROM invite_keys WHERE active=1 AND used_count=0 AND used_count < max_uses AND (expires_at=0 OR expires_at>?) ORDER BY id DESC", (now(),)):
                 kind = row_val(k, "kind", "register") or "register"
-                is_renew = kind == "renew"
+                is_register = kind == "register"
+                kind_label = {"register": "注册", "renew": "续期", "reset": "重置"}.get(kind, "注册")
                 w.writerow([
                     k["key"],
-                    "续期" if is_renew else "注册",
+                    kind_label,
                     k["note"],
                     k["used_count"],
                     k["max_uses"],
-                    "-" if is_renew else k["max_ports"],
-                    "-" if is_renew else round(int(row_val(k, "traffic_limit_bytes", 0) or 0) / 1024 / 1024 / 1024, 2),
-                    "-" if is_renew else round(int(row_val(k, "bandwidth_limit_kbps", 0) or 0) / 1024, 2),
+                    k["max_ports"] if is_register else "-",
+                    round(int(row_val(k, "traffic_limit_bytes", 0) or 0) / 1024 / 1024 / 1024, 2) if is_register else "-",
+                    round(int(row_val(k, "bandwidth_limit_kbps", 0) or 0) / 1024, 2) if is_register else "-",
                     k["user_expires_days"],
                     "启用" if k["active"] else "停用",
                     fmt_time(k["expires_at"]),
@@ -2848,7 +3019,7 @@ class Handler(BaseHTTPRequestHandler):
                             "active": bool(k["active"]), "expires_at": k["expires_at"], "expires_text": fmt_time(k["expires_at"]),
                             "expired": bool(k["expires_at"] and k["expires_at"] <= now()), "activated_at": k["activated_at"], "last_check_at": k["last_check_at"], "created_at": k["created_at"],
                         })
-            self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "invite_keys": invite_keys, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": effective_setup_key(), "has_setup_key": bool(effective_setup_key()), "setup_key_source": setup_key_source()})
+            self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "invite_keys": invite_keys, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": effective_setup_key(), "has_setup_key": bool(effective_setup_key()), "setup_key_source": setup_key_source(), "smtp": smtp_public(smtp_config(conn))})
             return
         if path == "/api/admin/frps-proxies":
             if not self.require_admin():
@@ -2949,6 +3120,7 @@ class Handler(BaseHTTPRequestHandler):
                 "setup_key": effective_setup_key(),
                 "has_setup_key": bool(effective_setup_key()),
                 "setup_key_source": setup_key_source(),
+                "smtp": smtp_public(smtp_config(conn)),
                 "r2": r2_public,
                 "r2_configured": r2_public["configured"],
                 "frpc_users": frpc_users,
@@ -3024,6 +3196,53 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True}, headers={"Set-Cookie": "fml_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0"})
             return
 
+        if path == "/api/password/reset":
+            ok_rate, retry_after = rate_limit_check(f"pwreset:{client_ip(self)}", REGISTER_RATE_LIMIT)
+            if not ok_rate:
+                self.send_json({"ok": False, "error": f"操作过于频繁，请 {retry_after} 秒后再试", "retry_after": retry_after}, 429)
+                return
+            ok, msg = reset_password_with_key(str(data.get("username", "")), str(data.get("password", "")), str(data.get("reset_key", "")))
+            self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg}, 200 if ok else 400)
+            return
+
+        if path == "/api/password/request-code":
+            ok_rate, retry_after = rate_limit_check(f"pwcode:{client_ip(self)}", REGISTER_RATE_LIMIT)
+            if not ok_rate:
+                self.send_json({"ok": False, "error": f"操作过于频繁，请 {retry_after} 秒后再试", "retry_after": retry_after}, 429)
+                return
+            username = str(data.get("username", "")).strip()
+            with db() as conn:
+                urow = conn.execute("SELECT id, username, email FROM users WHERE username=? AND role!='admin'", (username,)).fetchone()
+                last = conn.execute("SELECT created_at FROM email_codes WHERE username=? ORDER BY id DESC LIMIT 1", (username,)).fetchone() if username else None
+                if not smtp_configured(conn):
+                    self.send_json({"ok": False, "error": "邮件服务未配置，请联系管理员"}, 400)
+                    return
+            if not urow or not str(urow["email"] or "").strip():
+                self.send_json({"ok": False, "error": "账号不存在或未绑定邮箱，请联系管理员"}, 400)
+                return
+            if last and now() - int(last["created_at"]) < 60:
+                self.send_json({"ok": False, "error": f"验证码已发送，请 {60 - (now() - int(last['created_at']))} 秒后再试"}, 429)
+                return
+            code = create_email_code(username, str(urow["email"]).strip())
+            ok, msg = send_email(str(urow["email"]).strip(), "【Frp 管理台】密码重置验证码",
+                                 f"您的验证码是：{code}（10 分钟内有效）。如果不是您本人操作，请忽略本邮件。")
+            if not ok:
+                self.send_json({"ok": False, "error": msg}, 500)
+                return
+            masked = mask_email(str(urow["email"]).strip())
+            audit("password_code_sent", None, None, None, "", f"向 {masked} 发送密码重置验证码")
+            self.send_json({"ok": True, "message": f"验证码已发送至 {masked}", "email": masked})
+            return
+
+        if path == "/api/password/reset-by-code":
+            ok_rate, retry_after = rate_limit_check(f"pwcode2:{client_ip(self)}", REGISTER_RATE_LIMIT)
+            if not ok_rate:
+                self.send_json({"ok": False, "error": f"操作过于频繁，请 {retry_after} 秒后再试", "retry_after": retry_after}, 429)
+                return
+            ok, msg = reset_password_by_code(str(data.get("username", "")), str(data.get("code", "")), str(data.get("password", "")))
+            self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg}, 200 if ok else 400)
+            return
+
         user = self.require_user()
         if not user:
             return
@@ -3055,6 +3274,20 @@ class Handler(BaseHTTPRequestHandler):
                 return
             ok, msg = renew_user_with_key(user, str(data.get("key", "")))
             self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg}, 200 if ok else 400)
+            return
+
+        if path == "/api/user/email":
+            if user["role"] == "admin":
+                self.send_json({"ok": False, "error": "管理员账号无需设置邮箱"}, 403)
+                return
+            email = str(data.get("email", "")).strip()[:120]
+            if email and "@" not in email:
+                self.send_json({"ok": False, "error": "邮箱格式不正确"}, 400)
+                return
+            with db() as conn:
+                conn.execute("UPDATE users SET email=? WHERE id=?", (email, user["id"]))
+            audit("user_email_update", user, None, None, "", f"设置邮箱 {mask_email(email) if email else '（清除）'}")
+            self.send_json({"ok": True, "message": "邮箱已更新"})
             return
 
         if path == "/api/user/node/switch":
@@ -3122,6 +3355,12 @@ class Handler(BaseHTTPRequestHandler):
             self.admin_r2_config_save(user, data)
         elif path == "/api/admin/setup-key":
             self.admin_setup_key(user, data)
+        elif path == "/api/admin/smtp-config":
+            self.admin_smtp_config_save(user, data)
+        elif path == "/api/admin/smtp-test":
+            self.admin_smtp_test(user, data)
+        elif path == "/api/admin/users/email":
+            self.admin_set_user_email(data)
         elif path == "/api/admin/backup/r2":
             self.admin_backup_r2(user)
         elif path == "/api/admin/backup/restore":
@@ -3407,6 +3646,56 @@ class Handler(BaseHTTPRequestHandler):
             setting_set(conn, "setup_key", key)
         audit("setup_key_update", admin, None, None, "", "设置一键添加节点密钥" if key else "清除一键添加节点密钥")
         self.send_json({"ok": True, "message": "已保存自定义密钥" if key else "已清除（回退到环境变量 FML_SETUP_KEY）", "setup_key": effective_setup_key(), "has_setup_key": bool(effective_setup_key()), "setup_key_source": setup_key_source()})
+
+    def admin_smtp_config_save(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        host = str(data.get("host", "")).strip()
+        user = str(data.get("user", "")).strip()
+        from_addr = str(data.get("from_addr", "")).strip()
+        password = str(data.get("password", ""))
+        try:
+            port = int(data.get("port", 0) or 0)
+        except (TypeError, ValueError):
+            port = 0
+        ssl_flag = "1" if str(data.get("ssl", "1")) in ("1", "true", "True", "on") else "0"
+        with db() as conn:
+            setting_set(conn, "smtp_host", host)
+            setting_set(conn, "smtp_port", str(port))
+            setting_set(conn, "smtp_user", user)
+            setting_set(conn, "smtp_from", from_addr)
+            setting_set(conn, "smtp_ssl", ssl_flag)
+            if password:
+                setting_set(conn, "smtp_password", password)
+            cfg = smtp_config(conn)
+        audit("smtp_config_update", admin, None, None, "", f"更新邮件设置：{host}:{port} user={user}")
+        self.send_json({"ok": True, "message": "邮件设置已保存", "smtp": smtp_public(cfg)})
+
+    def admin_smtp_test(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        to_addr = str(data.get("to", "")).strip()
+        if not to_addr or "@" not in to_addr:
+            self.send_json({"ok": False, "error": "请填写有效的收件邮箱"}, 400)
+            return
+        ok, msg = send_email(to_addr, "【Frp 管理台】测试邮件", "这是一封测试邮件，说明邮件服务配置成功。")
+        self.send_json({"ok": ok, "message": "测试邮件已发送" if ok else None, "error": None if ok else msg}, 200 if ok else 400)
+
+    def admin_set_user_email(self, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        user_id = int(data.get("id", 0))
+        email = str(data.get("email", "")).strip()[:120]
+        if email and "@" not in email:
+            self.send_json({"ok": False, "error": "邮箱格式不正确"}, 400)
+            return
+        with db() as conn:
+            row = conn.execute("SELECT username FROM users WHERE id=? AND role!='admin'", (user_id,)).fetchone()
+            if not row:
+                self.send_json({"ok": False, "error": "用户不存在或不允许修改管理员"}, 404)
+                return
+            conn.execute("UPDATE users SET email=? WHERE id=?", (email, user_id))
+        self.send_json({"ok": True, "message": f"已更新 {row['username']} 的邮箱"})
 
     def admin_invite_create(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
         if not self.require_admin():
