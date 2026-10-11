@@ -7,6 +7,7 @@ behind Nginx/Caddy HTTPS in production.
 from __future__ import annotations
 
 import base64
+import collections
 import hashlib
 import hmac
 import io
@@ -28,6 +29,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 import urllib.parse
+import threading
 
 APP_NAME = "frp-manager-lite"
 APP_VERSION = os.getenv("FML_PANEL_VERSION", "1.0.4")  # 面板版本，不是 frp 版本
@@ -35,6 +37,12 @@ FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 DB_PATH = Path(os.getenv("FML_DB", BASE_DIR / "data.sqlite3"))
+# SQLite 性能调优：默认值在慢盘上会让每次写事务卡好几秒（见 db() 里的注释）。
+SQLITE_JOURNAL_MODES = {"WAL", "DELETE", "TRUNCATE", "PERSIST", "MEMORY", "OFF"}
+SQLITE_SYNCHRONOUS_LEVELS = {"OFF", "NORMAL", "FULL", "EXTRA"}
+SQLITE_JOURNAL_MODE = (os.getenv("FML_SQLITE_JOURNAL_MODE", "WAL") or "WAL").upper()
+SQLITE_SYNCHRONOUS = (os.getenv("FML_SQLITE_SYNCHRONOUS", "NORMAL") or "NORMAL").upper()
+SQLITE_BUSY_TIMEOUT = float(os.getenv("FML_SQLITE_BUSY_TIMEOUT", "10") or "10")
 HOST = os.getenv("FML_HOST", "127.0.0.1")
 PORT = int(os.getenv("FML_PORT", "8080"))
 PORT_START = int(os.getenv("FML_PORT_START", "20000"))
@@ -159,9 +167,26 @@ def record_val(record: sqlite3.Row | dict[str, Any], key: str, default: Any = ""
 
 def db() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=SQLITE_BUSY_TIMEOUT)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # 有些部署的 /data 存储 fsync 极慢（实测 0.5~1.0s/次）。SQLite 默认的
+    # journal_mode=delete + synchronous=FULL 每次写事务要 fsync 多次，导致
+    # 登录 / 退出 / 审计这类写操作卡 0.5~4 秒。改成 WAL + NORMAL 后 fsync 接近 0。
+    if SQLITE_JOURNAL_MODE in SQLITE_JOURNAL_MODES:
+        try:
+            conn.execute(f"PRAGMA journal_mode = {SQLITE_JOURNAL_MODE}")
+        except Exception:
+            pass
+    if SQLITE_SYNCHRONOUS in SQLITE_SYNCHRONOUS_LEVELS:
+        try:
+            conn.execute(f"PRAGMA synchronous = {SQLITE_SYNCHRONOUS}")
+        except Exception:
+            pass
+    try:
+        conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT}")
+    except Exception:
+        pass
     return conn
 
 
@@ -483,6 +508,8 @@ def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int | None) 
         conn.execute("ALTER TABLE invite_keys ADD COLUMN traffic_limit_bytes INTEGER NOT NULL DEFAULT 0")
     if "bandwidth_limit_kbps" not in invite_cols:
         conn.execute("ALTER TABLE invite_keys ADD COLUMN bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0")
+    if "kind" not in invite_cols:
+        conn.execute("ALTER TABLE invite_keys ADD COLUMN kind TEXT NOT NULL DEFAULT 'register'")
 
     port_cols = [r["name"] for r in conn.execute("PRAGMA table_info(ports)").fetchall()]
     if "node_id" not in port_cols or "id" not in port_cols:
@@ -807,6 +834,243 @@ def frps_user_dashboard(username: str, user: sqlite3.Row | None = None) -> dict[
         return {"enabled": False, "error": f"读取 frps dashboard 失败：{e.__class__.__name__}"}
 
 
+# --- Traffic history sampling & stats -------------------------------------------------
+TRAFFIC_SAMPLE_SECONDS = int(os.getenv("FML_TRAFFIC_SAMPLE_SECONDS", "300") or "300")
+TRAFFIC_RETAIN_DAYS = int(os.getenv("FML_TRAFFIC_RETAIN_DAYS", "45") or "45")
+
+def local_day_str(ts: int | None = None) -> str:
+    return time.strftime("%Y-%m-%d", time.localtime(ts if ts is not None else now()))
+
+def proxy_type_label(t: str) -> str:
+    return {"tcp": "TCP", "udp": "UDP", "http": "HTTP", "https": "HTTPS", "stcp": "STCP", "xtcp": "XTCP", "tcpmux": "TCPMUX"}.get(str(t or "").lower(), (str(t or "").upper() or "其他"))
+
+def sample_traffic_once() -> int:
+    """Snapshot per-user, per-proxy-type cumulative daily traffic from the node dashboards."""
+    try:
+        with db() as conn:
+            nodes = dashboard_nodes_for_user(conn)
+            if not nodes:
+                return 0
+            user_rows = conn.execute("SELECT id, username FROM users").fetchall()
+        id_by_name = {str(r["username"]): int(r["id"]) for r in user_rows}
+        proxies = frps_all_proxies(nodes)
+        if not proxies:
+            return 0
+        buckets: dict[tuple[str, str], int] = {}
+        for p in proxies:
+            uname = str(p.get("username") or "")
+            if uname not in id_by_name:
+                continue
+            typ = str(p.get("type") or "tcp")
+            key = (uname, typ)
+            buckets[key] = buckets.get(key, 0) + int(p.get("today_traffic_in") or 0) + int(p.get("today_traffic_out") or 0)
+        day = local_day_str()
+        ts = now()
+        inserted = 0
+        with db() as conn:
+            for (uname, typ), value in buckets.items():
+                uid = id_by_name[uname]
+                last = conn.execute("SELECT bytes FROM traffic_samples WHERE user_id=? AND day=? AND proxy_type=? ORDER BY ts DESC LIMIT 1", (uid, day, typ)).fetchone()
+                if last is not None and int(last["bytes"] or 0) == value:
+                    continue
+                conn.execute("INSERT INTO traffic_samples(user_id, username, day, proxy_type, bytes, ts) VALUES(?,?,?,?,?,?)", (uid, uname, day, typ, value, ts))
+                inserted += 1
+            conn.execute("DELETE FROM traffic_samples WHERE ts < ?", (now() - TRAFFIC_RETAIN_DAYS * 86400,))
+        return inserted
+    except Exception:
+        return 0
+
+_traffic_sampler_started = False
+
+def start_traffic_sampler() -> None:
+    global _traffic_sampler_started
+    if _traffic_sampler_started:
+        return
+    _traffic_sampler_started = True
+    def _loop() -> None:
+        time.sleep(15)
+        while True:
+            try:
+                sample_traffic_once()
+            except Exception:
+                pass
+            time.sleep(max(60, TRAFFIC_SAMPLE_SECONDS))
+    threading.Thread(target=_loop, name="traffic-sampler", daemon=True).start()
+
+
+# --- Host resource sampling (in-memory ring buffer powering 2D charts) ----------------
+HOST_SAMPLE_SECONDS = int(os.getenv("FML_HOST_SAMPLE_SECONDS", "30") or "30")
+HOST_SAMPLE_POINTS = int(os.getenv("FML_HOST_SAMPLE_POINTS", "60") or "60")
+_host_history_lock = threading.Lock()
+_host_history: "collections.deque[dict[str, Any]]" = collections.deque(maxlen=HOST_SAMPLE_POINTS)
+
+
+def host_sample_snapshot(stats: dict[str, Any] | None = None) -> dict[str, Any]:
+    s = stats if stats is not None else host_system_stats()
+    return {
+        "ts": now(),
+        "cpu": s.get("cpu_percent"),
+        "mem": s.get("memory_percent"),
+        "load1": s.get("load1"),
+    }
+
+
+def record_host_sample(stats: dict[str, Any] | None = None, min_interval: int = 0) -> bool:
+    """Append a host stats sample; skip when the newest sample is younger than min_interval."""
+    with _host_history_lock:
+        if min_interval and _host_history:
+            try:
+                if now() - int(_host_history[-1].get("ts") or 0) < min_interval:
+                    return False
+            except Exception:
+                pass
+        _host_history.append(host_sample_snapshot(stats))
+    return True
+
+
+def host_history() -> list[dict[str, Any]]:
+    with _host_history_lock:
+        return [dict(p) for p in _host_history]
+
+
+def host_stats_with_history() -> dict[str, Any]:
+    """host_system_stats() plus the recent sample ring buffer used by the admin charts."""
+    stats = host_system_stats()
+    record_host_sample(stats, min_interval=max(5, HOST_SAMPLE_SECONDS))
+    stats["history"] = host_history()
+    stats["sample_seconds"] = HOST_SAMPLE_SECONDS
+    stats["sample_points"] = HOST_SAMPLE_POINTS
+    return stats
+
+
+_host_sampler_started = False
+
+
+def start_host_sampler() -> None:
+    global _host_sampler_started
+    if _host_sampler_started:
+        return
+    _host_sampler_started = True
+
+    def _loop() -> None:
+        time.sleep(3)
+        while True:
+            try:
+                record_host_sample(None, min_interval=max(5, HOST_SAMPLE_SECONDS))
+            except Exception:
+                pass
+            time.sleep(max(5, HOST_SAMPLE_SECONDS))
+
+    threading.Thread(target=_loop, name="host-sampler", daemon=True).start()
+
+def traffic_stats_for_user(user: sqlite3.Row, range_key: str = "30d") -> dict[str, Any]:
+    if range_key not in {"today", "7d", "30d"}:
+        range_key = "30d"
+    uid = int(user["id"])
+    today = local_day_str()
+    with db() as conn:
+        source_ready = bool(dashboard_nodes_for_user(conn, user))
+        rows = conn.execute("SELECT day, proxy_type, bytes, ts FROM traffic_samples WHERE user_id=?", (uid,)).fetchall()
+    if range_key == "today":
+        type_hour: dict[str, dict[int, int]] = {}
+        for r in rows:
+            if r["day"] != today:
+                continue
+            h = time.localtime(int(r["ts"])).tm_hour
+            bucket = type_hour.setdefault(r["proxy_type"], {})
+            v = int(r["bytes"] or 0)
+            if v > bucket.get(h, 0):
+                bucket[h] = v
+        cum = [0] * 24
+        for bucket in type_hour.values():
+            run = 0
+            for h in range(24):
+                if bucket.get(h, 0) > run:
+                    run = bucket[h]
+                cum[h] += run
+        series = []
+        prev = 0
+        for h in range(24):
+            series.append({"label": f"{h:02d}:00", "short": f"{h:02d}", "bytes": max(0, cum[h] - prev)})
+            prev = cum[h]
+        unit = "小时"
+    else:
+        day_max: dict[str, int] = {}
+        for r in rows:
+            v = int(r["bytes"] or 0)
+            if v > day_max.get(r["day"], 0):
+                day_max[r["day"]] = v
+        count = 7 if range_key == "7d" else 30
+        base = now()
+        series = []
+        for i in range(count - 1, -1, -1):
+            d = local_day_str(base - i * 86400)
+            series.append({"label": d, "short": d[5:], "bytes": day_max.get(d, 0)})
+        unit = "天"
+    total = sum(int(p["bytes"]) for p in series)
+    peak = max([int(p["bytes"]) for p in series] or [0])
+    return {"ok": True, "range": range_key, "unit": unit, "enabled": source_ready, "has_data": total > 0, "total": total, "peak": peak, "series": series, "generated_at": now()}
+
+def traffic_protocols_for_user(user: sqlite3.Row, month: str = "") -> dict[str, Any]:
+    month = (month or "").strip()
+    if len(month) != 7 or month[4] != "-":
+        month = time.strftime("%Y-%m", time.localtime(now()))
+    uid = int(user["id"])
+    with db() as conn:
+        source_ready = bool(dashboard_nodes_for_user(conn, user))
+        rows = conn.execute("SELECT day, proxy_type, bytes FROM traffic_samples WHERE user_id=? AND day LIKE ?", (uid, month + "%")).fetchall()
+    day_type_max: dict[tuple[str, str], int] = {}
+    for r in rows:
+        key = (r["day"], r["proxy_type"])
+        v = int(r["bytes"] or 0)
+        if v > day_type_max.get(key, 0):
+            day_type_max[key] = v
+    per_type: dict[str, int] = {}
+    for (_day, typ), v in day_type_max.items():
+        per_type[typ] = per_type.get(typ, 0) + v
+    total = sum(per_type.values())
+    order = list(PROXY_TYPE_ORDER) + [t for t in per_type if t not in PROXY_TYPE_ORDER]
+    items = []
+    for t in order:
+        if t not in per_type:
+            continue
+        b = per_type[t]
+        items.append({"type": t, "label": proxy_type_label(t), "bytes": b, "percent": round(b * 100 / total, 1) if total else 0.0})
+    return {"ok": True, "enabled": source_ready, "has_data": total > 0, "month": month, "total": total, "items": items, "generated_at": now()}
+
+_ACTIVITY_META = {
+    "login": ("login", "登录"),
+    "logout": ("login", "退出登录"),
+    "tunnel_create": ("tunnel", "创建隧道"),
+    "admin_tunnel_create": ("tunnel", "创建隧道"),
+    "tunnel_delete": ("tunnel", "删除隧道"),
+    "tunnel_toggle": ("tunnel", "隧道开关"),
+    "user_node_switch": ("node", "切换节点"),
+    "user_ban": ("risk", "账号处理"),
+    "backup_download": ("backup", "下载备份"),
+    "software_license_activate": ("license", "激活授权"),
+}
+
+def user_activity_feed(user: sqlite3.Row, limit: int = 8) -> dict[str, Any]:
+    uid = int(user["id"])
+    limit = max(1, min(20, int(limit or 8)))
+    with db() as conn:
+        rows = conn.execute("SELECT event, proxy_type, remote_port, detail, created_at FROM audit_logs WHERE user_id=? ORDER BY id DESC LIMIT ?", (uid, limit)).fetchall()
+    items = []
+    for r in rows:
+        ev = str(r["event"] or "")
+        kind, title = _ACTIVITY_META.get(ev, ("default", ev or "动态"))
+        detail = str(r["detail"] or "")
+        items.append({"kind": kind, "title": title, "text": detail or title, "at": int(r["created_at"] or 0)})
+    try:
+        tv = traffic_stats_for_user(user, "today")
+        if tv.get("total"):
+            items.insert(0, {"kind": "traffic", "title": "流量使用", "bytes": int(tv["total"]), "at": now()})
+    except Exception:
+        pass
+    return {"ok": True, "items": items[:limit]}
+
+
 def user_today_traffic_bytes(username: str, user: sqlite3.Row | None = None) -> int | None:
     try:
         data = frps_user_dashboard(username, user)
@@ -913,6 +1177,17 @@ def init_db() -> None:
                 expires_at INTEGER NOT NULL,
                 created_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS traffic_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                username TEXT NOT NULL DEFAULT '',
+                day TEXT NOT NULL,
+                proxy_type TEXT NOT NULL DEFAULT '',
+                bytes INTEGER NOT NULL DEFAULT 0,
+                ts INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_traffic_user_ts ON traffic_samples(user_id, ts);
+            CREATE INDEX IF NOT EXISTS idx_traffic_user_day ON traffic_samples(user_id, day, proxy_type);
             CREATE TABLE IF NOT EXISTS csrf_tokens (
                 token TEXT PRIMARY KEY,
                 expires_at INTEGER NOT NULL,
@@ -945,6 +1220,7 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS invite_keys (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 key TEXT NOT NULL UNIQUE,
+                kind TEXT NOT NULL DEFAULT 'register',
                 note TEXT NOT NULL DEFAULT '',
                 max_uses INTEGER NOT NULL DEFAULT 1,
                 used_count INTEGER NOT NULL DEFAULT 0,
@@ -1007,6 +1283,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE invite_keys ADD COLUMN traffic_limit_bytes INTEGER NOT NULL DEFAULT 0")
         if "bandwidth_limit_kbps" not in invite_cols:
             conn.execute("ALTER TABLE invite_keys ADD COLUMN bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0")
+        if "kind" not in invite_cols:
+            conn.execute("ALTER TABLE invite_keys ADD COLUMN kind TEXT NOT NULL DEFAULT 'register'")
         # software_license.server_url migration
         sw_cols = {r["name"] for r in conn.execute("PRAGMA table_info(software_license)").fetchall()}
         if "server_url" not in sw_cols:
@@ -1222,27 +1500,29 @@ def create_invite_key(note: str, max_uses: int, max_ports: int, user_expires_day
     return True, "密钥已生成", key
 
 
-def create_invite_keys_batch(note: str, max_uses: int, max_ports: int, user_expires_days: int, key_expires_days: int, created_by: int, count: int, traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0) -> tuple[bool, str, list[str]]:
+def create_invite_keys_batch(note: str, max_uses: int, max_ports: int, user_expires_days: int, key_expires_days: int, created_by: int, count: int, traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0, kind: str = "register") -> tuple[bool, str, list[str]]:
     note = note.strip()[:120]
-    max_uses = 1  # 注册密钥按业务规则只能使用一次
+    max_uses = 1  # 注册/续期密钥按业务规则只能使用一次
+    kind = "renew" if str(kind).lower() == "renew" else "register"
     if count < 1 or count > 500:
         return False, "单次生成数量必须在 1-500 之间", []
-    if max_ports < 1 or max_ports > 100:
+    if kind == "register" and (max_ports < 1 or max_ports > 100):
         return False, "端口数量必须在 1-100 之间", []
     if user_expires_days < 0 or user_expires_days > 3650:
-        return False, "用户有效期必须在 0-3650 天之间", []
+        return False, ("续期天数" if kind == "renew" else "用户有效期") + "必须在 0-3650 天之间", []
     if key_expires_days < 0 or key_expires_days > 3650:
         return False, "密钥有效期必须在 0-3650 天之间", []
     if traffic_limit_bytes < 0 or bandwidth_limit_kbps < 0:
         return False, "流量/网速限制不能小于 0", []
     keys: list[str] = []
     key_expires_at = 0 if key_expires_days == 0 else now() + key_expires_days * 86400
+    prefix = "RNW-" if kind == "renew" else "FML-"
     with db() as conn:
         for _ in range(count):
-            key = "FML-" + secrets.token_urlsafe(18).replace("-", "").replace("_", "")[:24].upper()
+            key = prefix + secrets.token_urlsafe(18).replace("-", "").replace("_", "")[:24].upper()
             conn.execute(
-                "INSERT INTO invite_keys(key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, expires_at, created_by, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, key_expires_at, created_by, now()),
+                "INSERT INTO invite_keys(key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, expires_at, created_by, created_at, kind) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, key_expires_at, created_by, now(), kind),
             )
             keys.append(key)
     return True, f"已生成 {len(keys)} 枚密钥", keys
@@ -1260,6 +1540,8 @@ def register_with_invite(username: str, password: str, invite_key: str, node_id:
     with db() as conn:
         key_row = conn.execute("SELECT * FROM invite_keys WHERE key=?", (invite_key,)).fetchone()
         if not key_row:
+            return False, "注册密钥无效"
+        if (row_val(key_row, "kind", "register") or "register") != "register":
             return False, "注册密钥无效"
         if key_row["used_count"] >= 1:
             return False, "注册密钥已使用"
@@ -1284,8 +1566,40 @@ def register_with_invite(username: str, password: str, invite_key: str, node_id:
             return False, "用户名已存在"
         user_id = cur.lastrowid
         conn.executemany("UPDATE ports SET user_id=? WHERE node_id=? AND port=?", [(user_id, node_id, r["port"]) for r in free_ports])
-        conn.execute("UPDATE invite_keys SET used_count=used_count+1, active=0 WHERE id=?", (key_row["id"],))
+        claimed = conn.execute("UPDATE invite_keys SET used_count=used_count+1, active=0 WHERE id=? AND used_count=0 AND active=1", (key_row["id"],)).rowcount
+        if claimed != 1:
+            conn.rollback()
+            return False, "注册密钥已使用"
     return True, f"注册成功，地区节点：{node['region']} / {node['name']}，已分配 {max_ports} 个端口，到期时间：{fmt_time(user_expires_at)}"
+
+
+def renew_user_with_key(user: sqlite3.Row, raw_key: str) -> tuple[bool, str]:
+    key = raw_key.strip().upper()
+    if not key:
+        return False, "请输入续期密钥"
+    with db() as conn:
+        row = conn.execute("SELECT * FROM invite_keys WHERE key=?", (key,)).fetchone()
+        if not row or (row_val(row, "kind", "register") or "register") != "renew":
+            return False, "续期密钥无效"
+        if row["used_count"] >= 1:
+            return False, "续期密钥已使用"
+        if not row["active"]:
+            return False, "续期密钥已停用"
+        if row["expires_at"] and row["expires_at"] <= now():
+            return False, "续期密钥已过期"
+        days = int(row["user_expires_days"])
+        if days <= 0:
+            return False, "续期密钥未设置有效天数"
+        urow = conn.execute("SELECT expires_at FROM users WHERE id=?", (user["id"],)).fetchone()
+        base = int(urow["expires_at"] or 0) if urow else 0
+        new_expires_at = max(now(), base) + days * 86400
+        claimed = conn.execute("UPDATE invite_keys SET used_count=used_count+1, active=0 WHERE id=? AND used_count=0 AND active=1", (row["id"],)).rowcount
+        if claimed != 1:
+            conn.rollback()
+            return False, "续期密钥已使用"
+        conn.execute("UPDATE users SET expires_at=?, active=1 WHERE id=?", (new_expires_at, user["id"]))
+    audit("user_renew", user, None, None, "", f"使用续期密钥 +{days} 天")
+    return True, f"续期成功，已延长 {days} 天，到期时间：{fmt_time(new_expires_at)}"
 
 
 def audit(event: str, user: sqlite3.Row | None = None, node_id: int | None = None, remote_port: int | None = None, proxy_type: str = "", detail: str = "") -> None:
@@ -1769,6 +2083,14 @@ def restore_full_backup_zip(admin_username: str, filename: str, content_base64: 
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = DB_PATH.with_suffix(DB_PATH.suffix + ".restore.tmp")
     tmp.write_bytes(db_bytes)
+    # WAL 模式下必须清掉旧的 -wal / -shm，否则旧日志会盖到新库上导致损坏。
+    for wal_suffix in ("-wal", "-shm"):
+        try:
+            (DB_PATH.parent / (DB_PATH.name + wal_suffix)).unlink()
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
     os.replace(tmp, DB_PATH)
     init_db()
     return True, "全量备份已恢复，当前数据库已替换", {"source_filename": filename, "pre_restore_backup": str(current_backup), "size": len(db_bytes), "metadata": meta}
@@ -2243,14 +2565,24 @@ class Handler(BaseHTTPRequestHandler):
         import csv
         buf = io.StringIO()
         w = csv.writer(buf)
-        w.writerow(["key", "note", "used_count", "max_uses", "max_ports", "traffic_limit_gb_per_day", "bandwidth_limit_mbs", "user_expires_days", "active", "expires_at", "created_at"])
+        w.writerow(["密钥", "类型", "备注", "已用次数", "可用次数", "端口数", "每日流量上限(GB)", "速率上限(MB/s)", "有效期或续期天数", "状态", "密钥到期", "创建时间"])
         with db() as conn:
             for k in conn.execute("SELECT * FROM invite_keys WHERE active=1 AND used_count=0 AND used_count < max_uses AND (expires_at=0 OR expires_at>?) ORDER BY id DESC", (now(),)):
+                kind = row_val(k, "kind", "register") or "register"
+                is_renew = kind == "renew"
                 w.writerow([
-                    k["key"], k["note"], k["used_count"], k["max_uses"], k["max_ports"],
-                    round(int(row_val(k, "traffic_limit_bytes", 0) or 0) / 1024 / 1024 / 1024, 2),
-                    round(int(row_val(k, "bandwidth_limit_kbps", 0) or 0) / 1024, 2),
-                    k["user_expires_days"], "yes" if k["active"] else "no", fmt_time(k["expires_at"]), fmt_time(k["created_at"]),
+                    k["key"],
+                    "续期" if is_renew else "注册",
+                    k["note"],
+                    k["used_count"],
+                    k["max_uses"],
+                    "-" if is_renew else k["max_ports"],
+                    "-" if is_renew else round(int(row_val(k, "traffic_limit_bytes", 0) or 0) / 1024 / 1024 / 1024, 2),
+                    "-" if is_renew else round(int(row_val(k, "bandwidth_limit_kbps", 0) or 0) / 1024, 2),
+                    k["user_expires_days"],
+                    "启用" if k["active"] else "停用",
+                    fmt_time(k["expires_at"]),
+                    fmt_time(k["created_at"]),
                 ])
         self.send_body(buf.getvalue().encode("utf-8-sig"), 200, "text/csv; charset=utf-8", {"Content-Disposition": 'attachment; filename="invite-keys.csv"'})
 
@@ -2370,6 +2702,22 @@ class Handler(BaseHTTPRequestHandler):
                 user_dashboard = frps_user_dashboard(user["username"], user)
             self.send_json({"ok": True, "user": public_user(user), "software_license": sw_license, "node": node_public(node) if node else None, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
             return
+        if path == "/api/user/traffic":
+            q = urllib.parse.parse_qs(urlparse(self.path).query)
+            self.send_json(traffic_stats_for_user(user, (q.get("range") or ["30d"])[0]))
+            return
+        if path == "/api/user/traffic/protocols":
+            q = urllib.parse.parse_qs(urlparse(self.path).query)
+            self.send_json(traffic_protocols_for_user(user, (q.get("month") or [""])[0]))
+            return
+        if path == "/api/user/activity":
+            q = urllib.parse.parse_qs(urlparse(self.path).query)
+            try:
+                limit = int((q.get("limit") or ["8"])[0])
+            except Exception:
+                limit = 8
+            self.send_json(user_activity_feed(user, limit))
+            return
         if path == "/api/admin/overview":
             if not self.require_admin():
                 return
@@ -2399,6 +2747,7 @@ class Handler(BaseHTTPRequestHandler):
                     invite_keys.append({
                         "id": k["id"],
                         "key": k["key"],
+                        "kind": row_val(k, "kind", "register") or "register",
                         "note": k["note"],
                         "max_uses": k["max_uses"],
                         "used_count": k["used_count"],
@@ -2468,6 +2817,11 @@ class Handler(BaseHTTPRequestHandler):
                 tunnel_count = conn.execute("SELECT COUNT(*) c FROM tunnels").fetchone()["c"]
                 invite_key_count = conn.execute("SELECT COUNT(*) c FROM invite_keys").fetchone()["c"]
                 ban_count = conn.execute("SELECT COUNT(*) c FROM user_bans").fetchone()["c"]
+                traffic_row = conn.execute(
+                    "SELECT COALESCE(SUM(mx), 0) AS total FROM (SELECT MAX(bytes) AS mx FROM traffic_samples WHERE day=? GROUP BY user_id, proxy_type)",
+                    (local_day_str(),),
+                ).fetchone()
+                traffic_today = int(traffic_row["total"] or 0)
                 r2_public = public_r2_config(conn)
                 frpc_users = []
                 for u in conn.execute("""
@@ -2515,7 +2869,8 @@ class Handler(BaseHTTPRequestHandler):
                 "tunnel_count": int(tunnel_count),
                 "invite_key_count": int(invite_key_count),
                 "ban_count": int(ban_count),
-                "host": host_system_stats(),
+                "traffic_today": traffic_today,
+                "host": host_stats_with_history(),
                 "nodes": node_list,
                 "setup_key": (FML_SETUP_KEY if FML_SETUP_KEY else ""),
                 "has_setup_key": bool(FML_SETUP_KEY),
@@ -2570,6 +2925,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": False, "error": "账号已到期"}, 403)
                 return
             token = make_session(user["id"])
+            audit("login", user, user["node_id"], None, "", "面板登录")
             self.send_json({"ok": True, "user": public_user(user)}, headers={"Set-Cookie": f"fml_session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_TTL}"})
             return
 
@@ -2610,6 +2966,14 @@ class Handler(BaseHTTPRequestHandler):
             with db() as conn:
                 sw_license = current_software_license(conn)
             self.send_json({"ok": False, "error": "software_license_required", "license": sw_license}, 402)
+            return
+
+        if path == "/api/user/renew":
+            if user["role"] == "admin":
+                self.send_json({"ok": False, "error": "管理员账号无需续期"}, 403)
+                return
+            ok, msg = renew_user_with_key(user, str(data.get("key", "")))
+            self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg}, 200 if ok else 400)
             return
 
         if path == "/api/user/node/switch":
@@ -2946,6 +3310,7 @@ class Handler(BaseHTTPRequestHandler):
             int(data.get("count", 1)),
             traffic_gb_to_bytes(data.get("traffic_limit_gb", 0)),
             speed_mbs_to_kbps(data.get("bandwidth_limit_mbs", 0)),
+            str(data.get("kind", "register")),
         )
         self.send_json({"ok": ok, "message": msg if ok else None, "key": keys[0] if keys else None, "keys": keys, "error": None if ok else msg}, 200 if ok else 400)
 
@@ -3235,6 +3600,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     init_db()
+    start_traffic_sampler()
+    start_host_sampler()
     print(f"{APP_NAME} separated server listening on http://{HOST}:{PORT}")
     print(f"DB: {DB_PATH}")
     if ADMIN_PASSWORD == "admin123":

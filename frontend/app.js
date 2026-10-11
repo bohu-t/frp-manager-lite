@@ -8,6 +8,8 @@ let adminDashboardTimer = null;
 let tunnelPreviewTimer = null;
 let csrfToken = null;
 let colorMode = localStorage.getItem('fml_color_mode') || 'light';
+let trafficRange = '30d';
+const trafficChartCache = {};
 let adminPages = {users:1, keys:1, nodes:1, risk:1};
 let adminUserSearch = '';
 let adminUserStatus = 'all';
@@ -162,7 +164,7 @@ function authShell(title, subtitle, formHtml, footHtml='', nodes=[]){
     <div class="auth-page">
       <header class="auth-topbar">
         <div class="auth-topbar-inner">
-          <div class="auth-brand"><span class="auth-brand-mark">F</span><span>FRP 管理台</span></div>
+          <div class="auth-brand"><span class="auth-brand-mark">F</span><span>Frp 管理台</span></div>
           <div class="auth-topbar-tools"><span>安全、稳定、易用</span><button type="button" class="auth-theme-button" data-nav="theme" title="切换主题">◐</button></div>
         </div>
       </header>
@@ -170,7 +172,7 @@ function authShell(title, subtitle, formHtml, footHtml='', nodes=[]){
         <section class="auth-visual">
           <div class="auth-visual-glow auth-visual-glow-one"></div><div class="auth-visual-glow auth-visual-glow-two"></div>
           <div class="auth-visual-content">
-            <div class="auth-visual-brand"><span class="auth-visual-mark">F</span><strong>FRP 管理台</strong></div>
+            <div class="auth-visual-brand"><span class="auth-visual-mark">F</span><strong>Frp 管理台</strong></div>
             <h1>高效、专业的<br>内网穿透管理平台</h1>
             <p>统一管理隧道、端口和客户端配置，让每条映射都清晰可控。</p>
             <div class="auth-visual-points"><span>高速线路</span><span>全协议支持</span><span>${esc(regionText)}</span></div>
@@ -178,13 +180,13 @@ function authShell(title, subtitle, formHtml, footHtml='', nodes=[]){
         </section>
         <section class="auth-form-area">
           <div class="auth-form-wrap">
-            <div class="auth-mobile-brand"><span class="auth-brand-mark">F</span><strong>FRP 管理台</strong></div>
+            <div class="auth-mobile-brand"><span class="auth-brand-mark">F</span><strong>Frp 管理台</strong></div>
             <div class="auth-form-card">
               <div class="auth-form-heading"><h2>${title}</h2><p>${subtitle || '欢迎回来，请登录您的账号'}</p></div>
               ${formHtml}
               ${footHtml}
             </div>
-            <p class="auth-footer">© 2026 FRP 管理台</p>
+            <p class="auth-footer">© 2026 Frp 管理台</p>
           </div>
         </section>
       </main>
@@ -219,6 +221,13 @@ function tunnelMappingStatusHtml(t){
   const label = status === 'online' ? '已映射' : (status === 'registered' ? '已注册' : (status === 'disabled' ? '已停用' : '未连接'));
   const message = t.mapping_message || '';
   return `<span class="${cls}">${label}</span>${message ? `<div class="muted small status-note">${esc(message)}</div>` : ''}`;
+}
+function tunnelMappingState(t){
+  const status = t.mapping_status || (t.enabled ? 'unknown' : 'disabled');
+  return {
+    cls: status === 'online' ? 'ok' : (status === 'registered' ? 'warn' : (status === 'disabled' ? 'muted' : 'bad')),
+    label: status === 'online' ? '已映射' : (status === 'registered' ? '已注册' : (status === 'disabled' ? '已停用' : '未连接'))
+  };
 }
 
 function fmtBytes(n){
@@ -264,7 +273,7 @@ function renderAdminDeployScriptAddress(){
 
 function userFrpsDashboardHtml(dash){
   if(!dash || !dash.enabled){
-    return `<section class="card"><div class="section-title"><h2>我的映射监控</h2><p>${esc(dash?.error || '暂未接入 frps dashboard')}</p></div><p class="muted small">当前仍可通过“映射状态”列查看端口连通性。</p></section>`;
+    return `<section class="card"><div class="section-title"><h2>${stIcon('monitor')}我的映射监控</h2><p>${esc(dash?.error || '暂未接入 frps dashboard')}</p></div><p class="muted small">当前仍可通过“映射状态”列查看端口连通性。</p></section>`;
   }
   const cards = (dash.proxies || []).map(p => {
     const endpoint = p.remote_port || (Array.isArray(p.custom_domains) ? p.custom_domains.join(', ') : p.custom_domains) || '-';
@@ -276,7 +285,7 @@ function userFrpsDashboardHtml(dash){
       <p class="proxy-last-seen">最近启动：${esc(p.last_start_time || '-')}</p>
     </article>`;
   }).join('') || `<div class="empty-state"><strong>还没有在线映射</strong><p class="muted small">创建隧道并启动 frpc 客户端后，连接状态会显示在这里。</p></div>`;
-  return `<section class="card"><div class="section-title"><div><h2>实时映射</h2><p>只显示当前账号的 frps 代理，不会看到其他用户。</p></div><span class="section-count">${(dash.proxies || []).length} 个代理</span></div><div class="proxy-card-grid">${cards}</div></section>`;
+  return `<section class="card"><div class="section-title"><div><h2>${stIcon('monitor')}实时映射</h2><p>只显示当前账号的 frps 代理，不会看到其他用户。</p></div><span class="section-count">${(dash.proxies || []).length} 个代理</span></div><div class="proxy-card-grid">${cards}</div></section>`;
 }
 
 function clampPage(page, total, pageSize){
@@ -329,22 +338,273 @@ function navButton(label, action, cls='secondary', section=''){
   return `<button type="button" class="${cls}${active}" data-nav="${action}"${sectionAttr}>${label}</button>`;
 }
 
+// Inline SVG icons supplied for the quick actions and profile tools.
+const QICON_TUNNEL = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><path d="M1023.910943 511.999898c5.11911 317.794367-194.116663 516.825376-511.91103 511.911029-317.794367 4.914346-516.825376-194.116663-511.91103-511.911029C-4.825463 194.20553 194.205546-4.825478 511.999913 0.088868c317.794367-4.914346 516.825376 194.116663 511.91103 511.91103z" fill="#1296db"/><path d="M1022.477592 566.671996C1006.915497 340.40732 852.318366 201.16752 614.382119 204.85328c-254.112635-4.095288-413.624112 155.416189-409.528824 409.528824-3.890524 237.936247 135.554041 392.533378 361.613952 408.095473 268.036615-16.381153 439.629192-187.97373 456.010345-455.805581z" fill="#1296db"/><path d="M1015.515602 629.944199C985.824762 491.523456 876.480566 407.160519 716.764325 409.617692c-190.635668-3.071466-310.218084 116.51095-307.146618 307.146618-2.457173 159.716241 81.905765 269.060437 220.121743 298.751277 211.112109-34.400421 351.375731-174.664043 385.776152-385.571388z" fill="#1296db"/><path d="M997.701098 705.707031C964.734028 646.734881 902.076118 613.153517 819.146531 614.382104c-127.1587-2.047644-206.812056 77.605712-204.764412 204.764412-1.433351 82.929587 32.352777 145.587497 91.120163 178.554567a431.233852 431.233852 0 0 0 292.198816-291.994052z" fill="#1296db"/><path d="M380.745925 839.622957a196.369071 196.369071 0 0 1-139.035036-335.404107l87.434404-87.434404a31.738484 31.738484 0 0 1 44.843406 44.843406L286.75906 549.062256a133.096868 133.096868 0 0 0 188.383259 188.383259l87.434404-87.434404a31.738484 31.738484 0 0 1 44.843406 44.843406l-87.434404 87.434404a195.959542 195.959542 0 0 1-139.2398 57.334036zM672.330448 616.634512a31.738484 31.738484 0 0 1-22.319321-54.057805L737.240766 474.937539a133.096868 133.096868 0 0 0-188.383259-188.383259l-87.434404 87.434404a31.738484 31.738484 0 0 1-44.843406-44.843406l87.434404-87.434404a196.573835 196.573835 0 0 1 278.070071 278.070071l-87.434403 87.434404a31.533719 31.533719 0 0 1-22.319321 9.419163z" fill="#BDEFD1"/><path d="M439.103782 637.725247a52.829218 52.829218 0 0 1-37.267123-90.096342l145.792262-145.792261a52.829218 52.829218 0 0 1 74.73901 74.73901l-145.792261 145.792262a52.624454 52.624454 0 0 1-37.471888 15.357331z" fill="#FFFFFF"/></svg>';
+const QICON_PORT = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><path d="M512 1024A512 512 0 1 1 512.056889-0.056889 512 512 0 0 1 512 1024z m289.792-512a284.444444 284.444444 0 1 0-284.444444 284.444444 282.851556 282.851556 0 0 0 194.673777-77.994666l93.184 93.184 40.220445-40.277334-95.914667-95.914666A282.112 282.112 0 0 0 801.792 512z m-284.444444 227.555556a227.555556 227.555556 0 1 1 0-455.111112 227.555556 227.555556 0 0 1 0 455.111112z" fill="#4FD2C2"/></svg>';
+const QICON_TRAFFIC = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><path d="M960 544A480 480 0 1 1 480 64v480h480z" fill="#9526eb"/><path d="M1024 480H544V0a480 480 0 0 1 480 480z" fill="#F3ADBA"/></svg>';
+const QICON_DOWNLOAD = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><path d="M512 512m-450.56 0a450.56 450.56 0 1 0 901.12 0 450.56 450.56 0 1 0-901.12 0Z" fill="#131415"/><path d="M624.64 696.32a30.72 30.72 0 0 1 0 61.44h-225.28a30.72 30.72 0 0 1 0-61.44h225.28zM512 266.24a30.72 30.72 0 0 1 30.72 30.72v217.96864l59.26912-64.65536a30.72 30.72 0 0 1 47.3088 39.1168l-2.00704 2.41664-112.64 122.88a30.72 30.72 0 0 1-43.06944 2.19136l-2.23232-2.19136-112.64-122.88a30.72 30.72 0 0 1 43.04896-43.7248l2.2528 2.19136 59.26912 64.69632V296.96A30.72 30.72 0 0 1 512 266.24z" fill="#FFFFFF"/></svg>';
+const QICON_USER = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><path d="M512 512m-512 0a512 512 0 1 0 1024 0 512 512 0 1 0-1024 0Z" fill="#FD846F"/><path d="M646.339048 374.954667c0 75.897905-61.318095 136.777143-137.801143 136.777143s-137.825524-60.879238-137.825524-136.777143c0-75.922286 61.342476-136.021333 137.825524-136.021334 76.483048 0 137.825524 60.099048 137.825524 136.021334z m82.724571 417.401904H281.112381c-19.69981 0-28.550095-14.628571-28.550095-34.108952 0-115.95581 85.650286-207.530667 199.850666-207.530667h105.325715c114.200381 0 213.625905 92.550095 213.625904 208.505905v-1.950476c0.975238 19.504762-22.649905 34.108952-42.325333 35.08419z" fill="#FFFFFF"/></svg>';
+const QICON_VERSION = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><path d="M512 64 128 256v512l384 192 384-192V256z" fill="#7C5CFF"/><path d="M512 152 216 300v424l296 148 296-148V300z" fill="#FFFFFF"/><path d="M512 240 304 344v336l208 104 208-104V344z" fill="#7C5CFF"/></svg>';
+const QICON_SERVER = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><rect x="128" y="160" width="768" height="288" rx="44" fill="#2C6DD2"/><rect x="128" y="576" width="768" height="288" rx="44" fill="#20C997"/><circle cx="240" cy="304" r="34" fill="#FFFFFF"/><circle cx="240" cy="720" r="34" fill="#FFFFFF"/><rect x="330" y="286" width="420" height="36" rx="18" fill="#FFFFFF"/><rect x="330" y="702" width="420" height="36" rx="18" fill="#FFFFFF"/></svg>';
+const QICON_CPU = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><g fill="#3478F6"><rect x="440" y="96" width="48" height="152" rx="24"/><rect x="536" y="96" width="48" height="152" rx="24"/><rect x="440" y="776" width="48" height="152" rx="24"/><rect x="536" y="776" width="48" height="152" rx="24"/><rect x="96" y="440" width="152" height="48" rx="24"/><rect x="96" y="536" width="152" height="48" rx="24"/><rect x="776" y="440" width="152" height="48" rx="24"/><rect x="776" y="536" width="152" height="48" rx="24"/></g><rect x="248" y="248" width="528" height="528" rx="76" fill="#3478F6"/><rect x="368" y="368" width="288" height="288" rx="40" fill="#FFFFFF"/></svg>';
+const QICON_MEM = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><rect x="96" y="288" width="832" height="448" rx="60" fill="#9353F9"/><g fill="#FFFFFF"><rect x="184" y="392" width="88" height="240" rx="26"/><rect x="328" y="392" width="88" height="240" rx="26"/><rect x="472" y="392" width="88" height="240" rx="26"/><rect x="616" y="392" width="88" height="240" rx="26"/><rect x="760" y="392" width="88" height="240" rx="26"/></g></svg>';
+const QICON_KEY = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><circle cx="392" cy="384" r="216" fill="#F5A623"/><circle cx="392" cy="384" r="88" fill="#FFFFFF"/><rect x="536" y="360" width="368" height="48" rx="24" fill="#F5A623"/><rect x="780" y="408" width="48" height="104" rx="24" fill="#F5A623"/><rect x="664" y="408" width="48" height="80" rx="24" fill="#F5A623"/></svg>';
+const QICON_NODE = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><rect x="96" y="168" width="832" height="256" rx="44" fill="#2C6DD2"/><circle cx="216" cy="296" r="32" fill="#FFFFFF"/><rect x="304" y="278" width="420" height="36" rx="18" fill="#FFFFFF"/><circle cx="740" cy="744" r="208" fill="#20C997"/><rect x="684" y="720" width="112" height="48" rx="24" fill="#FFFFFF"/><rect x="716" y="688" width="48" height="112" rx="24" fill="#FFFFFF"/></svg>';
+const QICON_RISK = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><path d="M512 96l352 128v256c0 224-160 384-352 448-192-64-352-224-352-448V224z" fill="#F45B5B"/><rect x="480" y="312" width="64" height="248" rx="32" fill="#FFFFFF"/><circle cx="512" cy="648" r="44" fill="#FFFFFF"/></svg>';
+
+/* --- UI icon set (monochrome stroke icons, inherit currentColor) --- */
+const UIICONS = {
+  home:'<path d="M4 10.6 12 4l8 6.6V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z"/>',
+  users:'<circle cx="9" cy="8" r="3.4"/><path d="M3 20c0-3.2 2.7-5.2 6-5.2s6 2 6 5.2"/><path d="M16 5.2a3 3 0 0 1 0 5.8M17.5 14.9c2 .6 3.5 2.2 3.5 4.4"/>',
+  user:'<circle cx="12" cy="8" r="3.6"/><path d="M5 20c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5"/>',
+  userPlus:'<circle cx="10" cy="8" r="3.4"/><path d="M3.5 20c0-3.2 2.9-5.2 6.5-5.2 1.4 0 2.7.3 3.7.8"/><path d="M17.5 14v6M14.5 17h6"/>',
+  key:'<circle cx="8.5" cy="8.5" r="3.6"/><path d="M11 11l8.5 8.5M16.5 16.5l2-2M14 14l2-2"/>',
+  license:'<path d="M12 3l7 3v6c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6z"/><path d="M9.5 12l1.8 1.8 3.2-3.6"/>',
+  node:'<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+  nodePlus:'<rect x="3" y="4" width="18" height="7" rx="2"/><path d="M7 7.5h.01"/><path d="M12 15v6M9 18h6"/>',
+  pulse:'<path d="M3 12h3.5l2-4.5 3 9 2.5-6 1.6 3.5H21"/>',
+  monitor:'<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>',
+  risk:'<path d="M12 3l7 3v6c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6z"/><path d="M12 8.5v4M12 15.8h.01"/>',
+  log:'<path d="M5 4h11l3 3v13H5z"/><path d="M8 9h8M8 12.5h8M8 16h5"/>',
+  search:'<circle cx="11" cy="11" r="6"/><path d="M15.5 15.5 20 20"/>',
+  cpu:'<rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M10 3v3M14 3v3M10 18v3M14 18v3M3 10h3M3 14h3M18 10h3M18 14h3"/>',
+  mem:'<rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 17v3M12 17v3M17 17v3M7 11h2M11 11h2M15 11h2"/>',
+  bolt:'<path d="M13.5 3 6 13.5h5L10.5 21 18 10.5h-5z"/>',
+  tools:'<path d="M14.5 4.5a3.5 3.5 0 0 0 4.4 4.6L21 11l-2 2-9.6-9.6 2-2z"/><path d="M9.5 8.5 3.6 14.4a2 2 0 0 0 0 2.8l3.2 3.2a2 2 0 0 0 2.8 0l5.9-5.9"/>',
+  chart:'<path d="M4 20V4M4 20h16"/><path d="M8 17v-6M12.5 17V8M17 17v-9"/>',
+  donut:'<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>',
+  activity:'<path d="M4 6h16M4 12h10M4 18h13"/>',
+  port:'<rect x="4" y="4" width="7" height="7" rx="1.6"/><rect x="13" y="4" width="7" height="7" rx="1.6"/><rect x="4" y="13" width="7" height="7" rx="1.6"/><rect x="13" y="13" width="7" height="7" rx="1.6"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  tunnel:'<path d="M4 8.5h13l-3.2-3.2M20 15.5H7l3.2 3.2"/>',
+  file:'<path d="M6 3h7l5 5v13H6z"/><path d="M13 3v5h5"/>',
+  script:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12.5 15H17"/>',
+  backup:'<ellipse cx="12" cy="6.5" rx="7" ry="3"/><path d="M5 6.5v11c0 1.7 3.1 3 7 3s7-1.3 7-3v-11"/><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>',
+  cloud:'<path d="M7.5 18.5h9a4 4 0 0 0 .4-8A5.5 5.5 0 0 0 6.6 9.6 4.2 4.2 0 0 0 7.5 18.5Z"/>',
+  edit:'<path d="M4 20h4l10-10-4-4L4 16z"/><path d="M13.5 5.5 18.5 10.5"/>',
+  gear:'<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6.2 6.2l1.6 1.6M16.2 16.2l1.6 1.6M17.8 6.2l-1.6 1.6M7.8 16.2l-1.6 1.6"/>',
+  download:'<path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14"/>'
+};
+function uiIcon(name, cls){
+  const body = UIICONS[name];
+  if(!body) return '';
+  return `<span class="${cls || 'st-icon'}" aria-hidden="true"><svg viewBox="0 0 24 24">${body}</svg></span>`;
+}
+const stIcon = (name) => uiIcon(name, 'st-icon');
+const sideIcon = (name) => uiIcon(name, 'side-icon');
+
+function shortBytes(n){ n = Number(n || 0); if(n < 1024) return `${Math.round(n)} B`; if(n < 1048576) return `${(n/1024).toFixed(0)}K`; if(n < 1073741824) return `${(n/1048576).toFixed(0)}M`; return `${(n/1073741824).toFixed(1)}G`; }
+
+function relTime(ts){
+  const t = Number(ts || 0);
+  if(!t) return '-';
+  const diff = Math.max(0, Math.floor(Date.now()/1000 - t));
+  if(diff < 60) return '刚刚';
+  if(diff < 3600) return `${Math.floor(diff/60)} 分钟前`;
+  if(diff < 86400) return `${Math.floor(diff/3600)} 小时前`;
+  if(diff < 86400*7) return `${Math.floor(diff/86400)} 天前`;
+  return new Date(t*1000).toLocaleDateString('zh-CN');
+}
+
+const PROTO_COLORS = {tcp:'#3b82f6', udp:'#22c55e', http:'#f59e0b', https:'#8b5cf6', stcp:'#06b6d4', xtcp:'#ec4899', tcpmux:'#64748b'};
+const protoColor = (t) => PROTO_COLORS[t] || '#94a3b8';
+
+function trafficBarsSvg(series, width){
+  const H = 152, padL = 44, padR = 10, padT = 12, padB = 26;
+  const W = Math.max(200, Math.round(width || 640));
+  const n = Math.max(1, series.length);
+  const maxV = Math.max.apply(null, series.map(p => Number(p.bytes) || 0).concat([1]));
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const slot = innerW / n;
+  const barW = Math.max(2, Math.min(26, slot * 0.62));
+  let grid = '';
+  [0, 0.5, 1].forEach(f => {
+    const yy = padT + innerH - f * innerH;
+    grid += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W - padR}" y2="${yy.toFixed(1)}" class="chart-grid"/>`;
+    grid += `<text x="${padL - 8}" y="${(yy + 4).toFixed(1)}" text-anchor="end" class="chart-ylabel">${esc(shortBytes(maxV * f))}</text>`;
+  });
+  const step = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(innerW / 44))));
+  let bars = '';
+  series.forEach((p, i) => {
+    const v = Number(p.bytes) || 0;
+    const x = padL + slot * i + (slot - barW) / 2;
+    const yy = padT + innerH - (v / maxV) * innerH;
+    const h = Math.max(0, padT + innerH - yy);
+    bars += `<rect x="${x.toFixed(1)}" y="${yy.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="${Math.min(4, barW/2).toFixed(1)}" class="chart-bar"><title>${esc(p.label)} · ${esc(fmtBytes(v))}</title></rect>`;
+    if(i % step === 0 || i === n - 1){
+      bars += `<text x="${(padL + slot * i + slot/2).toFixed(1)}" y="${H - 10}" text-anchor="middle" class="chart-xlabel">${esc(p.short || p.label)}</text>`;
+    }
+  });
+  return `<svg class="bar-chart" viewBox="0 0 ${W} ${H}" role="img">${grid}${bars}</svg>`;
+}
+
+function protocolDonutSvg(items, total){
+  const size = 180, r = 70, cx = size/2, cy = size/2, stroke = 22;
+  const circ = 2 * Math.PI * r;
+  let segs = '', offset = 0;
+  if(!total){
+    segs = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--border)" stroke-width="${stroke}"/>`;
+  } else {
+    items.forEach(it => {
+      const len = ((Number(it.bytes) || 0) / total) * circ;
+      segs += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${protoColor(it.type)}" stroke-width="${stroke}" stroke-dasharray="${len.toFixed(2)} ${(circ - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 ${cx} ${cy})"><title>${esc(it.label)} · ${esc(fmtBytes(it.bytes))}</title></circle>`;
+      offset += len;
+    });
+  }
+  return `<svg class="donut" viewBox="0 0 ${size} ${size}" role="img">${segs}<text x="${cx}" y="${cy - 4}" text-anchor="middle" class="donut-total">${esc(shortBytes(total))}</text><text x="${cx}" y="${cy + 15}" text-anchor="middle" class="donut-caption">本月合计</text></svg>`;
+}
+
+const ACTIVITY_ICONS = {login:'👤', tunnel:'🔗', node:'🛰️', traffic:'📶', risk:'⛔', backup:'💾', license:'🔑', default:'•'};
+function activityItemHtml(item){
+  const icon = ACTIVITY_ICONS[item.kind] || ACTIVITY_ICONS.default;
+  const text = (item.bytes !== undefined && item.bytes !== null) ? `今日已使用流量 ${fmtBytes(item.bytes)}` : (item.text || item.title || '');
+  return `<li class="activity-item"><span class="activity-icon k-${esc(item.kind || 'default')}">${icon}</span><div class="activity-main"><span class="activity-text">${esc(text)}</span><span class="activity-meta">${esc(item.title || '')} · ${esc(relTime(item.at))}</span></div></li>`;
+}
+
+async function renderTrafficUsage(range){
+  const slot = document.getElementById('trafficUsageSlot');
+  if(!slot) return;
+  trafficRange = ['today','7d','30d'].includes(range) ? range : trafficRange;
+  document.querySelectorAll('[data-traffic-range] button').forEach(b => b.classList.toggle('active', b.dataset.range === trafficRange));
+  if(!trafficChartCache[trafficRange]){
+    slot.innerHTML = '<p class="muted small">加载中…</p>';
+    try{ trafficChartCache[trafficRange] = await api(`/api/user/traffic?range=${encodeURIComponent(trafficRange)}`); }
+    catch(err){ slot.innerHTML = `<p class="error small">${esc(err.message)}</p>`; return; }
+  }
+  const d = trafficChartCache[trafficRange];
+  if(!d.has_data){
+    slot.innerHTML = `<div class="chart-empty"><strong>暂无流量数据</strong><p class="muted small">${d.enabled ? '当前统计范围内还没有产生流量。' : 'frps 控制台未接入面板，采集不到流量；接入后这里会自动出现曲线。'}</p></div>`;
+    return;
+  }
+  const label = d.range === 'today' ? '今日累计' : (d.range === '7d' ? '近 7 天' : '近 30 天');
+  slot.innerHTML = `<div class="traffic-usage-head"><div><span>${label}</span><strong>${fmtBytes(d.total)}</strong></div><div><span>单${d.unit}峰值</span><strong>${fmtBytes(d.peak)}</strong></div></div>`;
+  const drawBars = () => slot.insertAdjacentHTML('beforeend', trafficBarsSvg(d.series, slot.clientWidth || Math.round(slot.getBoundingClientRect().width) || 300));
+  drawBars();
+}
+
+function setTrafficRange(range){
+  trafficRange = ['today','7d','30d'].includes(range) ? range : '30d';
+  renderTrafficUsage(trafficRange);
+}
+
+async function renderTrafficProtocols(){
+  const slot = document.getElementById('trafficProtocolSlot');
+  if(!slot) return;
+  slot.innerHTML = '<p class="muted small">加载中…</p>';
+  let d;
+  try{ d = await api('/api/user/traffic/protocols'); }
+  catch(err){ slot.innerHTML = `<p class="error small">${esc(err.message)}</p>`; return; }
+  if(!d.has_data){
+    slot.innerHTML = `<div class="chart-empty"><strong>暂无流量数据</strong><p class="muted small">${d.enabled ? '本月还没有采集到协议流量。' : 'frps 控制台未接入面板，暂无协议流量。'}</p></div>`;
+    return;
+  }
+  const legend = d.items.map(it => `<li><span class="proto-dot" style="background:${protoColor(it.type)}"></span><span class="proto-name">${esc(it.label)}</span><span class="proto-val">${esc(fmtBytes(it.bytes))}</span><span class="proto-pct">${it.percent}%</span></li>`).join('');
+  const monthLabel = (d.month || '').replace('-', ' 年 ') + ' 月';
+  slot.innerHTML = `<div class="protocol-body"><div class="donut-wrap">${protocolDonutSvg(d.items, d.total)}</div><ul class="protocol-legend">${legend}</ul></div><p class="muted small protocol-note">统计范围：${esc(monthLabel)} · 合计 ${esc(fmtBytes(d.total))}</p>`;
+}
+
+async function renderActivityFeed(){
+  const slot = document.getElementById('activitySlot');
+  if(!slot) return;
+  slot.innerHTML = '<p class="muted small">加载中…</p>';
+  let d;
+  try{ d = await api('/api/user/activity?limit=8'); }
+  catch(err){ slot.innerHTML = `<p class="error small">${esc(err.message)}</p>`; return; }
+  if(!d.items || !d.items.length){
+    slot.innerHTML = '<div class="chart-empty"><strong>暂无动态</strong><p class="muted small">登录、创建隧道等操作会显示在这里。</p></div>';
+    return;
+  }
+  slot.innerHTML = `<ul class="activity-list">${d.items.map(activityItemHtml).join('')}</ul>`;
+}
+
+function openConfigModal(){ const m = document.getElementById('configModal'); if(m) m.classList.remove('hidden'); }
+function closeConfigModal(){ const m = document.getElementById('configModal'); if(m) m.classList.add('hidden'); }
+
+/* ---- Online frpc config editor ---- */
+let frpcDraftTimer = null;
+function frpcDraftKey(){ return 'fml_frpc_draft_' + (currentUser?.id || currentUser?.username || 'anon'); }
+function frpcEditorEl(){ return document.getElementById('frpcEditor'); }
+function frpcEditorStatus(msg){ const el = document.getElementById('editorStatus'); if(el) el.textContent = msg || ''; }
+async function fetchGeneratedFrpc(){
+  const res = await fetch('/config/frpc.toml', {credentials:'same-origin'});
+  if(!res.ok){
+    let msg = '生成失败 (' + res.status + ')';
+    try{ const j = await res.json(); if(j && j.error) msg = j.error; }catch(e){}
+    throw new Error(msg);
+  }
+  return await res.text();
+}
+function readFrpcDraft(){ try{ return localStorage.getItem(frpcDraftKey()) || ''; }catch(e){ return ''; } }
+function writeFrpcDraft(v){ try{ localStorage.setItem(frpcDraftKey(), v); }catch(e){} }
+function clearFrpcDraft(){ try{ localStorage.removeItem(frpcDraftKey()); }catch(e){} }
+async function initFrpcEditor(){
+  const ta = frpcEditorEl();
+  if(!ta) return;
+  const draft = readFrpcDraft();
+  try{
+    const gen = await fetchGeneratedFrpc();
+    ta.value = draft || gen;
+    frpcEditorStatus(draft ? '已保留你的本地草稿（点“重新生成”可覆盖）' : '已按当前隧道生成');
+  }catch(err){
+    ta.value = draft;
+    frpcEditorStatus('无法自动生成：' + err.message);
+  }
+  ta.addEventListener('input', () => {
+    frpcEditorStatus('编辑中…');
+    if(frpcDraftTimer) clearTimeout(frpcDraftTimer);
+    frpcDraftTimer = setTimeout(() => { writeFrpcDraft(ta.value); frpcEditorStatus('已保存到本机'); }, 500);
+  });
+}
+async function regenFrpcConfig(){
+  const ta = frpcEditorEl();
+  if(!ta) return;
+  frpcEditorStatus('生成中…');
+  try{
+    const gen = await fetchGeneratedFrpc();
+    ta.value = gen;
+    clearFrpcDraft();
+    frpcEditorStatus('已按当前隧道重新生成');
+  }catch(err){ frpcEditorStatus('生成失败：' + err.message); }
+}
+function copyFrpcConfig(){
+  const ta = frpcEditorEl();
+  if(!ta) return;
+  copyText(ta.value);
+  frpcEditorStatus('已复制到剪贴板');
+}
+function downloadFrpcDraft(){
+  const ta = frpcEditorEl();
+  if(!ta) return;
+  const blob = new Blob([ta.value], {type:'application/toml;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'frpc.toml';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+  frpcEditorStatus('已下载 frpc.toml');
+}
+
 function appSidebarHtml(kind='dashboard'){
   const isAdmin = currentUser?.role === 'admin';
   const username = currentUser?.username || '用户';
   const items = isAdmin ? [
-    ['admin-dashboard','⌂','运行总览'],['admin','♙','用户管理','users'],['admin','▦','注册密钥','keys'],['admin','⌁','新增节点','nodes'],['admin-health','♥','节点健康','health'],['admin-proxies','◌','映射监控','proxies'],['admin','⚠','风控审计','risk']
+    ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','key','注册密钥','keys'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk']
   ] : [
-    ['dashboard','⌂','概览'],['dashboard-tunnels','⇄','隧道管理'],['dashboard-ports','#','端口资源'],['dashboard-config','↓','配置下载']
+    ['dashboard','home','概览'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
   ];
   const links = items.map(([action, icon, label, section]) => {
     const active = kind === action || (section && kind === section) ? ' active' : '';
-    return `<button class="side-link${active}" data-nav="${action}"${section ? ` data-section="${section}"` : ''}><span class="side-icon">${icon}</span><span class="side-link-label">${label}</span><span class="side-link-arrow">›</span></button>`;
+    return `<button class="side-link${active}" data-nav="${action}"${section ? ` data-section="${section}"` : ''}>${sideIcon(icon)}<span class="side-link-label">${label}</span><span class="side-link-arrow">›</span></button>`;
   }).join('');
   return `<aside class="app-sidebar">
-    <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>FRP 管理台</strong><span>内网穿透管理平台</span></div></div>
+    <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>Frp 管理台</strong><span>内网穿透管理平台</span></div></div>
     <div class="sidebar-section-label">工作空间</div>${links}
-    ${isAdmin ? '' : `<div class="sidebar-section-label sidebar-tools-label">快速工具</div><a class="side-link sidebar-download-link" href="/config/deploy-frpc.sh"><span class="side-icon">⚙</span><span class="side-link-label">客户端部署</span><span class="side-link-arrow">↗</span></a>`}
+    ${isAdmin ? '' : `<div class="sidebar-section-label sidebar-tools-label">快速工具</div>
+      <button class="side-link${kind === 'dashboard-config' ? ' active' : ''}" data-nav="dashboard-config">${sideIcon('download')}<span class="side-link-label">配置下载</span><span class="side-link-arrow">›</span></button>
+      <button class="side-link${kind === 'dashboard-editor' ? ' active' : ''}" data-nav="dashboard-editor">${sideIcon('edit')}<span class="side-link-label">在线配置</span><span class="side-link-arrow">›</span></button>
+      <a class="side-link sidebar-download-link" href="/config/deploy-frpc.sh">${sideIcon('gear')}<span class="side-link-label">客户端部署</span><span class="side-link-arrow">↗</span></a>`}
     <div class="sidebar-spacer"></div>
     <div class="sidebar-service-status"><span class="sidebar-service-dot"></span><span><strong>服务运行中</strong><small>FRP 管理服务</small></span></div>
     <div class="sidebar-user-card"><span class="sidebar-user-avatar">${esc(String(username).slice(0,1).toUpperCase())}</span><span class="sidebar-user-copy"><strong>${esc(username)}</strong><small>${isAdmin ? '系统管理员' : '普通用户'}</small></span><button type="button" data-nav="logout" title="退出登录" aria-label="退出登录">↗</button></div>
@@ -353,7 +613,7 @@ function appSidebarHtml(kind='dashboard'){
 
 function appLayoutHtml(content, kind='dashboard', topTitle='工作区'){
   const username = currentUser?.username || '用户';
-  return `<div class="app-shell">${appSidebarHtml(kind)}<main class="workspace-main"><div class="workspace-topbar"><div class="topbar-welcome"><svg class="topbar-welcome-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><path d="M683.232 304.576c-51.52 52.992-103.072 105.76-154.624 158.304-37.76 38.496-74.944 77.376-112.96 115.36-5.76 5.76-14.976 11.392-22.528 11.264-13.824 0-20.288-16.768-13.824-31.168 16.864-36.992 34.624-73.504 50.624-110.72 4.992-11.36 7.584-23.68 7.68-36.128a34.528 34.528 0 0 0-16-28.864 32.96 32.96 0 0 0-32.352-1.6c-8.992 4-16.704 10.528-22.272 18.784-41.824 75.328-83.584 150.624-123.328 226.976-15.168 28.896-20.064 61.76-19.616 95.168 1.664 66.624 30.08 121.696 71.232 171.296 35.456 42.656 76.032 77.472 130.624 91.36 58.688 15.04 115.04 6.336 169.344-19.2a418.976 418.976 0 0 0 121.152-87.584c65.632-66.944 131.2-133.952 196.672-201.056 10.432-10.592 18.432-21.856 13.408-38.656-9.6-31.264-40.224-40.416-63.52-17.408-31.776 31.52-62.816 64-94.208 96-3.488 3.584-6.976 9.408-10.944 9.408-8.384 0.864-19.744 1.92-24.96-2.816-4.576-4.032-3.584-16.096-2.368-24.192 0.64-4.704 6.528-8.48 10.304-12.416 54.272-55.776 108.704-111.168 162.72-167.072 21.376-21.696 14.016-56-13.376-63.68-18.048-5.12-32.224 2.336-45.056 15.52-49.44 51.296-99.264 102.304-148.992 153.344a101.024 101.024 0 0 1-10.752 10.24 18.112 18.112 0 0 1-25.6-1.216 19.136 19.136 0 0 1-2.56-25.92c3.712-5.344 7.968-10.272 12.704-14.72 65.792-67.36 131.552-134.816 197.28-202.336 23.904-24.384 16.32-58.944-14.528-67.584-15.232-4.352-26.944 2.816-37.056 13.056a26194.304 26194.304 0 0 0-106.88 108.736c-31.648 32.48-63.136 65.184-94.784 97.504-4.16 4.256-8.576 10.368-13.536 11.104a33.28 33.28 0 0 1-22.496-3.2 16.544 16.544 0 0 1-3.392-24.096c3.424-4.864 7.264-9.44 11.488-13.632 51.52-52.896 103.072-105.536 154.368-158.528 21.6-22.304 15.392-55.584-11.968-64.224-17.952-5.664-32.224 1.28-45.12 14.592z m-410.496 15.744c-19.744 3.104-32 16.768-41.28 34.56-16.832 32-33.6 63.968-50.24 95.904l-33.152 64.16a1594.88 1594.88 0 0 1-17.056 31.744c-55.584 99.776-41.92 209.504 19.52 299.744 33.728 49.504 73.6 90.624 129.664 108.864 4.8 1.6 9.728 3.104 14.624 4.704a12.128 12.128 0 0 0 3.648-0.48c-18.368-22.784-37.408-44.16-53.856-67.616-39.584-56.256-64.064-118.976-62.176-191.232 1.408-53.28 16.384-102.88 40.448-149.12 29.696-57.056 59.584-113.92 89.696-170.56 7.616-14.112 11.424-27.04 1.216-41.504-9.12-14.464-25.152-21.824-41.056-18.816v-0.32z m267.52-85.888c-31.552 32.448-60.864 67.776-92.256 103.04 18.432 21.344 24.736 46.976 20.928 78.528 3.84-3.072 5.632-4.224 7.136-5.76 41.536-45.6 82.752-91.52 124.736-136.512 9.6-10.24 8.864-18.432 2.112-28.96-13.664-21.344-44.8-28.672-62.656-10.336zM403.456 64L352 85.44c21.248 24.768 41.44 48.16 64 74.56-4.48-33.856-8.32-63.744-12.448-96h-0.096z m184.256 0L576 158.688l3.616 1.312c19.52-23.232 38.976-46.592 60.384-72l-52.544-23.968 0.256-0.032zM448 32l30.144 96h3.264c9.984-31.296 19.968-62.784 30.592-96h-64z" fill="#FFDA00"></path></svg><span class="topbar-greeting">欢迎回来，${esc(username)}</span><span class="topbar-breadcrumb"><img class="topbar-breadcrumb-icon" src="/dashboard-icon.svg" alt="" aria-hidden="true"><span>/ ${esc(topTitle)}</span></span></div></div>${content}</main></div>`;
+  return `<div class="app-shell">${appSidebarHtml(kind)}<main class="workspace-main"><div class="workspace-topbar"><div class="topbar-welcome"><svg class="topbar-welcome-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><path d="M683.232 304.576c-51.52 52.992-103.072 105.76-154.624 158.304-37.76 38.496-74.944 77.376-112.96 115.36-5.76 5.76-14.976 11.392-22.528 11.264-13.824 0-20.288-16.768-13.824-31.168 16.864-36.992 34.624-73.504 50.624-110.72 4.992-11.36 7.584-23.68 7.68-36.128a34.528 34.528 0 0 0-16-28.864 32.96 32.96 0 0 0-32.352-1.6c-8.992 4-16.704 10.528-22.272 18.784-41.824 75.328-83.584 150.624-123.328 226.976-15.168 28.896-20.064 61.76-19.616 95.168 1.664 66.624 30.08 121.696 71.232 171.296 35.456 42.656 76.032 77.472 130.624 91.36 58.688 15.04 115.04 6.336 169.344-19.2a418.976 418.976 0 0 0 121.152-87.584c65.632-66.944 131.2-133.952 196.672-201.056 10.432-10.592 18.432-21.856 13.408-38.656-9.6-31.264-40.224-40.416-63.52-17.408-31.776 31.52-62.816 64-94.208 96-3.488 3.584-6.976 9.408-10.944 9.408-8.384 0.864-19.744 1.92-24.96-2.816-4.576-4.032-3.584-16.096-2.368-24.192 0.64-4.704 6.528-8.48 10.304-12.416 54.272-55.776 108.704-111.168 162.72-167.072 21.376-21.696 14.016-56-13.376-63.68-18.048-5.12-32.224 2.336-45.056 15.52-49.44 51.296-99.264 102.304-148.992 153.344a101.024 101.024 0 0 1-10.752 10.24 18.112 18.112 0 0 1-25.6-1.216 19.136 19.136 0 0 1-2.56-25.92c3.712-5.344 7.968-10.272 12.704-14.72 65.792-67.36 131.552-134.816 197.28-202.336 23.904-24.384 16.32-58.944-14.528-67.584-15.232-4.352-26.944 2.816-37.056 13.056a26194.304 26194.304 0 0 0-106.88 108.736c-31.648 32.48-63.136 65.184-94.784 97.504-4.16 4.256-8.576 10.368-13.536 11.104a33.28 33.28 0 0 1-22.496-3.2 16.544 16.544 0 0 1-3.392-24.096c3.424-4.864 7.264-9.44 11.488-13.632 51.52-52.896 103.072-105.536 154.368-158.528 21.6-22.304 15.392-55.584-11.968-64.224-17.952-5.664-32.224 1.28-45.12 14.592z m-410.496 15.744c-19.744 3.104-32 16.768-41.28 34.56-16.832 32-33.6 63.968-50.24 95.904l-33.152 64.16a1594.88 1594.88 0 0 1-17.056 31.744c-55.584 99.776-41.92 209.504 19.52 299.744 33.728 49.504 73.6 90.624 129.664 108.864 4.8 1.6 9.728 3.104 14.624 4.704a12.128 12.128 0 0 0 3.648-0.48c-18.368-22.784-37.408-44.16-53.856-67.616-39.584-56.256-64.064-118.976-62.176-191.232 1.408-53.28 16.384-102.88 40.448-149.12 29.696-57.056 59.584-113.92 89.696-170.56 7.616-14.112 11.424-27.04 1.216-41.504-9.12-14.464-25.152-21.824-41.056-18.816v-0.32z m267.52-85.888c-31.552 32.448-60.864 67.776-92.256 103.04 18.432 21.344 24.736 46.976 20.928 78.528 3.84-3.072 5.632-4.224 7.136-5.76 41.536-45.6 82.752-91.52 124.736-136.512 9.6-10.24 8.864-18.432 2.112-28.96-13.664-21.344-44.8-28.672-62.656-10.336zM403.456 64L352 85.44c21.248 24.768 41.44 48.16 64 74.56-4.48-33.856-8.32-63.744-12.448-96h-0.096z m184.256 0L576 158.688l3.616 1.312c19.52-23.232 38.976-46.592 60.384-72l-52.544-23.968 0.256-0.032zM448 32l30.144 96h3.264c9.984-31.296 19.968-62.784 30.592-96h-64z" fill="#FFDA00"></path></svg><span class="topbar-greeting">欢迎回来，${esc(username)}</span><span class="topbar-breadcrumb"><span>/ ${esc(topTitle)}</span></span></div></div>${content}</main></div>`;
 }
 
 function setNav(){
@@ -427,8 +687,9 @@ app.addEventListener('click', async (e) => {
     if(action === 'logout') return logout();
     if(action === 'dashboard') return loadDashboard();
     if(action === 'dashboard-tunnels') return loadDashboard('tunnels');
-    if(action === 'dashboard-ports') return loadDashboard('ports');
-    if(action === 'dashboard-config') return window.location.href = '/config/frpc.toml';
+    if(action === 'dashboard-config') return loadDashboard('config');
+    if(action === 'dashboard-editor') return loadDashboard('editor');
+    if(action === 'dashboard-profile') return loadDashboard('profile');
     if(action === 'admin-dashboard') return loadAdminDashboard();
     if(action === 'admin-proxies') return loadAdminProxies();
     if(action === 'admin-health') return loadAdminHealth();
@@ -525,7 +786,7 @@ function renderLicenseActivatePublic(){
     <div class="auth-layout">
       <section class="auth-hero card">
         <div class="brand-mark">🔑</div>
-        <h2>需要软件授权激活</h2>
+        <h2>${stIcon('license')}需要软件授权激活</h2>
         <p>请联系卖家获取<strong>鉴权密钥</strong>。只在安装/首次部署时鉴权一次，成功后会在本机保存授权文件；重装后机器指纹一致会自动通过。</p>
         <div class="feature-grid">
           <div><b>首次验证</b><span>安装时向鉴权服务器验证</span></div>
@@ -536,7 +797,7 @@ function renderLicenseActivatePublic(){
         <div class="hero-points"><span><code style="word-break:break-all">${esc(machineId)}</code></span></div>
       </section>
       <section class="auth-card card">
-        <div class="section-title"><h2>激活授权</h2><p>${esc(lic.message || '请填写卖家提供的以下信息')}</p></div>
+        <div class="section-title"><h2>${stIcon('license')}激活授权</h2><p>${esc(lic.message || '请填写卖家提供的以下信息')}</p></div>
         <form id="licenseActivateForm" class="stack-form">
           <label>鉴权密钥</label>
           <input name="license_key" placeholder="FMLD-..." required>
@@ -567,7 +828,7 @@ function renderLicenseActivate(){
   const lic = softwareLicense || {};
   app.innerHTML = `
     <section class="card">
-      <div class="section-title"><h2>软件授权激活</h2><p>输入卖家给你的鉴权密钥；只在安装时鉴权一次，成功后生成本机授权文件，重装后自动读取并校验机器指纹。</p></div>
+      <div class="section-title"><h2>${stIcon('license')}软件授权激活</h2><p>输入卖家给你的鉴权密钥；只在安装时鉴权一次，成功后生成本机授权文件，重装后自动读取并校验机器指纹。</p></div>
       <div class="grid">
         <div><div class="label">授权状态</div><p>${esc(lic.message || '待激活')}</p></div>
         <div><div class="label">当前机器指纹</div><p><code class="token">${esc(lic.machine_id || '-')}</code></p><p class="muted small">仅用于本机授权文件校验，客户不需要复制给卖家。</p></div>
@@ -673,30 +934,47 @@ async function loadDashboard(view='overview'){
   }
   const tunnelRows = data.tunnels.map(t => {
     const endpointRaw = tunnelEndpointText(t, data.frps);
-    const endpoint = esc(endpointRaw);
+    const endpointScheme = t.proxy_type === 'https' ? 'https://' : (['http','tcp'].includes(t.proxy_type) ? 'http://' : '');
+    const endpointShown = (endpointScheme && endpointRaw && endpointRaw !== '-') ? endpointScheme + endpointRaw : endpointRaw;
+    const endpoint = esc(endpointShown);
     const runtime = tunnelRuntimeStats(t, data.frps_user_dashboard);
-    return `<article class="tunnel-card">
-      <div class="tunnel-card-head"><div class="tunnel-type-icon">${esc(String(t.proxy_type || 'tcp').slice(0, 1).toUpperCase())}</div><div class="tunnel-title"><strong title="${esc(t.name)}">${esc(t.name)}</strong><span>${esc(t.proxy_type)} 隧道 · #${esc(t.id)}</span></div><span class="status-dot ${t.enabled ? 'is-online' : 'is-offline'}">${t.enabled ? '已启用' : '已停用'}</span></div>
-      <div class="tunnel-route"><div><span>本地服务</span><strong>${esc(t.local_ip)}:${esc(t.local_port)}</strong></div><div><span>公网入口</span><strong title="${endpoint}">${endpoint}</strong>${endpointRaw !== '-' ? `<button type="button" class="copy-inline" data-copy-address="${endpoint}">复制</button>` : ''}</div></div>
-      <div class="tunnel-card-status"><span class="muted small">映射状态</span><div>${tunnelMappingStatusHtml(t)}</div></div>
-      <div class="tunnel-traffic-row"><span>今日流量 <b>${fmtBytes(runtime.trafficIn + runtime.trafficOut)}</b></span><span>连接数 <b>${runtime.available ? runtime.connections : '-'}</b></span></div>
-      <div class="tunnel-card-actions"><button class="secondary" onclick="loadDashboard('tunnels')">刷新状态</button><button class="secondary" onclick="toggleTunnel(${t.id})">${t.enabled ? '停用' : '启用'}</button><button class="danger" onclick="deleteTunnel(${t.id})">删除</button></div>
+    const mapState = tunnelMappingState(t);
+    return `<article class="tc-card${t.enabled ? '' : ' is-off'}">
+      <div class="tc-head">
+        <span class="tc-type">${esc(String(t.proxy_type || 'tcp').slice(0, 1).toUpperCase())}</span>
+        <span class="tc-title"><strong title="${esc(t.name)}">${esc(t.name)}</strong><small>${esc(t.proxy_type)} 隧道 · #${esc(t.id)}</small></span>
+        <span class="tc-state ${t.enabled ? 'on' : 'off'}">${t.enabled ? '已启用' : '已停用'}</span>
+      </div>
+      <div class="tc-route">
+        <span class="tc-hop"><span>本地</span><b title="${esc(t.local_ip)}:${esc(t.local_port)}">${esc(t.local_ip)}:${esc(t.local_port)}</b></span>
+        <span class="tc-arrow" aria-hidden="true">→</span>
+        <span class="tc-hop"><span>公网</span><b title="${endpoint}">${endpoint}</b>${endpointRaw !== '-' ? `<button type="button" class="tc-copy" data-copy-address="${endpoint}">复制</button>` : ''}</span>
+      </div>
+      <footer class="tc-foot">
+        <span class="tc-chip"${t.mapping_message ? ` title="${esc(t.mapping_message)}"` : ''}><i>映射</i><b class="${mapState.cls}">${mapState.label}</b></span>
+        <span class="tc-chip"><i>今日流量</i><b>${fmtBytes(runtime.trafficIn + runtime.trafficOut)}</b></span>
+        <span class="tc-chip"><i>连接</i><b>${runtime.available ? runtime.connections : '-'}</b></span>
+        <span class="tc-actions">
+          <button class="secondary" onclick="loadDashboard('tunnels')">刷新</button>
+          <button class="secondary" onclick="toggleTunnel(${t.id})">${t.enabled ? '停用' : '启用'}</button>
+          <button class="danger" onclick="deleteTunnel(${t.id})">删除</button>
+        </span>
+      </footer>
     </article>`;
   }).join('') || `<div class="empty-state"><strong>还没有隧道</strong><p class="muted small">创建第一个隧道后，就能在这里查看本地服务、公网入口和运行状态。</p><button onclick="loadDashboard('tunnels')">新建隧道</button></div>`;
   const tunnelPreviewRows = data.tunnels.map(t => {
     const endpointRaw = tunnelEndpointText(t, data.frps);
+    const endpointScheme = t.proxy_type === 'https' ? 'https://' : (['http','tcp'].includes(t.proxy_type) ? 'http://' : '');
+    const endpointShown = (endpointScheme && endpointRaw && endpointRaw !== '-') ? endpointScheme + endpointRaw : endpointRaw;
     const runtime = tunnelRuntimeStats(t, data.frps_user_dashboard);
     const status = t.mapping_status || (t.enabled ? 'unknown' : 'disabled');
     const statusLabel = status === 'online' ? '在线' : (status === 'registered' ? '已注册' : (status === 'disabled' ? '已停用' : '未连接'));
     const statusClass = status === 'online' ? 'ok' : (status === 'registered' ? 'warn' : (status === 'disabled' ? 'muted' : 'bad'));
     return `<article class="tunnel-preview-item">
-      <div class="tunnel-preview-top"><strong title="${esc(t.name)}">${esc(t.name)}</strong><span class="status-dot ${t.enabled ? 'is-online' : 'is-offline'}">${t.enabled ? '已启用' : '已停用'}</span></div>
-      <div class="tunnel-preview-grid">
-        <div><span>状态</span><b class="${statusClass}">${statusLabel}</b></div>
-        <div><span>本地服务</span><b title="${esc(t.local_ip)}:${esc(t.local_port)}">${esc(t.local_ip)}:${esc(t.local_port)}</b></div>
-        <div><span>公网地址</span><b title="${esc(endpointRaw)}">${esc(endpointRaw)}</b></div>
-        <div><span>今日流量</span><b>${fmtBytes(runtime.trafficIn + runtime.trafficOut)}</b></div>
-        <div><span>连接数</span><b>${runtime.available ? runtime.connections : '-'}</b></div>
+      <div class="tunnel-preview-layout">
+        <div class="tunnel-preview-identity"><img class="tunnel-preview-icon" src="/tunnel-globe.svg" alt=""><div class="tunnel-preview-name"><strong title="${esc(t.name)}">${esc(t.name)}</strong><span class="status-dot ${t.enabled ? 'is-online' : 'is-offline'} ${statusClass}">${statusLabel}</span></div><span class="tunnel-preview-local" title="${esc(t.local_ip)}:${esc(t.local_port)}">本地服务：${esc(t.local_ip)}:${esc(t.local_port)}</span></div>
+        <div class="tunnel-preview-endpoint" title="${esc(endpointShown)}"><span>公网地址</span><b>${esc(endpointShown)}</b></div>
+        <div class="tunnel-preview-traffic"><div><span>今日流量</span><b>${fmtBytes(runtime.trafficIn + runtime.trafficOut)}</b></div><div><span>连接数</span><b>${runtime.available ? runtime.connections : '-'}</b></div></div>
       </div>
     </article>`;
   }).join('') || `<div class="empty-state"><strong>还没有隧道</strong><p class="muted small">创建隧道后，这里会轮播展示隧道状态。</p></div>`;
@@ -725,6 +1003,8 @@ async function loadDashboard(view='overview'){
     const accountExpired = !!data.user.expired;
     const expiryPercent = accountExpired ? 0 : 100;
     const expiryLabel = accountExpired ? '账号已到期' : '账号有效';
+    const trafficUsagePercent = trafficLimit > 0 ? Math.min(100, Math.round(todayTraffic / trafficLimit * 100)) : 0;
+    const trafficUsageLabel = trafficLimit > 0 ? `已用 ${fmtBytes(todayTraffic)} / ${fmtBytes(trafficLimit)}` : '';
 
     app.innerHTML = appLayoutHtml(`
       <div class="workspace-stats user-overview-stats">
@@ -745,61 +1025,135 @@ async function loadDashboard(view='overview'){
             <div class="tunnel-usage-track" role="progressbar" aria-label="隧道使用情况" aria-valuemin="0" aria-valuemax="${tunnelLimit || tunnelCount || 1}" aria-valuenow="${tunnelLimit > 0 ? Math.min(tunnelCount, tunnelLimit) : tunnelCount}"><span style="width:${tunnelUsagePercent}%"></span></div>
           </div>
         </section>
-        <section class="workspace-stat overview-icon-stat"><div class="overview-stat-main"><svg class="overview-stat-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M153.6 358.4h716.8v307.2H153.6z" fill="#20C997"/><path d="M845.824 614.4V409.6h-665.6v204.8h665.6z m0 102.4h-665.6v102.4a102.4 102.4 0 0 0 102.4 102.4h460.8a51.2 51.2 0 0 1 0 102.4h-460.8a204.8 204.8 0 0 1-204.8-204.8V204.8a204.8 204.8 0 0 1 204.8-204.8h460.8a204.8 204.8 0 0 1 204.8 204.8v614.4a51.2 51.2 0 0 1-102.4 0v-102.4z m0-409.6V204.8a102.4 102.4 0 0 0-102.4-102.4h-460.8a102.4 102.4 0 0 0-102.4 102.4v102.4h665.6z m-153.6 563.2a51.2 51.2 0 1 1 0-102.4 51.2 51.2 0 0 1 0 102.4z m-358.4-716.8h102.4a51.2 51.2 0 1 1 0 102.4h-102.4a51.2 51.2 0 1 1 0-102.4z m0 307.2h102.4a51.2 51.2 0 1 1 0 102.4h-102.4a51.2 51.2 0 0 1 0-102.4z" fill="#2C6DD2"/></svg><div class="overview-stat-copy"><span>当前节点</span><strong>\${esc(node.region || node.name || '-')}</strong><small>\${esc(node.name || '未分配节点')}</small></div></div></section>
-        <section class="workspace-stat overview-icon-stat"><div class="overview-stat-main"><svg class="overview-stat-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M924.834016 734.642305V249.382098c0-74.58746-61.33588-135.071453-136.964535-135.071452H328.3552c-75.723309 0-136.964536 60.483993-136.964536 135.071452v609.667293c0 74.619011 61.304329 135.071453 136.964536 135.071453h344.193991z" fill="#9353F9"/><path d="M647.749807 1023.968449H261.592482A175.204807 175.204807 0 0 1 86.387675 848.763642V175.204807A175.204807 175.204807 0 0 1 261.592482 0h500.815036a175.204807 175.204807 0 0 1 175.204807 175.204807v546.532984zM261.592482 51.902018a123.302788 123.302788 0 0 0-123.271237 123.302789v673.558835a123.302788 123.302788 0 0 0 123.271237 123.302788H625.600739l260.046465-271.341858V175.204807a123.302788 123.302788 0 0 0-123.239686-123.302789z" fill="#2E3138"/></svg><div class="overview-stat-copy"><span>今日流量</span><strong>\${fmtBytes(todayTraffic)}</strong><small>\${trafficLimit ? `上限 \${fmtBytes(trafficLimit)}` : '当前不限额；按今日统计'}</small></div></div></section>
-        <section class="workspace-stat overview-icon-stat"><div class="overview-stat-main"><svg class="overview-stat-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M512 514m-448 0a448 448 0 1 0 896 0 448 448 0 1 0-896 0Z" fill="#69B452"/><path d="M512 512m-253.15 0a253.15 253.15 0 1 0 506.3 0 253.15 253.15 0 1 0-506.3 0Z" fill="#FFFFFF"/><path d="M512 512m-203.07 0a203.07 203.07 0 1 0 406.14 0 203.07 203.07 0 1 0-406.14 0Z" fill="#D1F0C7"/><path d="M622.12 497h-91.31a24.09 24.09 0 0 0-11.46-7.92V360.22a6 6 0 0 0-6-6h-2.81a6 6 0 0 0-6 6v128.93a24.06 24.06 0 1 0 26.19 38.08h91.49a6 6 0 0 0 6-6V503a6 6 0 0 0-6.1-6z" fill="#69B452"/></svg><div class="overview-stat-copy"><span>账号有效期</span><strong>\${esc(data.user.expires_text || '-')}</strong><small>\${data.user.expired ? '账号已到期' : '到期日期'}</small></div></div><div class="tunnel-usage"><div class="tunnel-usage-label"><span>\${expiryLabel}</span><b>\${expiryPercent}%</b></div><div class="tunnel-usage-track" role="progressbar" aria-label="账号有效状态" aria-valuemin="0" aria-valuemax="100" aria-valuenow="\${expiryPercent}"><span class="expiry-usage-fill" style="width:\${expiryPercent}%"></span></div></div></section>
-        <section class="workspace-stat port-limit-stat overview-icon-stat"><div class="overview-stat-main"><svg class="overview-stat-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M853.333333 201.984v469.333333H170.666667v-469.333333h682.666666z m-51.2 51.2H221.866667v366.933333h580.266666v-366.933333zM785.066667 802.304v51.2H238.933333v-51.2z" fill="#1296db"/></svg><div class="overview-stat-copy"><span>端口上限</span><strong>\${esc(data.user.max_ports ?? '-')}</strong><small>可分配端口总数</small></div></div><div class="tunnel-usage"><div class="tunnel-usage-label"><span>\${portUsageLabel}</span><b>\${tunnelLimit > 0 ? portUsagePercent + '%' : '—'}</b></div><div class="tunnel-usage-track" role="progressbar" aria-label="端口使用情况" aria-valuemin="0" aria-valuemax="\${tunnelLimit || tunnelCount || 1}" aria-valuenow="\${tunnelLimit > 0 ? Math.min(tunnelCount, tunnelLimit) : tunnelCount}"><span style="width:\${portUsagePercent}%"></span></div></div></section>
+        <section class="workspace-stat overview-icon-stat"><div class="overview-stat-main"><svg class="overview-stat-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M153.6 358.4h716.8v307.2H153.6z" fill="#20C997"/><path d="M845.824 614.4V409.6h-665.6v204.8h665.6z m0 102.4h-665.6v102.4a102.4 102.4 0 0 0 102.4 102.4h460.8a51.2 51.2 0 0 1 0 102.4h-460.8a204.8 204.8 0 0 1-204.8-204.8V204.8a204.8 204.8 0 0 1 204.8-204.8h460.8a204.8 204.8 0 0 1 204.8 204.8v614.4a51.2 51.2 0 0 1-102.4 0v-102.4z m0-409.6V204.8a102.4 102.4 0 0 0-102.4-102.4h-460.8a102.4 102.4 0 0 0-102.4 102.4v102.4h665.6z m-153.6 563.2a51.2 51.2 0 1 1 0-102.4 51.2 51.2 0 0 1 0 102.4z m-358.4-716.8h102.4a51.2 51.2 0 1 1 0 102.4h-102.4a51.2 51.2 0 1 1 0-102.4z m0 307.2h102.4a51.2 51.2 0 1 1 0 102.4h-102.4a51.2 51.2 0 0 1 0-102.4z" fill="#2C6DD2"/></svg><div class="overview-stat-copy"><span>当前节点</span><strong>${esc(node.region || node.name || '-')}</strong><small>${esc(node.name || '未分配节点')}</small></div></div></section>
+        <section class="workspace-stat overview-icon-stat"><div class="overview-stat-main"><svg class="overview-stat-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M960 544A480 480 0 1 1 480 64v480h480z" fill="#9526eb"/><path d="M1024 480H544V0a480 480 0 0 1 480 480z" fill="#F3ADBA"/></svg><div class="overview-stat-copy"><span>今日流量</span><strong>${fmtBytes(todayTraffic)}</strong><small>${trafficLimit ? '上限 ' + fmtBytes(trafficLimit) : '当前不限额；按今日统计'}</small></div></div>${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label"><span>${trafficUsageLabel}</span><b>${trafficUsagePercent}%</b></div><div class="tunnel-usage-track" role="progressbar" aria-label="今日流量使用情况" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${trafficUsagePercent}"><span style="width:${trafficUsagePercent}%"></span></div></div>` : ''}</section>
+        <section class="workspace-stat overview-icon-stat"><div class="overview-stat-main"><svg class="overview-stat-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M512 514m-448 0a448 448 0 1 0 896 0 448 448 0 1 0-896 0Z" fill="#69B452"/><path d="M512 512m-253.15 0a253.15 253.15 0 1 0 506.3 0 253.15 253.15 0 1 0-506.3 0Z" fill="#FFFFFF"/><path d="M512 512m-203.07 0a203.07 203.07 0 1 0 406.14 0 203.07 203.07 0 1 0-406.14 0Z" fill="#D1F0C7"/><path d="M622.12 497h-91.31a24.09 24.09 0 0 0-11.46-7.92V360.22a6 6 0 0 0-6-6h-2.81a6 6 0 0 0-6 6v128.93a24.06 24.06 0 1 0 26.19 38.08h91.49a6 6 0 0 0 6-6V503a6 6 0 0 0-6.1-6z" fill="#69B452"/></svg><div class="overview-stat-copy"><span>账号有效期</span><strong>${esc(data.user.expires_text || '-')}</strong><small>${data.user.expired ? '账号已到期' : '到期日期'}</small></div></div><div class="tunnel-usage"><div class="tunnel-usage-label"><span>${expiryLabel}</span><b>${expiryPercent}%</b></div><div class="tunnel-usage-track" role="progressbar" aria-label="账号有效状态" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${expiryPercent}"><span class="expiry-usage-fill" style="width:${expiryPercent}%"></span></div></div></section>
+        <section class="workspace-stat port-limit-stat overview-icon-stat"><div class="overview-stat-main"><svg class="overview-stat-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M853.333333 201.984v469.333333H170.666667v-469.333333h682.666666z m-51.2 51.2H221.866667v366.933333h580.266666v-366.933333zM785.066667 802.304v51.2H238.933333v-51.2z" fill="#1296db"/></svg><div class="overview-stat-copy"><span>端口上限</span><strong>${esc(data.user.max_ports ?? '-')}</strong><small>可分配端口总数</small></div></div><div class="tunnel-usage"><div class="tunnel-usage-label"><span>${portUsageLabel}</span><b>${tunnelLimit > 0 ? portUsagePercent + '%' : '—'}</b></div><div class="tunnel-usage-track" role="progressbar" aria-label="端口使用情况" aria-valuemin="0" aria-valuemax="${tunnelLimit || tunnelCount || 1}" aria-valuenow="${tunnelLimit > 0 ? Math.min(tunnelCount, tunnelLimit) : tunnelCount}"><span style="width:${portUsagePercent}%"></span></div></div></section>
       </div>
       <div class="user-dashboard-grid">
-        <section class="card node-status-card node-map-panel"><div class="node-map-backdrop" aria-hidden="true"><div class="node-map-grid"></div><svg viewBox="0 0 900 340" preserveAspectRatio="xMidYMid slice"><defs><filter id="nodeMapBlur"><feGaussianBlur stdDeviation="2.4"/></filter><linearGradient id="nodeMapFill" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#80b8ef"/><stop offset="100%" stop-color="#5e8bd9"/></linearGradient></defs><g fill="url(#nodeMapFill)" opacity=".28" filter="url(#nodeMapBlur)"><path d="M74 85l40-27 58 8 21 22 49-8 24 27-21 25-37 2-18 35-42 4-12 37-29-10-6-44-29-20z"/><path d="M214 193l39 12 28 45-8 38-21 18-18-43-25-26z"/><path d="M405 74l36-19 54 11 27 25 50-7 24 22 51-5 37 25-20 21-52-6-16 30-31-5-20 23-41-14-19-32-40-5-15-25-35-2z"/><path d="M459 166l43 1 30 31-8 51-27 47-25-18-11-52-18-24z"/><path d="M631 228l43-15 48 15 26 25-28 24-49-8-28 15-22-22z"/><path d="M748 65l42-13 39 20-6 26-42 9-30-17z"/></g><g fill="none" stroke="#5e9fe8" stroke-width="2" stroke-dasharray="5 7" opacity=".55"><path d="M170 118Q350 5 520 115T740 130"/><path d="M170 118Q250 240 430 210T740 130"/></g><g fill="#fff" stroke="#4388ec" stroke-width="3"><circle cx="170" cy="118" r="8"/><circle cx="430" cy="210" r="7"/><circle cx="740" cy="130" r="10"/></g><circle cx="740" cy="130" r="19" fill="#4388ec" opacity=".14"/></svg></div><div class="node-map-heading"><div><div class="section-kicker">CURRENT NODE · NODE OVERVIEW</div><h2>当前节点</h2></div><span class="status-badge ${nodeStateClass}"><i></i>${nodeState}</span></div><div class="node-map-content node-compact-content"><div class="node-server-art"><img src="/server-icon.svg" alt="服务器图标"></div><div class="node-compact-details"><div class="node-compact-title"><strong>${esc(node.name || '未分配节点')}</strong><span class="status-badge ${nodeStateClass}"><i></i>${nodeState}</span></div><div class="node-compact-location"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span>${esc(nodeLocation)}</span></div><div class="node-compact-meta"><span>延迟：${esc(nodeLatency)}</span><span class="node-meta-separator">|</span><span>带宽：${node.bandwidth_mbps || node.bandwidth || node.bandwidth_mbps === 0 ? esc(node.bandwidth_mbps ?? node.bandwidth) + ' Mbps' : '未设置'}</span></div></div><button type="button" class="node-switch-button" onclick="openNodeSwitch()">⇄ 切换节点</button></div><div id="nodeSwitchModal" class="node-switch-modal hidden" role="dialog" aria-modal="true" aria-labelledby="nodeSwitchTitle"><div class="node-switch-dialog"><div class="section-title"><div><div class="section-kicker">CHANGE NODE</div><h2 id="nodeSwitchTitle">切换接入节点</h2><p>切换后会影响当前账号新建隧道的默认节点。</p></div><button class="secondary" type="button" onclick="closeNodeSwitch()">关闭 ×</button></div><div id="nodeSwitchList" class="node-switch-list"><p class="muted">正在加载可用节点…</p></div></div></div></section>
-        <section class="card quick-actions-card"><div class="section-title"><div><div class="section-kicker">QUICK ACTIONS</div><h2>快捷操作</h2></div></div><div class="quick-actions-grid"><button class="quick-action" onclick="loadDashboard('tunnels')"><span>↗</span><b>管理隧道</b><small>查看和控制映射</small></button><button class="quick-action" onclick="loadDashboard('ports')"><span>#</span><b>查看端口</b><small>查看端口资源</small></button><a class="quick-action" href="/config/frpc.toml"><span>↓</span><b>下载配置</b><small>获取 frpc.toml</small></a><a class="quick-action" href="/config/deploy-frpc.sh"><span>⚙</span><b>部署脚本</b><small>安装客户端</small></a></div></section>
+        <section class="card node-status-card node-map-panel"><div class="node-map-backdrop" aria-hidden="true"><div class="node-map-grid"></div><svg viewBox="0 0 900 340" preserveAspectRatio="xMidYMid slice"><defs><filter id="nodeMapBlur"><feGaussianBlur stdDeviation="2.4"/></filter><linearGradient id="nodeMapFill" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#80b8ef"/><stop offset="100%" stop-color="#5e8bd9"/></linearGradient></defs><g fill="url(#nodeMapFill)" opacity=".28" filter="url(#nodeMapBlur)"><path d="M74 85l40-27 58 8 21 22 49-8 24 27-21 25-37 2-18 35-42 4-12 37-29-10-6-44-29-20z"/><path d="M214 193l39 12 28 45-8 38-21 18-18-43-25-26z"/><path d="M405 74l36-19 54 11 27 25 50-7 24 22 51-5 37 25-20 21-52-6-16 30-31-5-20 23-41-14-19-32-40-5-15-25-35-2z"/><path d="M459 166l43 1 30 31-8 51-27 47-25-18-11-52-18-24z"/><path d="M631 228l43-15 48 15 26 25-28 24-49-8-28 15-22-22z"/><path d="M748 65l42-13 39 20-6 26-42 9-30-17z"/></g><g fill="none" stroke="#5e9fe8" stroke-width="2" stroke-dasharray="5 7" opacity=".55"><path d="M170 118Q350 5 520 115T740 130"/><path d="M170 118Q250 240 430 210T740 130"/></g><g fill="#fff" stroke="#4388ec" stroke-width="3"><circle cx="170" cy="118" r="8"/><circle cx="430" cy="210" r="7"/><circle cx="740" cy="130" r="10"/></g><circle cx="740" cy="130" r="19" fill="#4388ec" opacity=".14"/></svg></div><div class="node-map-heading"><div><div class="section-kicker">CURRENT NODE · NODE OVERVIEW</div><h2>${stIcon('node')}当前节点</h2></div><span class="status-badge ${nodeStateClass}"><i></i>${nodeState}</span></div><div class="node-map-content node-compact-content"><div class="node-server-art"><img src="/server-icon.svg" alt="服务器图标"></div><div class="node-compact-details"><div class="node-compact-title"><strong>${esc(node.name || '未分配节点')}</strong><span class="status-badge ${nodeStateClass}"><i></i>${nodeState}</span></div><div class="node-compact-location"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span>${esc(nodeLocation)}</span></div><div class="node-compact-meta"><span>延迟：${esc(nodeLatency)}</span><span class="node-meta-separator">|</span><span>带宽：${node.bandwidth_mbps || node.bandwidth || node.bandwidth_mbps === 0 ? esc(node.bandwidth_mbps ?? node.bandwidth) + ' Mbps' : '未设置'}</span></div></div><button type="button" class="node-switch-button" onclick="openNodeSwitch()">⇄ 切换节点</button></div><div id="nodeSwitchModal" class="node-switch-modal hidden" role="dialog" aria-modal="true" aria-labelledby="nodeSwitchTitle"><div class="node-switch-dialog"><div class="section-title"><div><div class="section-kicker">CHANGE NODE</div><h2 id="nodeSwitchTitle">${stIcon('node')}切换接入节点</h2><p>切换后会影响当前账号新建隧道的默认节点。</p></div><button class="secondary" type="button" onclick="closeNodeSwitch()">关闭 ×</button></div><div id="nodeSwitchList" class="node-switch-list"><p class="muted">正在加载可用节点…</p></div></div></div></section>
+        <section class="card quick-actions-card"><div class="section-title"><div><div class="section-kicker">QUICK ACTIONS</div><h2>${stIcon('bolt')}快捷操作</h2></div></div><div class="quick-actions-grid"><button class="quick-action" onclick="loadDashboard('tunnels')"><span class="quick-action-icon">${QICON_TUNNEL}</span><b>管理隧道</b><small>查看和控制映射</small></button><button class="quick-action" onclick="openPortsModal()"><span class="quick-action-icon">${QICON_PORT}</span><b>查看端口</b><small>弹窗查看端口资源</small></button><button class="quick-action" onclick="loadDashboard('config')"><span class="quick-action-icon">${QICON_DOWNLOAD}</span><b>下载配置</b><small>配置与部署脚本</small></button><button class="quick-action" onclick="loadDashboard('profile')"><span class="quick-action-icon">${QICON_USER}</span><b>个人中心</b><small>账号与工具</small></button></div></section>
+        <section class="card dashboard-tunnels-preview"><div class="section-title"><div><div class="section-kicker">MY TUNNELS</div><h2>${stIcon('tunnel')}我的隧道</h2></div><button class="secondary tunnel-preview-all" onclick="loadDashboard('tunnels')">查看全部隧道 ↗</button></div><div id="tunnelPreviewRotator" class="tunnel-preview-rotator">${tunnelPreviewRows}</div></section>
+      <div class="dashboard-charts">
+        <section class="card traffic-usage-card">
+          <div class="section-title"><div><div class="section-kicker">TRAFFIC USAGE</div><h2>${stIcon('chart')}流量使用情况</h2></div><div class="seg-control" data-traffic-range><button type="button" data-range="today" onclick="setTrafficRange('today')">今天</button><button type="button" data-range="7d" onclick="setTrafficRange('7d')">7天</button><button type="button" data-range="30d" class="active" onclick="setTrafficRange('30d')">30天</button></div></div>
+          <div id="trafficUsageSlot" class="chart-slot"></div>
+        </section>
+        <section class="card traffic-protocol-card">
+          <div class="section-title"><div><div class="section-kicker">PROTOCOL SHARE</div><h2>${stIcon('donut')}流量占比</h2></div><span class="section-count">本月</span></div>
+          <div id="trafficProtocolSlot" class="chart-slot"></div>
+        </section>
+        <section class="card activity-card">
+          <div class="section-title"><div><div class="section-kicker">ACTIVITY</div><h2>${stIcon('activity')}最新动态</h2></div><button class="secondary activity-refresh" type="button" onclick="renderActivityFeed()">刷新</button></div>
+          <div id="activitySlot" class="chart-slot"></div>
+        </section>
+        </div>
       </div>
-      <section class="card dashboard-tunnels-preview"><div class="section-title"><div><div class="section-kicker">MY TUNNELS</div><h2>我的隧道</h2></div><button class="secondary tunnel-preview-all" onclick="loadDashboard('tunnels')">查看全部隧道 ↗</button></div><div id="tunnelPreviewRotator" class="tunnel-preview-rotator">${tunnelPreviewRows}</div></section>`, 'dashboard', '概览');
-    const previewItems = [...document.querySelectorAll('#tunnelPreviewRotator .tunnel-preview-item')];
-    if(previewItems.length > 1){
-      let previewIndex = 0;
-      previewItems.forEach((item, index) => item.classList.toggle('is-active', index === 0));
-      tunnelPreviewTimer = setInterval(() => {
-        if(!document.querySelector('#tunnelPreviewRotator')){ clearInterval(tunnelPreviewTimer); tunnelPreviewTimer = null; return; }
-        previewItems[previewIndex].classList.remove('is-active');
-        previewIndex = (previewIndex + 1) % previewItems.length;
-        previewItems[previewIndex].classList.add('is-active');
-      }, 4000);
-    } else if(previewItems.length === 1){ previewItems[0].classList.add('is-active'); }
-    return;
-  }
-  if(view === 'ports'){
-    app.innerHTML = appLayoutHtml(`
-      <section class="card dashboard-hero"><div><div class="eyebrow">RESOURCE POOL</div><h2>端口资源</h2><p>查看当前节点端口池和已分配端口。</p></div><button onclick="loadDashboard('ports')">刷新</button></section>
-      <section class="card ports-section"><div class="section-title"><div><div class="section-kicker">PORTS</div><h2>端口列表</h2></div><p>黄色表示已分配给隧道</p></div><div class="ports">${portsHtml}</div></section>`, 'dashboard-ports', '端口资源');
+      <div id="portsModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="portsModalTitle" onclick="if(event.target===this)closePortsModal()">
+        <section class="modal-page card ports-modal">
+          <div class="section-title modal-title">
+            <div><div class="section-kicker">RESOURCE POOL</div><h2 id="portsModalTitle">${stIcon('port')}端口资源</h2><p>共 ${ps.total || 0} 个 · 可用 ${ps.free || 0} 个 · 已用 ${ps.used || 0} 个；黄色表示已分配给隧道。</p></div>
+            <button type="button" class="secondary modal-close" onclick="closePortsModal()" aria-label="关闭端口资源">关闭 ×</button>
+          </div>
+          <div class="ports ports-modal-list">${portsHtml}</div>
+        </section>
+      </div>`, 'dashboard', '概览');
+    Object.keys(trafficChartCache).forEach(k => delete trafficChartCache[k]);
+    renderTrafficUsage(trafficRange);
+    renderTrafficProtocols();
+    renderActivityFeed();
     return;
   }
   if(view === 'tunnels'){
     app.innerHTML = appLayoutHtml(`
-      <section class="card dashboard-hero"><div><div class="eyebrow">MY TUNNELS</div><h2>我的隧道</h2><p>管理映射、查看状态并创建新的隧道。</p></div><button onclick="openTunnelModal()">＋ 新建隧道</button></section>
-      <section class="card tunnel-config-entry"><div class="section-title"><div><div class="section-kicker">QUICK ACTION</div><h2>创建映射</h2></div><p>支持 TCP / UDP / HTTP / HTTPS 等协议</p></div><button onclick="openTunnelModal()">新建隧道</button><span class="muted small">填写本地服务和公网访问方式，创建后下载最新 frpc 配置。</span></section>
-      <div id="tunnelModal" class="modal-backdrop${tunnelModalOpen ? '' : ' hidden'}" role="dialog" aria-modal="true" aria-labelledby="tunnelModalTitle">
-        <section class="modal-page card"><div class="section-title modal-title"><div><h2 id="tunnelModalTitle">新建隧道</h2><p>填写本地服务和公网访问方式。</p></div><button type="button" class="secondary modal-close" onclick="closeTunnelModal()">关闭 ×</button></div>
-          <form id="tunnelForm" class="grid"><div><label>名称</label><input name="name" value="${esc(tunnelFormDraft.name || '')}" placeholder="web" required></div><div><label>类型</label><select name="proxy_type" id="proxyTypeSelect">${proxyTypeOptions}</select></div><div><label>本地 IP</label><input name="local_ip" value="${esc(tunnelFormDraft.local_ip || '127.0.0.1')}" required></div><div><label>本地端口</label><input name="local_port" type="number" min="1" max="65535" value="${esc(tunnelFormDraft.local_port || '80')}" required></div><div class="remote-port-field"><label>公网端口</label>${remotePortField}</div><div class="domain-field hidden"><label>自定义域名</label><input name="custom_domains" value="${esc(tunnelFormDraft.custom_domains || '')}" placeholder="app.example.com,api.example.com"></div><div class="secret-field hidden"><label>访问密钥</label><input name="secret_key" value="${esc(tunnelFormDraft.secret_key || '')}" placeholder="留空自动生成"></div><div class="form-actions"><button>创建</button></div></form>
-          <p class="muted small">HTTP/HTTPS/TCPMUX 需要 frps 已配置对应能力。</p></section>
-      </div>
-      <section class="card tunnel-list-section"><div class="section-title"><div><div class="section-kicker">TUNNELS</div><h2>隧道列表</h2></div><span class="section-count">${data.tunnels.length} 条隧道</span></div><div class="tunnel-card-grid">${tunnelRows}</div></section>`, 'dashboard-tunnels', '我的隧道');
+      <section class="card tunnel-create-card" id="tunnelCreateCard">
+        <div class="section-title"><div><div class="section-kicker">CREATE TUNNEL</div><h2>${stIcon('plus')}创建隧道</h2><p>填好本地服务和公网访问方式，创建后重新下载 frpc.toml 并重启客户端即可生效。</p></div></div>
+        <form id="tunnelForm" class="grid tunnel-create-form">
+          <div><label>名称</label><input name="name" value="${esc(tunnelFormDraft.name || '')}" placeholder="web" required></div>
+          <div><label>类型</label><select name="proxy_type" id="proxyTypeSelect">${proxyTypeOptions}</select></div>
+          <div><label>本地 IP</label><input name="local_ip" value="${esc(tunnelFormDraft.local_ip || '127.0.0.1')}" required></div>
+          <div><label>本地端口</label><input name="local_port" type="number" min="1" max="65535" value="${esc(tunnelFormDraft.local_port || '80')}" required></div>
+          <div class="remote-port-field"><label>公网端口</label>${remotePortField}</div>
+          <div class="domain-field hidden"><label>自定义域名</label><input name="custom_domains" value="${esc(tunnelFormDraft.custom_domains || '')}" placeholder="app.example.com,api.example.com"></div>
+          <div class="secret-field hidden"><label>访问密钥</label><input name="secret_key" value="${esc(tunnelFormDraft.secret_key || '')}" placeholder="留空自动生成"></div>
+          <div class="form-actions tunnel-form-actions"><button>创建隧道</button><button type="button" class="secondary" onclick="resetTunnelForm()">清空重填</button></div>
+        </form>
+        <p class="muted small">HTTP / HTTPS / TCPMUX 需要 frps 已配置 vhostHTTPPort / vhostHTTPSPort / tcpmuxHTTPConnectPort 等对应能力。</p>
+      </section>
+      <section class="card tunnel-list-section"><div class="section-title"><div><div class="section-kicker">TUNNELS</div><h2>${stIcon('tunnel')}隧道列表</h2><p>一张卡片对应一条映射；改完配置请重新下载 frpc.toml 并重启客户端。</p></div><span class="section-count">${data.tunnels.length} 条隧道</span></div><div class="tc-grid">${tunnelRows}</div></section>`, 'dashboard-tunnels', '我的隧道');
     bindUserTunnelForm();
     return;
   }
+  if(view === 'config'){
+    const deployUrl = userDeployScriptUrl(data.user) || '/config/deploy-frpc.sh';
+    const deployCmd = userDeployScriptCommand(data.user);
+    app.innerHTML = appLayoutHtml(`
+      <div class="config-grid">
+        <section class="card config-dl-card">
+          <div class="section-title"><div><div class="section-kicker">FRPC</div><h2>${stIcon('file')}frpc.toml</h2></div></div>
+          <p class="muted small">包含你所有“已启用”隧道的完整配置，下载后覆盖客户端的 frpc.toml 即可。</p>
+          <a class="config-option" href="/config/frpc.toml"><span class="config-option-icon">${QICON_DOWNLOAD}</span><span class="config-option-copy"><b>下载 frpc 配置</b><small>frpc.toml · 覆盖即生效</small></span></a>
+        </section>
+        <section class="card config-dl-card">
+          <div class="section-title"><div><div class="section-kicker">DEPLOY</div><h2>${stIcon('script')}部署脚本</h2></div></div>
+          <p class="muted small">在客户端服务器上执行，自动安装 frpc、写入配置并注册服务。</p>
+          <a class="config-option" href="${esc(deployUrl)}"><span class="config-option-icon">${QICON_TUNNEL}</span><span class="config-option-copy"><b>下载 deploy-frpc.sh</b><small>一键安装并启动 frpc</small></span></a>
+          ${deployCmd ? `<div class="copy-line"><code>${esc(deployCmd)}</code><button type="button" class="copy-inline" data-copy-address="${esc(deployCmd)}">复制</button></div>` : ''}
+        </section>
+      </div>
+      <section class="card config-tip"><p class="muted small">想看/改具体内容？去 <button type="button" class="link-btn" onclick="loadDashboard('editor')">在线配置</button>，那里会根据你当前的隧道自动生成 frpc.toml。</p></section>`, 'dashboard-config', '配置下载');
+    return;
+  }
+  if(view === 'editor'){
+    app.innerHTML = appLayoutHtml(`
+      <section class="card editor-card">
+        <div class="section-title"><div><div class="section-kicker">FRPC.TOML</div><h2>${stIcon('file')}配置内容</h2><span class="editor-status" id="editorStatus">加载中…</span></div><div class="editor-actions"><button type="button" class="secondary" onclick="copyFrpcConfig()">复制全部</button><button type="button" class="secondary" onclick="downloadFrpcDraft()">下载 .toml</button><button type="button" class="secondary" onclick="regenFrpcConfig()">重新生成</button></div></div>
+        <textarea id="frpcEditor" class="frpc-editor" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" placeholder="# 正在加载当前 tunnels 生成的配置…"></textarea>
+        <p class="muted small">改动会暂存在本机浏览器；点“重新生成”会用当前隧道重新覆盖。新增/修改隧道后回来重新生成即可。</p>
+      </section>`, 'dashboard-editor', '在线配置');
+    initFrpcEditor();
+    return;
+  }
+  if(view === 'profile'){
+    app.innerHTML = appLayoutHtml(`
+      <div class="profile-grid">
+        <section class="card profile-card">
+          <div class="profile-head"><span class="profile-avatar">${esc(String(data.user.username||'U').slice(0,1).toUpperCase())}</span><div class="profile-id"><strong>${esc(data.user.username||'-')}</strong><small>${data.user.role === 'admin' ? '系统管理员' : '普通用户'}</small></div></div>
+          <div class="profile-rows">
+            <div class="info-line"><span>账号有效期</span><strong>${esc(data.user.expires_text || '-')}</strong></div>
+            <div class="info-line"><span>今日流量</span><strong>${fmtBytes(todayTraffic)}${trafficLimit ? ' / ' + fmtBytes(trafficLimit) : ' / 不限'}</strong></div>
+            <div class="info-line"><span>隧道数量</span><strong>${data.tunnels.length} 条</strong></div>
+            <div class="info-line"><span>端口上限</span><strong>${esc(data.user.max_ports ?? '-')}</strong></div>
+            <div class="info-line"><span>接入节点</span><strong>${esc(data.node?.region || data.node?.name || '-')}</strong></div>
+            <div class="info-line"><span>FRPS 接入点</span><strong>${esc(data.frps.addr)}:${esc(data.frps.port)}</strong></div>
+          </div>
+        </section>
+        <section class="card profile-tools">
+          <div class="section-title"><div><div class="section-kicker">RENEW</div><h2>${stIcon('key')}账号续期</h2><p>输入管理员发放的续期密钥，为当前账号延长有效期。</p></div></div>
+          <form id="renewForm" class="grid renew-form">
+            <div><label>续期密钥</label><input name="key" placeholder="RNW-XXXXXXXXXXXXXXXX" autocomplete="off" spellcheck="false" required></div>
+            <div style="align-self:end"><button type="submit">立即续期</button></div>
+          </form>
+          <div id="renewResult" class="renew-result hidden"></div>
+          <div class="profile-rows"><div class="info-line"><span>当前到期</span><strong>${esc(data.user.expires_text || '-')}</strong></div></div>
+        </section>
+      </div>`, 'dashboard-profile', '个人中心');
+    initRenewForm();
+    return;
+  }
   const sideNav = `<aside class="app-sidebar">
-      <div class="sidebar-brand"><div class="brand-mark-small">鱼</div><div><strong>FRP 管理台</strong><span>工作台</span></div></div>
+      <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>Frp 管理台</strong><span>工作台</span></div></div>
       <div class="sidebar-section-label">工作区</div>
       <button class="side-link active"><span class="side-icon">⌂</span>概览</button>
       <button class="side-link" onclick="document.querySelector('.tunnel-list-section')?.scrollIntoView({behavior:'smooth'})"><span class="side-icon">↗</span>我的隧道</button>
       <button class="side-link" onclick="document.querySelector('.ports-section')?.scrollIntoView({behavior:'smooth'})"><span class="side-icon">#</span>端口资源</button>
       <div class="sidebar-section-label">工具</div>
-      <a class="side-link" href="/config/frpc.toml"><span class="side-icon">↓</span>下载配置</a>
-      <a class="side-link" href="/config/deploy-frpc.sh"><span class="side-icon">⚙</span>部署脚本</a>
+      <a class="side-link" href="/config/frpc.toml">${sideIcon('download')}下载配置</a>
+      <a class="side-link" href="/config/deploy-frpc.sh">${sideIcon('gear')}部署脚本</a>
       <div class="sidebar-spacer"></div>
     </aside>`;
   app.innerHTML = appLayoutHtml(`
-    <section class="workspace-hero"><div><div class="hero-overline">FRP WORKSPACE</div><h1>连接你的内网服务</h1><p>统一管理隧道、端口和客户端配置，让每条映射都清晰可控。</p></div><button onclick="openTunnelModal()">＋ 新建隧道</button></section>
+    <section class="workspace-hero"><div><div class="hero-overline">FRP WORKSPACE</div><h1>连接你的内网服务</h1><p>统一管理隧道、端口和客户端配置，让每条映射都清晰可控。</p></div><button onclick="loadDashboard('tunnels')">＋ 新建隧道</button></section>
     <div class="workspace-stats">
       <section class="workspace-stat highlight"><span>隧道总数</span><strong>${data.tunnels.length}</strong><small>${data.tunnels.filter(t => t.enabled).length} 条正在启用</small></section>
       <section class="workspace-stat"><span>端口资源</span><strong>${ps.free || 0}</strong><small>可用 / 共 ${ps.total || 0} 个</small></section>
@@ -808,28 +1162,12 @@ async function loadDashboard(view='overview'){
     </div>
     <div class="workspace-columns"><div class="workspace-primary">
     ${isAdmin ? '' : userFrpsDashboardHtml(data.frps_user_dashboard)}
-    ${isAdmin ? '' : `<section class="card ports-section"><div class="section-title"><div><div class="section-kicker">RESOURCE POOL</div><h2>端口资源</h2></div><p>黄色表示已分配给隧道</p></div><div class="ports">${portsHtml}</div></section>`}
-    <section class="card tunnel-config-entry"><div class="section-title"><div><div class="section-kicker">QUICK ACTION</div><h2>开始创建映射</h2></div><p>支持 TCP / UDP / HTTP / HTTPS 等协议</p></div><button onclick="openTunnelModal()">新建隧道</button><span class="muted small">填写本地服务和公网访问方式，创建后下载最新 frpc 配置。</span></section>
-    <div id="tunnelModal" class="modal-backdrop${tunnelModalOpen ? '' : ' hidden'}" role="dialog" aria-modal="true" aria-labelledby="tunnelModalTitle">
-      <section class="modal-page card">
-        <div class="section-title modal-title"><div><h2 id="tunnelModalTitle">新建隧道</h2><p>填写本地服务和公网访问方式。</p></div><button type="button" class="secondary modal-close" onclick="closeTunnelModal()" aria-label="关闭隧道配置">关闭 ×</button></div>
-        <form id="tunnelForm" class="grid">
-          <div><label>名称</label><input name="name" value="${esc(tunnelFormDraft.name || '')}" placeholder="web" required></div>
-          <div><label>类型</label><select name="proxy_type" id="proxyTypeSelect">${proxyTypeOptions}</select></div>
-          <div><label>本地 IP</label><input name="local_ip" value="${esc(tunnelFormDraft.local_ip || '127.0.0.1')}" required></div>
-          <div><label>本地端口</label><input name="local_port" type="number" min="1" max="65535" value="${esc(tunnelFormDraft.local_port || '80')}" required></div>
-          <div class="remote-port-field"><label>公网端口</label>${remotePortField}</div>
-          <div class="domain-field hidden"><label>自定义域名</label><input name="custom_domains" value="${esc(tunnelFormDraft.custom_domains || '')}" placeholder="app.example.com,api.example.com"></div>
-          <div class="secret-field hidden"><label>访问密钥</label><input name="secret_key" value="${esc(tunnelFormDraft.secret_key || '')}" placeholder="留空自动生成"></div>
-          <div class="form-actions"><button>创建</button></div>
-        </form>
-        <p class="muted small">HTTP/HTTPS/TCPMUX 需要 frps 已配置 vhostHTTPPort / vhostHTTPSPort / tcpmuxHTTPConnectPort 等对应能力。</p>
-      </section>
-    </div>
-    <section class="card tunnel-list-section"><div class="section-title"><div><div class="section-kicker">MY TUNNELS</div><h2>我的隧道</h2><p>一张卡片对应一条映射。修改配置后，请重新下载 frpc.toml 并重启客户端。</p></div><span class="section-count">${data.tunnels.length} 条隧道</span></div><div class="tunnel-card-grid">${tunnelRows}</div></section>
+    ${isAdmin ? '' : `<section class="card ports-section"><div class="section-title"><div><div class="section-kicker">RESOURCE POOL</div><h2>${stIcon('port')}端口资源</h2></div><p>黄色表示已分配给隧道</p></div><div class="ports">${portsHtml}</div></section>`}
+    <section class="card tunnel-config-entry"><div class="section-title"><div><div class="section-kicker">QUICK ACTION</div><h2>${stIcon('plus')}开始创建映射</h2></div><p>支持 TCP / UDP / HTTP / HTTPS 等协议</p></div><button onclick="loadDashboard('tunnels')">去创建隧道</button><span class="muted small">在「隧道管理」页填写本地服务和公网访问方式，创建后下载最新 frpc 配置。</span></section>
+    <section class="card tunnel-list-section"><div class="section-title"><div><div class="section-kicker">MY TUNNELS</div><h2>${stIcon('tunnel')}我的隧道</h2><p>一张卡片对应一条映射。修改配置后，请重新下载 frpc.toml 并重启客户端。</p></div><span class="section-count">${data.tunnels.length} 条隧道</span></div><div class="tc-grid">${tunnelRows}</div></section>
     </div><aside class="workspace-aside">
-      <section class="side-info-card"><div class="section-kicker">ACCOUNT</div><h3>账号信息</h3><div class="info-line"><span>当前账号</span><strong>${esc(data.user.username)}</strong></div><div class="info-line"><span>所在节点</span><strong>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</strong></div><div class="info-line"><span>端口上限</span><strong>${esc(data.user.max_ports)}</strong></div><div class="info-line"><span>有效期</span><strong>${esc(data.user.expires_text)}</strong></div></section>
-      <section class="side-info-card dark-side"><div class="section-kicker">ACCESS POINT</div><h3>FRPS 接入点</h3><div class="endpoint-big">${esc(data.frps.addr)}</div><code>${esc(data.frps.port)}</code><div class="side-actions"><a class="btn" href="/config/frpc.toml">下载配置</a><a class="btn secondary" href="/config/deploy-frpc.sh">部署脚本</a></div></section>
+      <section class="side-info-card"><div class="section-kicker">ACCOUNT</div><h3>${stIcon('user')}账号信息</h3><div class="info-line"><span>当前账号</span><strong>${esc(data.user.username)}</strong></div><div class="info-line"><span>所在节点</span><strong>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</strong></div><div class="info-line"><span>端口上限</span><strong>${esc(data.user.max_ports)}</strong></div><div class="info-line"><span>有效期</span><strong>${esc(data.user.expires_text)}</strong></div></section>
+      <section class="side-info-card dark-side"><div class="section-kicker">ACCESS POINT</div><h3>${stIcon('node')}FRPS 接入点</h3><div class="endpoint-big">${esc(data.frps.addr)}</div><code>${esc(data.frps.port)}</code><div class="side-actions"><a class="btn" href="/config/frpc.toml">下载配置</a><a class="btn secondary" href="/config/deploy-frpc.sh">部署脚本</a></div></section>
       ${userDeployScriptAddressHtml(data.user, {title:'部署地址', desc:'复制给需要安装客户端的服务器。'})}
     </aside></div>`, 'dashboard', '概览');
   const proxyTypeSelect = document.querySelector('#proxyTypeSelect');
@@ -863,11 +1201,20 @@ async function loadDashboard(view='overview'){
   };
 }
 
-function openTunnelModal(){
-  tunnelModalOpen = true;
-  const modal = document.querySelector('#tunnelModal');
-  if(modal) modal.classList.remove('hidden');
+function focusTunnelForm(){
+  const card = document.querySelector('#tunnelCreateCard');
+  if(card) card.scrollIntoView({behavior:'smooth', block:'start'});
+  const input = document.querySelector('#tunnelForm input[name="name"]');
+  if(input) setTimeout(() => input.focus({preventScroll:true}), 260);
 }
+function resetTunnelForm(){
+  tunnelFormDraft = {};
+  const form = document.querySelector('#tunnelForm');
+  if(form) form.reset();
+  focusTunnelForm();
+}
+// 创建隧道已改为页面内表单（不再用弹窗）；保留旧函数名做兼容。
+function openTunnelModal(){ loadDashboard('tunnels').then(() => setTimeout(focusTunnelForm, 120)); }
 function closeTunnelModal(){
   tunnelModalOpen = false;
   const modal = document.querySelector('#tunnelModal');
@@ -910,7 +1257,6 @@ async function loadAdminProxies(page=adminProxyPage){
       <td>${esc(p.client_version || '-')}</td><td>${esc(p.last_start_time || '-')}</td><td>${esc(p.last_close_time || '-')}</td>
     </tr>`).join('') || emptyRow(10, dash.enabled ? '暂无映射数据' : (dash.error || 'frps dashboard 未接入'));
   app.innerHTML = appLayoutHtml(`
-    <section class="card dashboard-hero"><div><div class="eyebrow">FRPS MONITOR</div><h2>映射监控</h2><p>管理员全局视图；普通用户页面仍只显示自己的映射。</p></div><div class="hero-actions"><button onclick="loadAdminProxies(${adminProxyPage})">刷新</button><button class="secondary" onclick="loadAdminDashboard()">返回仪表盘</button></div></section>
     <section class="monitor-summary-grid">
       <section class="card monitor-summary-card monitor-summary-primary"><span>今日总流量</span><strong>${fmtBytes(monitorStats.trafficTotal)}</strong><small>入 ${fmtBytes(monitorStats.trafficIn)} · 出 ${fmtBytes(monitorStats.trafficOut)}</small></section>
       <section class="card monitor-summary-card"><span>今日入站</span><strong>${fmtBytes(monitorStats.trafficIn)}</strong><small>所有节点汇总</small></section>
@@ -983,7 +1329,7 @@ async function loadAdmin(section=currentAdminSection){
       <td class="actions node-actions user-actions">
         <button class="node-action" onclick="adminToggle(${u.id})">${u.active ? '停用' : '启用'}</button>
         <button class="node-action" onclick="adminExtend(${u.id})">续30天</button>
-        <button class="node-action" onclick="adminLimits(${u.id}, ${Number(u.traffic_limit_bytes || 0)}, ${Number(u.bandwidth_limit_kbps || 0)})">改套餐</button>
+        <button class="node-action" onclick="openAdminLimits(${u.id}, ${Number(u.traffic_limit_bytes || 0)}, ${Number(u.bandwidth_limit_kbps || 0)}, '${esc(u.username)}')">流量限制</button>
         <button class="node-action" onclick="adminReset(${u.id})">重置密码</button>
         <button class="node-action node-action-danger" onclick="adminDelete(${u.id})">删除</button>
       </td>
@@ -996,19 +1342,23 @@ async function loadAdmin(section=currentAdminSection){
       <td>${esc(n.note)}</td>
       <td class="actions node-actions"><button class="node-action" onclick='editNode(${JSON.stringify(n)})'>编辑</button><button class="node-action" onclick="nodeToggle(${n.id})">${n.active ? '停用' : '启用'}</button><a class="btn node-action" href="/config/frps.example.toml?node_id=${n.id}">frps配置</a><button class="node-action node-action-danger" onclick="nodeDelete(${n.id})">删除</button></td>
     </tr>`).join('') || emptyRow(9, '还没有节点');
-  const keyRows = keysSlice.map(k => `
+  const keyRows = keysSlice.map(k => {
+    const isRenew = k.kind === 'renew';
+    return `
     <tr>
       <td>${k.id}</td>
+      <td>${isRenew ? '<span class="key-kind renew">续期</span>' : '<span class="key-kind register">注册</span>'}</td>
       <td><code class="token" title="${esc(k.key)}">${esc(k.key)}</code></td>
       <td>${esc(k.note)}</td>
       <td>${k.used_count}/${k.max_uses}</td>
-      <td>${k.max_ports}</td>
-      <td>${fmtBytes(k.traffic_limit_bytes)} / ${k.bandwidth_limit_kbps ? `${(Number(k.bandwidth_limit_kbps) / 1024).toFixed(1)} MB/s` : '不限'}</td>
-      <td>${k.user_expires_days === 0 ? '永不过期' : `${k.user_expires_days} 天`}</td>
+      <td>${isRenew ? '-' : k.max_ports}</td>
+      <td>${isRenew ? '-' : `${fmtBytes(k.traffic_limit_bytes)} / ${k.bandwidth_limit_kbps ? `${(Number(k.bandwidth_limit_kbps) / 1024).toFixed(1)} MB/s` : '不限'}`}</td>
+      <td>${isRenew ? `+${k.user_expires_days} 天` : (k.user_expires_days === 0 ? '永不过期' : `${k.user_expires_days} 天`)}</td>
       <td>${esc(k.expires_text)} ${k.expired ? '<span class="bad">已过期</span>' : ''}</td>
       <td>${k.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
       <td class="actions"><button onclick="copyText('${k.key}')">复制</button><button onclick="inviteToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button class="danger" onclick="inviteDelete(${k.id})">删除</button></td>
-    </tr>`).join('') || emptyRow(10, '还没有注册密钥');
+    </tr>`;
+  }).join('') || emptyRow(11, '还没有密钥');
   const logRows = logsSlice.map(l => `
     <tr><td>${l.id}</td><td>${esc(l.event)}</td><td>${esc(l.username || '-')}</td><td>${esc(l.remote_port || '-')}</td><td>${esc(l.proxy_type || '-')}</td><td>${esc(l.detail || '')}</td><td>${fmtTs(l.created_at)}</td></tr>
   `).join('') || emptyRow(7, '暂无审计日志');
@@ -1022,7 +1372,7 @@ async function loadAdmin(section=currentAdminSection){
     </tr>`).join('') || emptyRow(8, '还没有软件授权码');
   const adminNodeOptions = nodeOptions((data.nodes || []).filter(n => n.active));
   const nodeHtml = `
-    <section class="card hidden" id="editNodeCard"><div class="section-title"><h2>编辑节点</h2><p>建议使用稳定域名，方便后期更换 VPS</p></div><form id="editNodeForm" class="grid">
+    <section class="card hidden" id="editNodeCard"><div class="section-title"><h2>${stIcon('edit')}编辑节点</h2><p>建议使用稳定域名，方便后期更换 VPS</p></div><form id="editNodeForm" class="grid">
       <input type="hidden" name="id">
       <div><label>地区</label><input name="region" required></div>
       <div><label>节点名</label><input name="name" required></div>
@@ -1034,7 +1384,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>备注</label><input name="note"></div>
       <div style="align-self:end"><button>保存修改</button><button type="button" class="secondary" onclick="document.querySelector('#editNodeCard').classList.add('hidden')">取消</button></div>
     </form><p class="muted small">建议 frps 地址填写域名，例如 <code>hk.example.com</code>。后期更换 VPS 时优先改 DNS，用户的 frpc 配置可保持不变。</p></section>
-    <section class="card"><div class="section-title"><h2>新增节点</h2><p>每个节点独立端口池和 token</p></div><form id="nodeForm" class="grid">
+    <section class="card"><div class="section-title"><h2>${stIcon('nodePlus')}新增节点</h2><p>每个节点独立端口池和 token</p></div><form id="nodeForm" class="grid">
       <div><label>地区</label><input name="region" placeholder="香港 / 日本 / 美国" required></div>
       <div><label>节点名</label><input name="name" placeholder="hk-1" required></div>
       <div><label>frps 域名/地址</label><input name="server_addr" placeholder="hk.example.com" required></div>
@@ -1046,9 +1396,10 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>备注</label><input name="note" placeholder="线路/机房说明"></div>
       <div style="align-self:end"><button>创建节点</button></div>
     </form></section>
-    <section class="card" id="nodes"><div class="section-title"><h2>节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>ID</th><th>地区</th><th>节点</th><th>frps</th><th>端口池</th><th>剩余</th><th>状态</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table>${paginationHtml('nodes', nodesPage, (data.nodes || []).length, ADMIN_PAGE_SIZE)}</section>`;
+    <section class="card" id="nodes"><div class="section-title"><h2>${stIcon('node')}节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>ID</th><th>地区</th><th>节点</th><th>frps</th><th>端口池</th><th>剩余</th><th>状态</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table>${paginationHtml('nodes', nodesPage, (data.nodes || []).length, ADMIN_PAGE_SIZE)}</section>`;
   const keysHtml = `
-    <section class="card" id="keys"><div class="section-title"><h2>生成注册密钥</h2><p>注册密钥固定单次使用，适合批量发货</p></div><form id="inviteForm" class="grid">
+    <section class="card" id="keys"><div class="section-title"><h2>${stIcon('key')}生成注册密钥</h2><p>注册密钥固定单次使用，适合批量发货</p></div><form id="inviteForm" class="grid">
+      <input type="hidden" name="kind" value="register">
       <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
       <div><label>备注</label><input name="note" placeholder="订单号/套餐名"></div>
       <div><label>每枚可用次数</label><input name="max_uses" type="number" value="1" min="1" max="1" disabled><span class="muted small">固定 1 次</span></div>
@@ -1058,9 +1409,17 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>注册后账号有效期天数</label><input name="user_expires_days" type="number" value="30" min="0" max="3650"></div>
       <div><label>密钥有效期天数</label><input name="key_expires_days" type="number" value="30" min="0" max="3650"></div>
       <div style="align-self:end"><button>生成密钥</button></div>
-    </form><p><a class="btn" href="/admin/export/invite-keys.csv">导出未使用可用密钥 CSV</a></p><p class="panel-note small">批量生成后会自动复制并下载本次生成的 txt。CSV 导出只包含未使用、启用中、未过期的密钥。</p></section>
-    <section class="card"><div class="section-title"><h2>注册密钥列表</h2><p>已使用密钥不会出现在 CSV 导出里</p></div><table><thead><tr><th>ID</th><th>密钥</th><th>备注</th><th>使用</th><th>端口</th><th>流量/速率策略</th><th>账号有效期</th><th>密钥到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table>${paginationHtml('keys', keysPage, (data.invite_keys || []).length, ADMIN_PAGE_SIZE)}</section>
-    ${data.software_license_authority ? `<section class="card" id="software-licenses"><div class="section-title"><h2>服务器软件授权码</h2><p>卖家后台使用：先批量生成授权码发给客户；客户输入授权码后自动绑定他的部署服务器。</p></div><form id="softwareLicenseForm" class="grid">
+    </form></section>
+    <section class="card" id="renew-keys"><div class="section-title"><h2>${stIcon('key')}生成续期密钥</h2><p>用户凭续期密钥在「个人中心 · 账号续期」自助延长账号有效期</p></div><form id="renewKeyForm" class="grid">
+      <input type="hidden" name="kind" value="renew">
+      <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
+      <div><label>备注</label><input name="note" placeholder="订单号/续期说明"></div>
+      <div><label>续期天数</label><input name="user_expires_days" type="number" value="30" min="1" max="3650"><span class="muted small">用户使用后延长这么多天</span></div>
+      <div><label>密钥有效期天数</label><input name="key_expires_days" type="number" value="30" min="0" max="3650"><span class="muted small">0 表示密钥永不过期</span></div>
+      <div style="grid-column:1/-1;display:flex;justify-content:flex-start"><button>生成续期密钥</button></div>
+    </form></section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('key')}密钥列表</h2><p>注册密钥用于新用户注册，续期密钥用于老用户延长有效期</p></div><a class="btn" href="/admin/export/invite-keys.csv">导出未使用密钥 CSV</a></div><table><thead><tr><th>ID</th><th>类型</th><th>密钥</th><th>备注</th><th>使用</th><th>端口</th><th>流量/速率策略</th><th>有效期/续期</th><th>密钥到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table>${paginationHtml('keys', keysPage, (data.invite_keys || []).length, ADMIN_PAGE_SIZE)}</section>
+    ${data.software_license_authority ? `<section class="card" id="software-licenses"><div class="section-title"><h2>${stIcon('license')}服务器软件授权码</h2><p>卖家后台使用：先批量生成授权码发给客户；客户输入授权码后自动绑定他的部署服务器。</p></div><form id="softwareLicenseForm" class="grid">
       <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
       <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
       <div><label>套餐</label><input name="plan" value="deploy"></div>
@@ -1069,7 +1428,7 @@ async function loadAdmin(section=currentAdminSection){
     </form><p class="panel-note small">客户不需要提供机器码；首次激活时授权服务器会自动绑定机器。批量生成后会自动复制并下载 txt。</p>
     <table><thead><tr><th>ID</th><th>授权码</th><th>备注</th><th>套餐</th><th>绑定机器</th><th>到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${softwareKeyRows}</tbody></table></section>` : ''}`;
   const usersHtml = `
-    <section class="card"><div class="section-title"><h2>创建用户</h2><p>管理员直开账号，可指定接入节点</p></div><form id="createUserForm" class="grid">
+    <section class="card"><div class="section-title"><h2>${stIcon('userPlus')}创建用户</h2><p>管理员直开账号，可指定接入节点</p></div><form id="createUserForm" class="grid">
       <div><label>用户名</label><input name="username" required></div>
       <div><label>初始密码</label><input name="password" type="password" required></div>
       <div><label>接入节点</label><select name="node_id" required>${adminNodeOptions}</select></div>
@@ -1079,16 +1438,30 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>有效期天数</label><input name="expires_days" type="number" value="30" min="0" max="3650"><span class="muted small">0 表示永不过期</span></div>
       <div style="align-self:end"><button>创建</button></div>
     </form></section>
-    <section class="card" id="users"><div class="section-title"><h2>用户列表</h2><p>管理状态、续期、注册密钥和删除账号</p></div>
+    <section class="card" id="users"><div class="section-title"><h2>${stIcon('users')}用户列表</h2><p>管理状态、续期、注册密钥和删除账号</p></div>
       <form id="adminUserFilterForm" class="grid admin-user-filters">
         <div><label for="adminUserSearch">搜索用户</label><input id="adminUserSearch" name="search" value="${esc(adminUserSearch)}" placeholder="用户名、ID、注册密钥"></div>
         <div><label for="adminUserNode">接入节点</label><select id="adminUserNode" name="node"><option value="">全部节点</option>${(data.nodes || []).map(n => `<option value="${n.id}" ${String(n.id)===String(adminUserNode)?'selected':''}>${esc(n.region)} / ${esc(n.name)}</option>`).join('')}</select></div>
         <div><label for="adminUserStatus">账号状态</label><select id="adminUserStatus" name="status"><option value="all" ${adminUserStatus==='all'?'selected':''}>全部状态</option><option value="active" ${adminUserStatus==='active'?'selected':''}>正常启用</option><option value="disabled" ${adminUserStatus==='disabled'?'selected':''}>已停用</option><option value="expired" ${adminUserStatus==='expired'?'selected':''}>已到期</option></select></div>
         <div class="form-actions"><button type="submit">筛选</button><button type="button" class="secondary" id="adminUserFilterReset">重置</button></div>
       </form>
-      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>ID</th><th>用户</th><th>角色</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>到期</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>`;
+      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>ID</th><th>用户</th><th>角色</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>到期</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>
+    <div id="adminLimitsModal" class="modal-backdrop modal-center hidden" role="dialog" aria-modal="true" aria-labelledby="adminLimitsTitle" onclick="if(event.target===this)closeAdminLimits()">
+      <section class="modal-page card admin-limits-modal">
+        <div class="section-title modal-title">
+          <div><div class="section-kicker">LIMITS</div><h2 id="adminLimitsTitle">${stIcon('chart')}流量 / 速率限制</h2><p id="adminLimitsUser">调整该用户的每日流量上限与速率策略。</p></div>
+          <button type="button" class="secondary modal-close" onclick="closeAdminLimits()">关闭 ×</button>
+        </div>
+        <form id="adminLimitsForm" class="grid">
+          <input type="hidden" name="id">
+          <div><label>今日流量上限 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
+          <div><label>速率策略 MB/s</label><input name="bandwidth_limit_mbs" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限；仅后台可见</span></div>
+          <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存</button><button type="button" class="secondary" onclick="closeAdminLimits()">取消</button></div>
+        </form>
+      </section>
+    </div>`;
   const riskHtml = `
-    <section class="card" id="risk"><div class="section-title"><h2>投诉处理 / 风控</h2><p>按端口定位用户并快速封禁</p></div>
+    <section class="card" id="risk"><div class="section-title"><h2>${stIcon('risk')}投诉处理 / 风控</h2><p>按端口定位用户并快速封禁</p></div>
       <form id="lookupPortForm" class="grid">
         <div><label>被投诉端口</label><input name="remote_port" type="number" min="1" max="65535" placeholder="例如 20088" required></div>
         <div><label>节点（可选）</label><select name="node_id"><option value="0">全部节点</option>${nodeOptions(data.nodes || [])}</select></div>
@@ -1096,7 +1469,7 @@ async function loadAdmin(section=currentAdminSection){
       </form>
       <div id="riskResult" class="risk-result"></div>
     </section>
-    <section class="card"><div class="section-title"><h2>审计日志</h2><p>最近 80 条关键操作和风控事件</p></div><table><thead><tr><th>ID</th><th>事件</th><th>用户</th><th>端口</th><th>协议</th><th>详情</th><th>时间</th></tr></thead><tbody>${logRows}</tbody></table>${paginationHtml('risk', riskPage, (data.logs || []).length, ADMIN_PAGE_SIZE)}</section>`;
+    <section class="card"><div class="section-title"><h2>${stIcon('log')}审计日志</h2><p>最近 80 条关键操作和风控事件</p></div><table><thead><tr><th>ID</th><th>事件</th><th>用户</th><th>端口</th><th>协议</th><th>详情</th><th>时间</th></tr></thead><tbody>${logRows}</tbody></table>${paginationHtml('risk', riskPage, (data.logs || []).length, ADMIN_PAGE_SIZE)}</section>`;
   const sectionHtml = {users: usersHtml, keys: keysHtml, nodes: nodeHtml, risk: riskHtml}[currentAdminSection] || usersHtml;
   const sectionTitles = {users:'用户管理', keys:'注册密钥', nodes:'新增节点', risk:'风控审计'};
   app.innerHTML = appLayoutHtml(sectionHtml, currentAdminSection, sectionTitles[currentAdminSection] || '管理台');
@@ -1188,6 +1561,33 @@ async function loadAdmin(section=currentAdminSection){
       }catch(err){ show(err.message, true); }
     };
   }
+  const renewKeyForm = document.querySelector('#renewKeyForm');
+  if(renewKeyForm){
+    renewKeyForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      try{
+        const r = await api('/api/admin/invite-keys/create', {method:'POST', body:Object.fromEntries(fd)});
+        const keys = r.keys || (r.key ? [r.key] : []);
+        show(r.message || '续期密钥已生成');
+        if(keys.length){ await copyText(keys.join('\n')); }
+        await loadAdmin();
+      }catch(err){ show(err.message, true); }
+    };
+  }
+  const adminLimitsForm = document.querySelector('#adminLimitsForm');
+  if(adminLimitsForm){
+    adminLimitsForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(e.target));
+      try{
+        const r = await api('/api/admin/users/limits', {method:'POST', body});
+        closeAdminLimits();
+        show(r.message || '已更新流量/速率限制');
+        await loadAdmin();
+      }catch(err){ show(err.message, true); }
+    };
+  }
   const lookupPortForm = document.querySelector('#lookupPortForm');
   if(lookupPortForm){
     lookupPortForm.onsubmit = async (e) => {
@@ -1213,9 +1613,9 @@ function renderRiskResult(data){
     </tr>`).join('') || emptyRow(8, '没有查到该端口');
   const logRows = logs.map(l => `<tr><td>${esc(l.event)}</td><td>${esc(l.username || '-')}</td><td>${esc(l.detail || '')}</td><td>${fmtTs(l.created_at)}</td></tr>`).join('') || emptyRow(4, '该端口暂无日志');
   box.innerHTML = `
-    <div class="section-title"><h3>查询结果</h3><p>如确认违规，可直接封禁用户</p></div>
+    <div class="section-title"><h3>${stIcon('search')}查询结果</h3><p>如确认违规，可直接封禁用户</p></div>
     <table><thead><tr><th>节点</th><th>端口</th><th>用户</th><th>账号状态</th><th>隧道</th><th>协议</th><th>本地服务</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>
-    <div class="section-title"><h3>端口相关日志</h3><p>最近 30 条</p></div>
+    <div class="section-title"><h3>${stIcon('log')}端口相关日志</h3><p>最近 30 条</p></div>
     <table><thead><tr><th>事件</th><th>用户</th><th>详情</th><th>时间</th></tr></thead><tbody>${logRows}</tbody></table>`;
 }
 
@@ -1376,15 +1776,20 @@ async function restoreFullBackup(){
 
 async function adminToggle(id){ await api('/api/admin/users/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
 async function adminExtend(id){ await api('/api/admin/users/extend', {method:'POST', body:{id, days:30}}).then(r=>{show(r.message||'已续期'); loadAdmin();}).catch(e=>show(e.message,true)); }
-async function adminLimits(id, trafficBytes=0, bandwidthKbps=0){
-  const currentGb = trafficBytes ? (Number(trafficBytes) / 1024 / 1024 / 1024).toFixed(1) : '0';
-  const currentMbs = bandwidthKbps ? (Number(bandwidthKbps) / 1024).toFixed(1) : '0';
-  const traffic_limit_gb = prompt('今日流量上限 GB（0 表示不限）', currentGb);
-  if(traffic_limit_gb === null) return;
-  const bandwidth_limit_mbs = prompt('速率策略 MB/s（0 表示不限，仅后台可见）', currentMbs);
-  if(bandwidth_limit_mbs === null) return;
-  await api('/api/admin/users/limits', {method:'POST', body:{id, traffic_limit_gb, bandwidth_limit_mbs}}).then(r=>{show(r.message||'已更新套餐'); loadAdmin();}).catch(e=>show(e.message,true));
+function openAdminLimits(id, trafficBytes=0, bandwidthKbps=0, username=''){
+  const modal = document.querySelector('#adminLimitsModal');
+  if(!modal) return;
+  const form = modal.querySelector('#adminLimitsForm');
+  if(form){
+    form.elements.id.value = id;
+    form.elements.traffic_limit_gb.value = trafficBytes ? (Number(trafficBytes) / 1024 / 1024 / 1024).toFixed(1) : '0';
+    form.elements.bandwidth_limit_mbs.value = bandwidthKbps ? (Number(bandwidthKbps) / 1024).toFixed(1) : '0';
+  }
+  const label = modal.querySelector('#adminLimitsUser');
+  if(label) label.textContent = username ? `用户 ${username}` : '调整该用户的每日流量上限与速率策略。';
+  modal.classList.remove('hidden');
 }
+function closeAdminLimits(){ document.querySelector('#adminLimitsModal')?.classList.add('hidden'); }
 async function adminReset(id){ if(confirm('重置该用户密码？')) await api('/api/admin/users/reset-password', {method:'POST', body:{id}}).then(r=>{show(r.message); loadAdmin();}).catch(e=>show(e.message,true)); }
 async function adminDelete(id){ if(confirm('删除用户会释放端口并删除隧道，确定？')) await api('/api/admin/users/delete', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
 async function inviteToggle(id){ await api('/api/admin/invite-keys/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
@@ -1451,11 +1856,75 @@ async function loadAdminHealth(){
       <td>${Number(n.port_count || 0) - Number(n.free_count || 0)} / ${n.port_count || 0}</td>
     </tr>`).join('') || emptyRow(3, '暂无节点');
   app.innerHTML = appLayoutHtml(`
-    <section class="card dashboard-hero"><div><div class="eyebrow">NODE HEALTH</div><h2>节点健康</h2><p>检查 frps bind/auth 端口连通性，确认节点在线和端口池使用情况。</p></div><div class="hero-actions"><button onclick="loadAdminHealth()">立即刷新</button><button class="secondary" onclick="loadAdminDashboard()">返回仪表盘</button></div></section>
-    <section class="card node-health-card"><div class="section-title"><h2>节点健康状态</h2><p>每页 ${healthPageSize} 条</p></div>
+    <section class="card node-health-card"><div class="section-title"><h2>${stIcon('pulse')}节点健康状态</h2><p>每页 ${healthPageSize} 条</p></div>
       <table class="compact-table"><thead><tr><th>节点</th><th>状态</th><th>端口使用</th></tr></thead><tbody>${nodeRows}</tbody></table>
       ${paginationHtml('health', nodeHealthPage, (data.nodes || []).length, healthPageSize)}
     </section>`, 'health', '节点健康');
+}
+
+/* --- Admin host resource charts (2D line/area, no external libs) --- */
+let adminHostHistory = [];
+
+function hostClockText(ts){
+  const d = new Date((Number(ts) || 0) * 1000);
+  if(isNaN(d.getTime())) return '';
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+function hostChartSvg(points, key, color, gradId, width, label){
+  const W = Math.max(180, Math.round(width || 300));
+  const H = 132, padL = 30, padR = 30, padT = 14, padB = 20;
+  const innerW = Math.max(10, W - padL - padR), innerH = Math.max(10, H - padT - padB);
+  let pts = (points || []).filter(p => p && p[key] !== null && p[key] !== undefined && !isNaN(Number(p[key])));
+  if(!pts.length) return '<div class="host-chart-empty">等待采样…</div>';
+  if(pts.length === 1) pts = [pts[0], pts[0]];
+  const n = pts.length;
+  const clamp = v => Math.max(0, Math.min(100, Number(v)));
+  const xs = i => padL + (innerW * i) / (n - 1);
+  const ys = v => padT + innerH - (clamp(v) / 100) * innerH;
+  let grid = '';
+  [0, 25, 50, 75, 100].forEach(v => {
+    const yy = ys(v).toFixed(1);
+    grid += `<line x1="${padL}" y1="${yy}" x2="${(W - padR).toFixed(1)}" y2="${yy}" class="host-chart-grid"/>`;
+  });
+  [100, 50, 0].forEach(v => {
+    grid += `<text x="${padL - 6}" y="${(ys(v) + 3.5).toFixed(1)}" text-anchor="end" class="host-chart-ylabel">${v}%</text>`;
+  });
+  const coords = pts.map((p, i) => [xs(i), ys(p[key])]);
+  const line = coords.map((c, i) => `${i ? 'L' : 'M'}${c[0].toFixed(1)},${c[1].toFixed(1)}`).join(' ');
+  const base = (padT + innerH).toFixed(1);
+  const area = `${line} L${coords[n-1][0].toFixed(1)},${base} L${coords[0][0].toFixed(1)},${base} Z`;
+  const last = coords[n-1], lastV = Math.round(clamp(pts[n-1][key]));
+  const vx = Math.min(Math.max(last[0], padL + 14), W - padR - 14);
+  const vy = Math.max(last[1] - 10, padT + 10);
+  const t0 = hostClockText(pts[0].ts), t1 = hostClockText(pts[n-1].ts);
+  return `<svg class="host-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label || '')}">
+    <defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity=".32"/><stop offset="100%" stop-color="${color}" stop-opacity=".02"/></linearGradient></defs>
+    ${grid}
+    <path d="${area}" fill="url(#${gradId})"/>
+    <path d="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3.6" fill="#fff" stroke="${color}" stroke-width="2.2"/>
+    <text x="${vx.toFixed(1)}" y="${vy.toFixed(1)}" text-anchor="middle" class="host-chart-value">${lastV}%</text>
+    ${n > 2 ? `<text x="${padL}" y="${H - 5}" text-anchor="start" class="host-chart-xlabel">${esc(t0)}</text>` : ''}
+    <text x="${(W - padR).toFixed(1)}" y="${H - 5}" text-anchor="end" class="host-chart-xlabel">${n > 2 ? esc(t1) : '采样中'}</text>
+  </svg>`;
+}
+
+function hostChartPanelHtml(history, key, color, gradId, label, valueLabel, note){
+  const count = (history || []).filter(p => p && p[key] !== null && p[key] !== undefined).length;
+  return `<div class="host-chart-panel">
+    <div class="host-chart-head"><span class="host-chart-name"><i class="host-dot ${key}"></i>${esc(label)}</span><b>${esc(valueLabel)}</b></div>
+    <div class="host-chart-slot" data-metric="${key}" data-color="${color}" data-grad="${gradId}" data-label="${esc(label)}"></div>
+    <div class="host-chart-foot"><small>${esc(note)}</small><small class="host-chart-samples">采样 ${count} 点</small></div>
+  </div>`;
+}
+
+function renderHostCharts(){
+  const slots = document.querySelectorAll('.host-chart-slot');
+  if(!slots.length) return;
+  Array.prototype.forEach.call(slots, slot => {
+    slot.innerHTML = hostChartSvg(adminHostHistory, slot.dataset.metric, slot.dataset.color, slot.dataset.grad, slot.clientWidth || 260, slot.dataset.label);
+  });
 }
 
 async function loadAdminDashboard(auto=false){
@@ -1470,7 +1939,6 @@ async function loadAdminDashboard(auto=false){
   }
   setNav();
   const refreshSeconds = Math.max(10, Number(data.refresh_seconds || 30));
-  const nowText = new Date().toLocaleTimeString();
   const portStats = data.port_stats || {};
   const userStats = data.user_stats || {};
   const host = data.host || {};
@@ -1489,36 +1957,84 @@ async function loadAdminDashboard(auto=false){
   window.adminProxyTypeOptions = data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux'];
   const frpcUserOptions = frpcUsers.map(u => `<option value="${u.id}">${esc(u.username)} · ${esc(u.node_region || '-')} / ${esc(u.node_name || '-')} · 端口 ${u.port_count || 0} · 可用 ${(u.available_ports || []).length} · 隧道 ${u.tunnel_count || 0}</option>`).join('');
   const proxyTypeOptions = (data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux']).map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  const hostCpu = host.cpu_percent == null ? null : Number(host.cpu_percent);
+  const hostMem = host.memory_percent == null ? null : Number(host.memory_percent);
+  const hostCpuLabel = hostCpu == null ? '—' : hostCpu + '%';
+  const hostMemLabel = hostMem == null ? '—' : hostMem + '%';
+  const hostHistory = Array.isArray(host.history) ? host.history : [];
+  const hostSampleSeconds = Math.max(5, Number(host.sample_seconds || 30));
+  const hostSamplePoints = Math.max(6, Number(host.sample_points || 60));
+  const nodeRows = (data.nodes || []).map(n => {
+    const ok = !!n.auth_port_ok;
+    const latency = n.auth_latency_ms == null ? '—' : `${n.auth_latency_ms} ms`;
+    const statusText = ok ? '在线' : (n.active ? '不可达' : '已停用');
+    const portText = `端口 ${Number(n.port_count || 0)} / 空闲 ${Number(n.free_count || 0)}`;
+    return `<div class="admin-node-row"><span class="admin-node-dot ${ok ? 'ok' : 'bad'}" title="${esc(n.auth_message || statusText)}"></span><div class="admin-node-copy"><strong>${esc(n.name || '-')}</strong><small>${esc(n.server_addr || '-')}:${esc(n.server_port ?? '-')}</small></div><div class="admin-node-meta"><b>${esc(latency)}</b><small>${esc(statusText)} · ${esc(portText)}</small></div></div>`;
+  }).join('') || '<div class="empty-state"><strong>还没有节点</strong><p class="muted small">先去「节点管理」添加一个 frps 节点。</p></div>';
   app.innerHTML = appLayoutHtml(`
-    <section class="dashboard-hero card">
-      <div>
-        <div class="eyebrow">ADMIN DASHBOARD</div>
-        <h2>运行总览</h2>
-        <p>主机资源、备份和运维入口集中在这里。最后检查：${esc(nowText)}</p>
-      </div>
-      <div class="hero-actions">
-        <button onclick="loadAdminDashboard()">立即刷新</button>
-        <button class="secondary" onclick="loadAdmin('nodes')">新增节点</button>
-      </div>
-    </section>
 
-    <div class="metric-grid">
-      <section class="card stat"><div class="label">面板版本</div><div class="num">${esc(data.panel_version || data.version || '-')}</div><div class="sub">frp-manager-lite</div></section>
-      <section class="card stat"><div class="label">节点在线</div><div class="num">${data.active_node_count}/${data.node_count}</div><div class="sub">每 ${refreshSeconds} 秒自动检查认证端口</div></section>
-      <section class="card stat"><div class="label">端口使用率</div><div class="num">${portUsage}%</div><div class="sub">已用 ${usedPorts} · 空闲 ${freePorts} · 总数 ${totalPorts}</div></section>
-      <section class="card stat"><div class="label">用户</div><div class="num">${userStats.active}/${userStats.total}</div><div class="sub">活跃用户 / 总用户</div></section>
-      <section class="card stat"><div class="label">CPU</div><div class="num">${host.cpu_percent == null ? '-' : `${host.cpu_percent}%`}</div><div class="sub">${host.cpu_count || 0} 核 · load ${esc(host.load1 ?? '-')} / ${esc(host.load5 ?? '-')} / ${esc(host.load15 ?? '-')}</div></section>
-      <section class="card stat"><div class="label">内存</div><div class="num">${host.memory_percent == null ? '-' : `${host.memory_percent}%`}</div><div class="sub">${fmtBytes(host.memory_used)} / ${fmtBytes(host.memory_total)}</div></section>
+    <div class="workspace-stats user-overview-stats admin-overview-stats">
+      <section class="workspace-stat overview-icon-stat"><div class="overview-stat-main"><span class="overview-stat-icon">${QICON_TRAFFIC}</span><div class="overview-stat-copy"><span>总流量</span><strong>${fmtBytes(data.traffic_today)}</strong><small>今日全平台 · 所有用户</small></div></div></section>
+      <section class="workspace-stat highlight overview-icon-stat"><div class="overview-stat-main"><span class="overview-stat-icon">${QICON_VERSION}</span><div class="overview-stat-copy"><span>面板版本</span><strong>${esc(data.panel_version || data.version || '-')}</strong><small>frp-manager-lite</small></div></div></section>
+      <section class="workspace-stat overview-icon-stat"><div class="overview-stat-main"><span class="overview-stat-icon">${QICON_SERVER}</span><div class="overview-stat-copy"><span>节点在线</span><strong>${data.active_node_count}/${data.node_count}</strong><small>每 ${refreshSeconds} 秒检查认证端口</small></div></div></section>
+      <section class="workspace-stat overview-icon-stat"><div class="overview-stat-main"><span class="overview-stat-icon">${QICON_PORT}</span><div class="overview-stat-copy"><span>端口使用率</span><strong>${portUsage}%</strong><small>已用 ${usedPorts} · 空闲 ${freePorts} · 共 ${totalPorts}</small></div></div><div class="tunnel-usage"><div class="tunnel-usage-label"><span>端口池</span><b>${portUsage}%</b></div><div class="tunnel-usage-track" role="progressbar" aria-label="端口使用率" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${portUsage}"><span style="width:${portUsage}%"></span></div></div></section>
+      <section class="workspace-stat overview-icon-stat"><div class="overview-stat-main"><span class="overview-stat-icon">${QICON_USER}</span><div class="overview-stat-copy"><span>用户</span><strong>${userStats.active}/${userStats.total}</strong><small>活跃用户 / 总用户</small></div></div></section>
     </div>
 
-    <section class="card"><div class="section-title"><h2>运维入口</h2><p>常用下载和备份操作</p></div>
-      <div class="ops-list ops-grid">
-        ${setupHtml}
-        <div class="ops-item"><div class="label">下载模块</div><p class="row"><button onclick="openAdminFrpcModal()">下载 frpc 配置/部署脚本</button><a class="btn" href="/admin/backup/full.zip">下载全量备份</a></p><p class="muted small">管理员可先为普通用户配置隧道，再下载 frpc.toml 和 deploy-frpc.sh 给用户。</p></div>
-        <div class="ops-item"><div class="label">恢复全量备份</div><p class="row"><input id="restoreBackupFile" type="file" accept=".zip,application/zip"><button class="danger" onclick="restoreFullBackup()">恢复备份</button></p><p class="muted small">会要求输入 RESTORE，并在恢复前自动保存当前备份。</p></div>
-        <div class="ops-item"><div class="label">业务概况</div><p class="muted small">隧道 ${data.tunnel_count || 0} · 注册密钥 ${data.invite_key_count || 0} · 封禁记录 ${data.ban_count || 0}</p></div>
-      </div>
-    </section>
+    <div class="admin-dashboard-grid">
+      <section class="card admin-host-card">
+        <div class="section-title"><div><div class="section-kicker">HOST RESOURCES</div><h2>${stIcon('cpu')}主机资源</h2></div><span class="status-badge ${hostCpu == null ? '' : 'ok'}"><i></i>运行中</span></div>
+        <div class="host-charts">
+          ${hostChartPanelHtml(hostHistory, 'cpu', '#3478f6', 'hostGradCpu', 'CPU 使用率', hostCpuLabel, `${host.cpu_count || 0} 核 · 负载 ${host.load1 ?? '-'} / ${host.load5 ?? '-'} / ${host.load15 ?? '-'}`)}
+          ${hostChartPanelHtml(hostHistory, 'mem', '#9353f9', 'hostGradMem', '内存使用率', hostMemLabel, `${fmtBytes(host.memory_used)} / ${fmtBytes(host.memory_total)} · 可用 ${fmtBytes(host.memory_available)}`)}
+        </div>
+        <div class="host-meta-row"><div><span>节点在线</span><b>${data.active_node_count}/${data.node_count}</b></div><div><span>自动检查</span><b>每 ${refreshSeconds} 秒</b></div><div><span>资源采样</span><b>每 ${hostSampleSeconds} 秒 · 保留 ${hostSamplePoints} 点</b></div></div>
+      </section>
+
+      <section class="card quick-actions-card">
+        <div class="section-title"><div><div class="section-kicker">QUICK ACTIONS</div><h2>${stIcon('bolt')}快捷操作</h2></div></div>
+        <div class="quick-actions-grid">
+          <button class="quick-action" onclick="loadAdmin('users')"><span class="quick-action-icon">${QICON_USER}</span><b>用户管理</b><small>账号与到期</small></button>
+          <button class="quick-action" onclick="loadAdmin('keys')"><span class="quick-action-icon">${QICON_KEY}</span><b>注册密钥</b><small>邀请注册</small></button>
+          <button class="quick-action" onclick="loadAdmin('nodes')"><span class="quick-action-icon">${QICON_NODE}</span><b>节点管理</b><small>frps 接入</small></button>
+          <button class="quick-action" onclick="loadAdmin('health')"><span class="quick-action-icon">${QICON_SERVER}</span><b>节点健康</b><small>连通性检查</small></button>
+          <button class="quick-action" onclick="loadAdminProxies()"><span class="quick-action-icon">${QICON_TUNNEL}</span><b>映射监控</b><small>隧道状态</small></button>
+          <button class="quick-action" onclick="loadAdmin('risk')"><span class="quick-action-icon">${QICON_RISK}</span><b>风控审计</b><small>登录与封禁</small></button>
+        </div>
+      </section>
+
+      <section class="card admin-ops-card">
+        <div class="section-title"><div><div class="section-kicker">OPERATIONS</div><h2>${stIcon('tools')}运维入口</h2></div></div>
+        <div class="ops-list">
+          ${setupHtml}
+          <div class="ops-item"><div class="label">下载模块</div><p class="muted small">为普通用户生成 frpc.toml 与 deploy-frpc.sh。</p><p class="row"><button onclick="openAdminFrpcModal()">为用户生成配置</button></p></div>
+          <div class="ops-item"><div class="label">全量备份</div><p class="muted small">导出数据库与前端配置文件。</p><p class="row"><a class="btn" href="/admin/backup/full.zip">下载全量备份</a></p></div>
+        </div>
+      </section>
+
+      <section class="card admin-nodes-card">
+        <div class="section-title"><div><div class="section-kicker">NODES</div><h2>${stIcon('node')}节点状态</h2></div><span class="section-count">${data.active_node_count}/${data.node_count} 在线</span></div>
+        <div class="admin-node-list">${nodeRows}</div>
+      </section>
+
+      <section class="card admin-biz-card">
+        <div class="section-title"><div><div class="section-kicker">BUSINESS</div><h2>${stIcon('chart')}业务概况</h2></div></div>
+        <div class="admin-biz-list">
+          <div><span>隧道总数</span><b>${data.tunnel_count || 0}</b></div>
+          <div><span>普通用户</span><b>${userStats.total || 0}</b></div>
+          <div><span>注册密钥</span><b>${data.invite_key_count || 0}</b></div>
+          <div><span>封禁记录</span><b>${data.ban_count || 0}</b></div>
+        </div>
+      </section>
+
+      <section class="card admin-backup-card">
+        <div class="section-title"><div><div class="section-kicker">BACKUP</div><h2>${stIcon('backup')}备份与恢复</h2></div><span class="section-count">R2 ${r2.configured ? '已配置' : '未配置'}</span></div>
+        <div class="ops-list">
+          <div class="ops-item"><div class="label">恢复全量备份</div><p class="row"><input id="restoreBackupFile" type="file" accept=".zip,application/zip"><button class="danger" onclick="restoreFullBackup()">恢复备份</button></p><p class="muted small">会要求输入 RESTORE，并在恢复前自动保存当前备份。</p></div>
+          <div class="ops-item"><div class="label">Cloudflare R2</div><p class="muted small">${r2Status} · ${esc(r2Source)}</p><p class="row"><button class="secondary" onclick="backupToR2()">上传备份到 R2</button></p></div>
+        </div>
+      </section>
+    </div>
 
     <div id="adminFrpcModal" class="modal-backdrop${adminFrpcModalOpen ? '' : ' hidden'}" role="dialog" aria-modal="true" aria-labelledby="adminFrpcModalTitle">
       <section class="modal-page card admin-frpc-modal">
@@ -1532,7 +2048,7 @@ async function loadAdminDashboard(auto=false){
       </section>
     </div>
 
-    <section class="card"><div class="section-title"><h2>Cloudflare R2 备份配置</h2><p>${r2Status} · ${esc(r2Source)}</p></div>
+    <section class="card"><div class="section-title"><h2>${stIcon('cloud')}Cloudflare R2 备份配置</h2><p>${r2Status} · ${esc(r2Source)}</p></div>
       <form id="r2ConfigForm" class="grid r2-form">
         <div><label>Account ID</label><input name="account_id" value="${esc(r2.account_id || '')}" placeholder="Cloudflare Account ID"></div>
         <div><label>Access Key ID</label><input name="access_key_id" value="${esc(r2.access_key_id || '')}" placeholder="R2 API Token Access Key ID"></div>
@@ -1543,6 +2059,8 @@ async function loadAdminDashboard(auto=false){
       </form>
       <p class="muted small">配置保存在本面板数据库中；Secret 不会明文回显。已有环境变量配置仍可作为兼容兜底。</p>
     </section>`, 'admin-dashboard', '运行总览');
+  adminHostHistory = hostHistory;
+  renderHostCharts();
   const r2Form = document.querySelector('#r2ConfigForm');
   if(r2Form) r2Form.onsubmit = saveR2Config;
   const adminFrpcForm = document.querySelector('#adminFrpcForm');
@@ -1568,6 +2086,31 @@ async function openNodeSwitch(){
   }catch(err){list.innerHTML='<p class="error">'+esc(err.message||'节点列表加载失败')+'</p>';}
 }
 function closeNodeSwitch(){document.getElementById('nodeSwitchModal')?.classList.add('hidden');}
+function openPortsModal(){ const m = document.getElementById('portsModal'); if(m) m.classList.remove('hidden'); }
+function closePortsModal(){ document.getElementById('portsModal')?.classList.add('hidden'); }
+document.addEventListener('keydown', (e) => { if(e.key === 'Escape') closePortsModal(); });
+function initRenewForm(){
+  const form = document.querySelector('#renewForm');
+  if(!form) return;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const box = document.querySelector('#renewResult');
+    const key = String(new FormData(form).get('key') || '').trim();
+    if(!key){ if(box){ box.className = 'renew-result error'; box.textContent = '请输入续期密钥'; } return; }
+    const btn = form.querySelector('button');
+    if(btn) btn.disabled = true;
+    try{
+      const r = await api('/api/user/renew', {method:'POST', body:{key}});
+      if(box){ box.className = 'renew-result ok'; box.textContent = r.message || '续期成功'; }
+      show(r.message || '续期成功');
+      await loadDashboard('profile');
+    }catch(err){
+      if(box){ box.className = 'renew-result error'; box.textContent = err.message || '续期失败'; }
+    }finally{
+      if(btn) btn.disabled = false;
+    }
+  };
+}
 let currentDashboardNodeId=null;
 async function switchDashboardNode(nodeId){
   if(!nodeId||String(nodeId)===String(currentDashboardNodeId)){closeNodeSwitch();return;}
