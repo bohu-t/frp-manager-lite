@@ -2892,6 +2892,10 @@ class Handler(BaseHTTPRequestHandler):
             token = make_csrf_token()
             self.send_json({"ok": True, "csrf_token": token}, headers={"Set-Cookie": f"fml_csrf={token}; SameSite=Lax; Path=/; Max-Age={CSRF_TTL}"})
             return
+        if path == "/api/ping":
+            # Lightweight client-side latency probe (no DB / no auth work).
+            self.send_json({"ok": True, "t": now()}, headers={"Cache-Control": "no-store"})
+            return
         if path == "/api/nodes":
             with db() as conn:
                 self.send_json({"ok": True, "nodes": list_public_nodes(conn, active_only=True)})
