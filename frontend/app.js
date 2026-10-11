@@ -606,8 +606,7 @@ function appSidebarHtml(kind='dashboard'){
     <div class="sidebar-section-label">工作空间</div>${links}
     ${isAdmin ? '' : `<div class="sidebar-section-label sidebar-tools-label">快速工具</div>
       <button class="side-link${kind === 'dashboard-config' ? ' active' : ''}" data-nav="dashboard-config">${sideIcon('download')}<span class="side-link-label">配置下载</span><span class="side-link-arrow">›</span></button>
-      <button class="side-link${kind === 'dashboard-editor' ? ' active' : ''}" data-nav="dashboard-editor">${sideIcon('edit')}<span class="side-link-label">在线配置</span><span class="side-link-arrow">›</span></button>
-      <a class="side-link sidebar-download-link" href="/config/deploy-frpc.sh">${sideIcon('gear')}<span class="side-link-label">客户端部署</span><span class="side-link-arrow">↗</span></a>`}
+      <button class="side-link${kind === 'dashboard-editor' ? ' active' : ''}" data-nav="dashboard-editor">${sideIcon('edit')}<span class="side-link-label">在线配置</span><span class="side-link-arrow">›</span></button>`}
     <div class="sidebar-spacer"></div>
     <div class="sidebar-service-status"><span class="sidebar-service-dot"></span><span><strong>服务运行中</strong><small>FRP 管理服务</small></span></div>
     <div class="sidebar-user-card"><span class="sidebar-user-avatar">${esc(String(username).slice(0,1).toUpperCase())}</span><span class="sidebar-user-copy"><strong>${esc(username)}</strong><small>${isAdmin ? '系统管理员' : '普通用户'}</small></span><button type="button" data-nav="logout" title="退出登录" aria-label="退出登录">↗</button></div>
