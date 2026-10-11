@@ -2938,7 +2938,12 @@ class Handler(BaseHTTPRequestHandler):
                 ports_display = ports[:200] if port_count > 200 else ports
                 port_stats = {"total": port_count, "used": len(used_ports), "free": port_count - len(used_ports)}
                 user_dashboard = frps_user_dashboard(user["username"], user)
-            self.send_json({"ok": True, "user": public_user(user), "software_license": sw_license, "node": node_public(node) if node else None, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
+            node_payload = node_public(node) if node else None
+            if node_payload:
+                # Measure panel→node auth/bind port latency (same probe as node health).
+                node_payload.update(check_node_auth_port(node_payload))
+                node_payload["latency_ms"] = node_payload.get("auth_latency_ms")
+            self.send_json({"ok": True, "user": public_user(user), "software_license": sw_license, "node": node_payload, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
             return
         if path == "/api/user/traffic":
             q = urllib.parse.parse_qs(urlparse(self.path).query)
