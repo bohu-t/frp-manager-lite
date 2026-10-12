@@ -1598,7 +1598,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>frp 版本</label><select name="frp_channel" id="nodeFrpChannel"><option value="stable">稳定版（推荐）</option><option value="latest">最新版</option><option value="custom">自定义版本</option></select></div>
       <div class="hidden" id="nodeFrpVersionWrap"><label>自定义 frp 版本</label><input name="frp_version" placeholder="例如 0.66.0"></div>
       <div><label>备注</label><input name="note" placeholder="线路/机房说明"></div>
-      <div class="form-actions" style="grid-column:1/-1"><button>创建节点</button><button type="button" class="secondary" onclick="genNodeDeployScript()">生成一键部署脚本</button></div>
+      <div class="form-actions" style="grid-column:1/-1"><button>创建节点</button></div>
     </form>
     <div id="nodeDeployScriptBox" class="deploy-script-item hidden" style="margin-top:14px"><div class="label">一键部署脚本（复制到新节点机器上执行）</div><div class="copy-line"><code class="token deploy-token" id="nodeDeployScriptCmd"></code><button type="button" class="secondary" onclick="copyNodeDeployScript()">复制命令</button></div><p class="muted small">脚本从公开仓库拉取，不依赖本面板；执行时会把该节点注册到当前面板（地址、密钥与节点信息已按上方表单预填）。</p></div></section>
     <section class="card" id="nodes"><div class="section-title"><h2>${stIcon('node')}节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>ID</th><th>地区</th><th>节点</th><th>frps</th><th>端口池</th><th>剩余</th><th>状态</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table>${paginationHtml('nodes', nodesPage, (data.nodes || []).length, ADMIN_PAGE_SIZE)}</section>`;
@@ -1728,14 +1728,10 @@ async function loadAdmin(section=currentAdminSection){
   }
   const nodeForm = document.querySelector('#nodeForm');
   if(nodeForm){
-    nodeForm.onsubmit = async (e) => {
+    nodeForm.onsubmit = (e) => {
       e.preventDefault();
-      const fd = new FormData(e.target);
-      try{
-        const r = await api('/api/admin/nodes/create', {method:'POST', body:Object.fromEntries(fd)});
-        show(r.message || '节点已创建');
-        await loadAdmin();
-      }catch(err){ show(err.message, true); }
+      // 不再直接建节点：根据表单生成一键部署脚本，用户在节点机上执行后节点才会接入。
+      genNodeDeployScript();
     };
   }
   const nodeFrpChannel = document.querySelector('#nodeFrpChannel');
@@ -2086,6 +2082,8 @@ function genNodeDeployScript(){
     `FRPS_TOKEN=${shellQuote(token)}`,
     `PORT_START=${shellQuote(portStart)}`,
     `PORT_END=${shellQuote(portEnd)}`,
+    `BANDWIDTH_MBPS=${shellQuote(String(fd.get('bandwidth_mbps') || '0').trim() || '0')}`,
+    `NOTE=${shellQuote(String(fd.get('note') || '').trim())}`,
   ];
   if(channel === 'latest') env.push('FRP_CHANNEL=latest');
   else if(channel === 'custom'){

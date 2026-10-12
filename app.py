@@ -2754,6 +2754,7 @@ class Handler(BaseHTTPRequestHandler):
             dashboard_url = str(data.get("dashboard_url", "")).strip().rstrip("/")[:300]
             dashboard_user = str(data.get("dashboard_user", "")).strip()[:80]
             dashboard_password = str(data.get("dashboard_password", "")).strip()[:200]
+            bandwidth_mbps = max(0, int(data.get("bandwidth_mbps", 0) or 0))
             if not name or not name.replace("_", "").replace("-", "").isalnum():
                 raise ValueError("节点名称只能包含字母、数字、下划线、短横线")
             if not server_addr:
@@ -2772,8 +2773,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"ok": False, "error": f"节点名称 {name} 已存在"}, 409)
                     return
                 cur = conn.execute(
-                    "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, note, active, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, note, 1, now()),
+                    "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, note, active, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, note, 1, now()),
                 )
                 node_id = cur.lastrowid
                 # Pre-create port pool
