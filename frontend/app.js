@@ -2099,7 +2099,7 @@ function genNodeDeployScript(){
 function copyNodeDeployScript(){
   const el = document.querySelector('#nodeDeployScriptCmd');
   const cmd = el ? el.textContent.trim() : '';
-  if(!cmd){ show('请先点「生成一键部署脚本」', true); return; }
+  if(!cmd){ show('请先填好信息并点「创建节点」生成脚本', true); return; }
   copyText(cmd);
 }
 
