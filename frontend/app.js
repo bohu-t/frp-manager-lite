@@ -24,6 +24,7 @@ let adminFrpcModalOpen = false;
 let tunnelFormDraft = {};
 let editingTunnelId = null;
 let lastTunnels = [];
+let adminSetupKey = '';
 let adminFrpcUsers = [];
 let adminSmtp = {};
 let adminCurrentPage = 'dashboard';
@@ -1486,6 +1487,7 @@ async function loadAdmin(section=currentAdminSection){
   try{ data = await api('/api/admin/overview'); }
   catch(err){ show(err.message, true); return; }
   softwareLicense = data.software_license || softwareLicense;
+  adminSetupKey = data.setup_key || adminSetupKey;
   setNav();
   adminPages[currentAdminSection] = adminPages[currentAdminSection] || 1;
   const allUsers = data.users || [];
@@ -1577,7 +1579,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>备注</label><input name="note"></div>
       <div style="align-self:end"><button>保存修改</button><button type="button" class="secondary" onclick="document.querySelector('#editNodeCard').classList.add('hidden')">取消</button></div>
     </form><p class="muted small">建议 frps 地址填写域名，例如 <code>hk.example.com</code>。后期更换 VPS 时优先改 DNS，用户的 frpc 配置可保持不变。</p></section>
-    <section class="card"><div class="section-title"><h2>${stIcon('nodePlus')}新增节点</h2><p>每个节点独立端口池和 token</p></div><form id="nodeForm" class="grid">
+    <section class="card"><div class="section-title"><h2>${stIcon('nodePlus')}新增节点</h2><p>每个节点独立端口池和 token；填好信息后可直接生成一键部署脚本</p></div><form id="nodeForm" class="grid">
       <div><label>地区</label><input name="region" placeholder="香港 / 日本 / 美国" required></div>
       <div><label>节点名</label><input name="name" placeholder="hk-1" required></div>
       <div><label>frps 域名/地址</label><input name="server_addr" placeholder="hk.example.com" required></div>
@@ -1586,9 +1588,12 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>带宽（Mbps）</label><input name="bandwidth_mbps" type="number" value="0" min="0" step="1"><span class="muted small">0 表示不限</span></div>
       <div><label>端口起始</label><input name="port_start" type="number" value="20000" min="1" max="65535"></div>
       <div><label>端口结束</label><input name="port_end" type="number" value="20199" min="1" max="65535"></div>
+      <div><label>frp 版本</label><select name="frp_channel" id="nodeFrpChannel"><option value="stable">稳定版（推荐）</option><option value="latest">最新版</option><option value="custom">自定义版本</option></select></div>
+      <div class="hidden" id="nodeFrpVersionWrap"><label>自定义 frp 版本</label><input name="frp_version" placeholder="例如 0.66.0"></div>
       <div><label>备注</label><input name="note" placeholder="线路/机房说明"></div>
-      <div style="align-self:end"><button>创建节点</button></div>
-    </form></section>
+      <div class="form-actions" style="grid-column:1/-1"><button>创建节点</button><button type="button" class="secondary" onclick="genNodeDeployScript()">生成一键部署脚本</button></div>
+    </form>
+    <div id="nodeDeployScriptBox" class="deploy-script-item hidden" style="margin-top:14px"><div class="label">一键部署脚本（复制到新节点机器上执行）</div><div class="copy-line"><code class="token deploy-token" id="nodeDeployScriptCmd"></code><button type="button" class="secondary" onclick="copyNodeDeployScript()">复制命令</button></div><p class="muted small">脚本从公开仓库拉取，不依赖本面板；执行时会把该节点注册到当前面板（地址、密钥与节点信息已按上方表单预填）。</p></div></section>
     <section class="card" id="nodes"><div class="section-title"><h2>${stIcon('node')}节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>ID</th><th>地区</th><th>节点</th><th>frps</th><th>端口池</th><th>剩余</th><th>状态</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table>${paginationHtml('nodes', nodesPage, (data.nodes || []).length, ADMIN_PAGE_SIZE)}</section>`;
   const keysHtml = `
     <section class="card" id="keys"><div class="section-title"><h2>${stIcon('key')}生成注册密钥</h2><p>注册密钥固定单次使用，适合批量发货</p></div><form id="inviteForm" class="grid">
@@ -1726,6 +1731,11 @@ async function loadAdmin(section=currentAdminSection){
       }catch(err){ show(err.message, true); }
     };
   }
+  const nodeFrpChannel = document.querySelector('#nodeFrpChannel');
+  if(nodeFrpChannel) nodeFrpChannel.onchange = () => {
+    const wrap = document.querySelector('#nodeFrpVersionWrap');
+    if(wrap) wrap.classList.toggle('hidden', nodeFrpChannel.value !== 'custom');
+  };
   const editNodeForm = document.querySelector('#editNodeForm');
   if(editNodeForm){
     editNodeForm.onsubmit = async (e) => {
@@ -2038,6 +2048,56 @@ function editNode(n){
 async function nodeToggle(id){ await api('/api/admin/nodes/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
 async function nodeDelete(id){ if(confirm('删除节点会删除空端口池；节点下有用户/隧道时会被拒绝。确定？')) await api('/api/admin/nodes/delete', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
 
+// 一键添加节点脚本（公开仓库版，不依赖本面板）
+const NODE_INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/bohu-t/lite-install/main/add-frps-node.sh';
+function shellQuote(v){ return `'${String(v).replace(/'/g, `'\\''`)}'`; }
+function genNodeDeployScript(){
+  const form = document.querySelector('#nodeForm');
+  if(!form) return;
+  const fd = new FormData(form);
+  const name = String(fd.get('name') || '').trim();
+  const region = String(fd.get('region') || '').trim();
+  const addr = String(fd.get('server_addr') || '').trim();
+  const bind = String(fd.get('server_port') || '').trim() || '7000';
+  const token = String(fd.get('auth_token') || '').trim();
+  const portStart = String(fd.get('port_start') || '').trim();
+  const portEnd = String(fd.get('port_end') || '').trim();
+  if(!name || !region || !addr || !token || !portStart || !portEnd){
+    show('请先填写：地区、节点名、frps 域名/地址、frps token、端口范围', true); return;
+  }
+  const setupKey = (adminSetupKey || '').trim();
+  if(!setupKey){ show('尚未设置「一键添加节点密钥」，请到「设置 · 运维入口」配置后再生成', true); return; }
+  const channel = (document.querySelector('#nodeFrpChannel') || {}).value || 'stable';
+  const customVer = String((document.querySelector('#nodeFrpVersionWrap input') || {}).value || '').trim();
+  const env = [
+    `PANEL_URL=${shellQuote(location.origin)}`,
+    `SETUP_KEY=${shellQuote(setupKey)}`,
+    `NODE_NAME=${shellQuote(name)}`,
+    `REGION=${shellQuote(region)}`,
+    `SERVER_IP=${shellQuote(addr)}`,
+    `FRPS_BIND_PORT=${shellQuote(bind)}`,
+    `FRPS_TOKEN=${shellQuote(token)}`,
+    `PORT_START=${shellQuote(portStart)}`,
+    `PORT_END=${shellQuote(portEnd)}`,
+  ];
+  if(channel === 'latest') env.push('FRP_CHANNEL=latest');
+  else if(channel === 'custom'){
+    if(!customVer){ show('请填写自定义 frp 版本号', true); return; }
+    env.push(`FRP_VERSION=${shellQuote(customVer)}`);
+  } else env.push('FRP_CHANNEL=stable');
+  const cmd = `${env.join(' ')} bash <(curl -fsSL ${NODE_INSTALL_SCRIPT_URL})`;
+  const box = document.querySelector('#nodeDeployScriptBox');
+  const codeEl = document.querySelector('#nodeDeployScriptCmd');
+  if(codeEl) codeEl.textContent = cmd;
+  if(box){ box.classList.remove('hidden'); box.scrollIntoView({behavior:'smooth', block:'nearest'}); }
+}
+function copyNodeDeployScript(){
+  const el = document.querySelector('#nodeDeployScriptCmd');
+  const cmd = el ? el.textContent.trim() : '';
+  if(!cmd){ show('请先点「生成一键部署脚本」', true); return; }
+  copyText(cmd);
+}
+
 function clearAdminDashboardTimer(){
   if(adminDashboardTimer){ clearTimeout(adminDashboardTimer); adminDashboardTimer = null; }
 }
@@ -2073,8 +2133,7 @@ function copySetupKey(){
   copyText(val);
 }
 function copyNodeScriptCmd(){
-  const cmd = `curl -fsSL ${location.origin}/setup/add-frps-node.sh | bash`;
-  copyText(cmd);
+  copyText('bash <(curl -fsSL https://raw.githubusercontent.com/bohu-t/lite-install/main/add-frps-node.sh)');
 }
 
 async function loadAdminHealth(){
@@ -2311,7 +2370,7 @@ async function loadAdminSettings(){
   const setupKeySourceLabel = data.setup_key_source === 'db' ? '面板自定义' : (data.setup_key_source === 'env' ? '环境变量 FML_SETUP_KEY' : '未设置');
   const setupHtml = `
     <div class="ops-item"><div class="label">一键添加节点密钥</div><form id="setupKeyForm" class="row setup-key-form"><input name="setup_key" value="${esc(data.setup_key || '')}" placeholder="自定义密钥（留空则清除，回退到环境变量）" autocomplete="off" spellcheck="false"><button type="submit">保存</button><button type="button" class="secondary" onclick="copySetupKey()">复制</button></form><p class="muted small">当前来源：${setupKeySourceLabel}；在新机器运行添加节点脚本时输入此密钥。</p></div>
-    <div class="ops-item"><div class="label">一键添加节点脚本</div><div class="copy-line"><code class="token">curl -fsSL ${esc(location.origin)}/setup/add-frps-node.sh | bash</code><button type="button" class="secondary" onclick="copyNodeScriptCmd()">复制命令</button></div><p class="muted small">在准备作为新节点的机器上执行；按提示输入上面的密钥即可完成注册。也可 <a href="/setup/add-frps-node.sh" download>下载脚本</a> 后手动运行。</p></div>`;
+    <div class="ops-item"><div class="label">一键添加节点脚本</div><div class="copy-line"><code class="token">bash <(curl -fsSL https://raw.githubusercontent.com/bohu-t/lite-install/main/add-frps-node.sh)</code><button type="button" class="secondary" onclick="copyNodeScriptCmd()">复制命令</button></div><p class="muted small">在准备作为新节点的机器上执行；按提示输入面板地址、上面的密钥与节点信息即可完成注册（脚本从公开仓库拉取，不依赖本面板）。也可在「新增节点」页填好信息后生成预填好的一键脚本。</p></div>`;
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
   const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
   const frpcUsers = data.frpc_users || [];
@@ -2355,7 +2414,7 @@ async function loadAdminDashboard(auto=false){
   const setupKeySourceLabel = data.setup_key_source === 'db' ? '面板自定义' : (data.setup_key_source === 'env' ? '环境变量 FML_SETUP_KEY' : '未设置');
   const setupHtml = `
     <div class="ops-item"><div class="label">一键添加节点密钥</div><form id="setupKeyForm" class="row setup-key-form"><input name="setup_key" value="${esc(data.setup_key || '')}" placeholder="自定义密钥（留空则清除，回退到环境变量）" autocomplete="off" spellcheck="false"><button type="submit">保存</button><button type="button" class="secondary" onclick="copySetupKey()">复制</button></form><p class="muted small">当前来源：${setupKeySourceLabel}；在新机器运行添加节点脚本时输入此密钥。</p></div>
-    <div class="ops-item"><div class="label">一键添加节点脚本</div><div class="copy-line"><code class="token">curl -fsSL ${esc(location.origin)}/setup/add-frps-node.sh | bash</code><button type="button" class="secondary" onclick="copyNodeScriptCmd()">复制命令</button></div><p class="muted small">在准备作为新节点的机器上执行；按提示输入上面的密钥即可完成注册。也可 <a href="/setup/add-frps-node.sh" download>下载脚本</a> 后手动运行。</p></div>`;
+    <div class="ops-item"><div class="label">一键添加节点脚本</div><div class="copy-line"><code class="token">bash <(curl -fsSL https://raw.githubusercontent.com/bohu-t/lite-install/main/add-frps-node.sh)</code><button type="button" class="secondary" onclick="copyNodeScriptCmd()">复制命令</button></div><p class="muted small">在准备作为新节点的机器上执行；按提示输入面板地址、上面的密钥与节点信息即可完成注册（脚本从公开仓库拉取，不依赖本面板）。也可在「新增节点」页填好信息后生成预填好的一键脚本。</p></div>`;
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
   const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
   const frpcUsers = data.frpc_users || [];
