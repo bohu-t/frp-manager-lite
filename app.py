@@ -986,13 +986,64 @@ def frps_all_proxies(nodes: list[sqlite3.Row] | None = None) -> list[dict[str, A
     return proxies
 
 
+# --- 映射快照缓存：后台定时采集各节点 dashboard，页面直接读缓存（不再每次实时拉取）------
+PROXY_SAMPLE_SECONDS = int(os.getenv("FML_PROXY_SAMPLE_SECONDS", "15") or "15")
+_proxy_snapshot_lock = threading.Lock()
+_proxy_snapshot: dict[str, Any] = {"ts": 0.0, "proxies": [], "error": ""}
+_proxy_sampler_started = False
+
+
+def refresh_proxy_snapshot() -> None:
+    try:
+        proxies = frps_all_proxies()
+        error = ""
+    except Exception as e:
+        proxies = []
+        error = e.__class__.__name__
+    with _proxy_snapshot_lock:
+        _proxy_snapshot["proxies"] = proxies
+        _proxy_snapshot["error"] = error
+        _proxy_snapshot["ts"] = time.time()
+
+
+def proxy_snapshot(wait: bool = False) -> list[dict[str, Any]]:
+    """返回最近一次定时采集的代理列表。从未采集过、或缓存过旧时（wait=True）同步刷新一次。"""
+    with _proxy_snapshot_lock:
+        ts = float(_proxy_snapshot.get("ts") or 0)
+        proxies = list(_proxy_snapshot.get("proxies") or [])
+    if wait and (ts <= 0 or (time.time() - ts) > max(120, PROXY_SAMPLE_SECONDS * 6)):
+        refresh_proxy_snapshot()
+        with _proxy_snapshot_lock:
+            proxies = list(_proxy_snapshot.get("proxies") or [])
+    return proxies
+
+
+def start_proxy_sampler() -> None:
+    global _proxy_sampler_started
+    if _proxy_sampler_started:
+        return
+    _proxy_sampler_started = True
+
+    def _loop() -> None:
+        time.sleep(5)
+        while True:
+            try:
+                refresh_proxy_snapshot()
+            except Exception:
+                pass
+            time.sleep(max(5, PROXY_SAMPLE_SECONDS))
+
+    threading.Thread(target=_loop, name="proxy-sampler", daemon=True).start()
+
+
 def frps_user_dashboard(username: str, user: sqlite3.Row | None = None) -> dict[str, Any]:
     try:
         with db() as conn:
             nodes = dashboard_nodes_for_user(conn, user)
         if not nodes:
             return {"enabled": False, "error": "frps dashboard 未接入面板"}
-        proxies = [p for p in frps_all_proxies(nodes) if p.get("username") == username]
+        allowed_nodes = {int(r["id"]) for r in nodes}
+        proxies = [p for p in proxy_snapshot(wait=True) if int(p.get("node_id") or 0) in allowed_nodes and p.get("username") == username]
         traffic_in = sum(int(p.get("today_traffic_in") or 0) for p in proxies)
         traffic_out = sum(int(p.get("today_traffic_out") or 0) for p in proxies)
         return {"enabled": True, "proxies": proxies, "total": len(proxies), "today_traffic_in": traffic_in, "today_traffic_out": traffic_out, "today_traffic_total": traffic_in + traffic_out}
@@ -1263,7 +1314,7 @@ def frps_admin_dashboard(page: int = 1, page_size: int = 20, username: str = "")
             nodes = dashboard_nodes_for_user(conn)
         if not nodes:
             return {"enabled": False, "error": "frps dashboard 未接入面板", "proxies": [], "total": 0, "page": page, "page_size": page_size, "traffic_in": 0, "traffic_out": 0, "traffic_total": 0, "cur_conns": 0, "online_count": 0}
-        proxies = frps_all_proxies(nodes)
+        proxies = proxy_snapshot(wait=True)
         if username:
             proxies = [p for p in proxies if p.get("username") == username]
         total = len(proxies)
@@ -4099,6 +4150,7 @@ def main() -> None:
     init_db()
     start_traffic_sampler()
     start_host_sampler()
+    start_proxy_sampler()
     print(f"{APP_NAME} separated server listening on http://{HOST}:{PORT}")
     print(f"DB: {DB_PATH}")
     if ADMIN_PASSWORD == "admin123":
