@@ -2160,15 +2160,14 @@ async function loadAdminHealth(){
     const used = Number(n.port_count || 0) - Number(n.free_count || 0);
     const latency = (n.auth_latency_ms !== undefined && n.auth_latency_ms !== null) ? `${n.auth_latency_ms} ms` : '—';
     const latencyCell = `<span data-latency-node="${esc(n.server_addr || '')}">${esc(latency)}</span>`;
-    const checked = n.auth_checked_at ? fmtTs(n.auth_checked_at) : '—';
     return `
     <tr>
-      <td><b>${esc(n.name || '-')}</b><span class="muted small">${esc(n.region || '未设置地区')} · #${esc(n.id)}</span></td>
+      <td><b>${esc(n.name || '-')}</b></td>
       <td><code>${esc(n.server_addr || '-')}:${esc(n.server_port ?? '-')}</code></td>
-      <td>${nodeStatusBadge(n)}<span class="muted small">${esc(n.auth_message || '')}</span></td>
-      <td>${latencyCell}<span class="muted small">检查 ${checked}</span></td>
+      <td>${nodeStatusBadge(n)}</td>
+      <td>${latencyCell}</td>
       <td>${n.port_start != null ? `${esc(n.port_start)} - ${esc(n.port_end)}` : '—'}</td>
-      <td>${used} / ${esc(n.port_count || 0)}<span class="muted small">空闲 ${esc(n.free_count || 0)}</span></td>
+      <td>${used} / ${esc(n.port_count || 0)}</td>
       <td>${n.bandwidth_mbps ? esc(n.bandwidth_mbps) + ' Mbps' : '未设置'}</td>
       <td>${n.dashboard_configured ? '<span class="ok">已接入</span>' : '<span class="muted">未接入</span>'}</td>
       <td>${esc(n.note || '—')}</td>
