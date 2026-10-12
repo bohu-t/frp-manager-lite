@@ -2072,6 +2072,10 @@ function copySetupKey(){
   if(!val){ show('没有可复制的密钥', true); return; }
   copyText(val);
 }
+function copyNodeScriptCmd(){
+  const cmd = `curl -fsSL ${location.origin}/setup/add-frps-node.sh | bash`;
+  copyText(cmd);
+}
 
 async function loadAdminHealth(){
   clearAdminDashboardTimer();
@@ -2306,7 +2310,8 @@ async function loadAdminSettings(){
   const r2 = data.r2 || {};
   const setupKeySourceLabel = data.setup_key_source === 'db' ? '面板自定义' : (data.setup_key_source === 'env' ? '环境变量 FML_SETUP_KEY' : '未设置');
   const setupHtml = `
-    <div class="ops-item"><div class="label">一键添加节点密钥</div><form id="setupKeyForm" class="row setup-key-form"><input name="setup_key" value="${esc(data.setup_key || '')}" placeholder="自定义密钥（留空则清除，回退到环境变量）" autocomplete="off" spellcheck="false"><button type="submit">保存</button><button type="button" class="secondary" onclick="copySetupKey()">复制</button></form><p class="muted small">当前来源：${setupKeySourceLabel}；在新机器运行添加节点脚本时输入此密钥。</p></div>`;
+    <div class="ops-item"><div class="label">一键添加节点密钥</div><form id="setupKeyForm" class="row setup-key-form"><input name="setup_key" value="${esc(data.setup_key || '')}" placeholder="自定义密钥（留空则清除，回退到环境变量）" autocomplete="off" spellcheck="false"><button type="submit">保存</button><button type="button" class="secondary" onclick="copySetupKey()">复制</button></form><p class="muted small">当前来源：${setupKeySourceLabel}；在新机器运行添加节点脚本时输入此密钥。</p></div>
+    <div class="ops-item"><div class="label">一键添加节点脚本</div><div class="copy-line"><code class="token">curl -fsSL ${esc(location.origin)}/setup/add-frps-node.sh | bash</code><button type="button" class="secondary" onclick="copyNodeScriptCmd()">复制命令</button></div><p class="muted small">在准备作为新节点的机器上执行；按提示输入上面的密钥即可完成注册。也可 <a href="/setup/add-frps-node.sh" download>下载脚本</a> 后手动运行。</p></div>`;
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
   const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
   const frpcUsers = data.frpc_users || [];
@@ -2349,7 +2354,8 @@ async function loadAdminDashboard(auto=false){
   const portUsage = totalPorts > 0 ? ((usedPorts / totalPorts) * 100).toFixed(1) : '0.0';
   const setupKeySourceLabel = data.setup_key_source === 'db' ? '面板自定义' : (data.setup_key_source === 'env' ? '环境变量 FML_SETUP_KEY' : '未设置');
   const setupHtml = `
-    <div class="ops-item"><div class="label">一键添加节点密钥</div><form id="setupKeyForm" class="row setup-key-form"><input name="setup_key" value="${esc(data.setup_key || '')}" placeholder="自定义密钥（留空则清除，回退到环境变量）" autocomplete="off" spellcheck="false"><button type="submit">保存</button><button type="button" class="secondary" onclick="copySetupKey()">复制</button></form><p class="muted small">当前来源：${setupKeySourceLabel}；在新机器运行添加节点脚本时输入此密钥。</p></div>`;
+    <div class="ops-item"><div class="label">一键添加节点密钥</div><form id="setupKeyForm" class="row setup-key-form"><input name="setup_key" value="${esc(data.setup_key || '')}" placeholder="自定义密钥（留空则清除，回退到环境变量）" autocomplete="off" spellcheck="false"><button type="submit">保存</button><button type="button" class="secondary" onclick="copySetupKey()">复制</button></form><p class="muted small">当前来源：${setupKeySourceLabel}；在新机器运行添加节点脚本时输入此密钥。</p></div>
+    <div class="ops-item"><div class="label">一键添加节点脚本</div><div class="copy-line"><code class="token">curl -fsSL ${esc(location.origin)}/setup/add-frps-node.sh | bash</code><button type="button" class="secondary" onclick="copyNodeScriptCmd()">复制命令</button></div><p class="muted small">在准备作为新节点的机器上执行；按提示输入上面的密钥即可完成注册。也可 <a href="/setup/add-frps-node.sh" download>下载脚本</a> 后手动运行。</p></div>`;
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
   const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
   const frpcUsers = data.frpc_users || [];

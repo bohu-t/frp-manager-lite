@@ -84,6 +84,7 @@ RUN addgroup --system --gid 10001 fml \\
 
 COPY --chown=fml:fml app.py /app/app.py
 COPY --chown=fml:fml frontend/ /app/frontend/
+COPY --chown=fml:fml scripts/ /app/scripts/
 
 USER fml
 
@@ -208,6 +209,14 @@ def main():
             target = DIST / f
             shutil.copytree(src, target, dirs_exist_ok=True)
             print(f"  copied dir: {f}")
+
+    # Node registration script served by the panel at /setup/add-frps-node.sh
+    node_script = ROOT / "scripts" / "add-frps-node.sh"
+    if node_script.is_file():
+        target = DIST / "scripts" / node_script.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(node_script.read_bytes())
+        print(f"  copied: scripts/{node_script.name}")
 
     # Generate Docker artifacts
     write_dockerfile()
