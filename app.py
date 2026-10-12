@@ -2767,24 +2767,34 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("frps dashboard 端口不合法")
             if port_end - port_start > 20000:
                 raise ValueError("单节点端口池不要超过 20000 个")
+            reused = False
             with db() as conn:
-                existing = conn.execute("SELECT id FROM nodes WHERE name=?", (name,)).fetchone()
+                existing = conn.execute("SELECT * FROM nodes WHERE name=?", (name,)).fetchone()
                 if existing:
-                    self.send_json({"ok": False, "error": f"节点名称 {name} 已存在"}, 409)
-                    return
-                cur = conn.execute(
-                    "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, note, active, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, note, 1, now()),
-                )
-                node_id = cur.lastrowid
-                # Pre-create port pool
+                    if str(existing["auth_token"]) != auth_token:
+                        self.send_json({"ok": False, "error": f"节点名称 {name} 已被其他 token 使用"}, 409)
+                        return
+                    # 幂等重跑：同名 + token 一致 → 同一节点重新部署，复用 node_id，更新配置
+                    node_id = int(existing["id"])
+                    conn.execute(
+                        "UPDATE nodes SET region=?, server_addr=?, server_port=?, port_start=?, port_end=?, web_port=?, dashboard_url=?, dashboard_user=?, dashboard_password=?, bandwidth_mbps=?, note=?, active=1 WHERE id=?",
+                        (region, server_addr, server_port, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, note, node_id),
+                    )
+                    reused = True
+                else:
+                    cur = conn.execute(
+                        "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, note, active, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, note, 1, now()),
+                    )
+                    node_id = cur.lastrowid
+                # 端口池（新建或补建）
                 conn.executemany(
                     "INSERT OR IGNORE INTO ports(node_id, port, user_id, created_at) VALUES(?,?,NULL,?)",
                     [(node_id, p, now()) for p in range(port_start, port_end + 1)],
                 )
-            # 新节点接入：立即连续探测几次确认正常（不阻塞响应）
+            # 节点接入：立即连续探测几次确认正常（不阻塞响应）
             spawn_new_node_verify({"name": name, "server_addr": server_addr, "server_port": server_port, "active": True})
-            self.send_json({"ok": True, "message": f"节点 {name} 注册成功", "node_id": node_id}, 201)
+            self.send_json({"ok": True, "message": f"节点 {name} {'已重新部署' if reused else '注册成功'}", "node_id": node_id, "reused": reused}, 200 if reused else 201)
         except ValueError as e:
             self.send_json({"ok": False, "error": str(e)}, 400)
         except Exception as e:
