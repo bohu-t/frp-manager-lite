@@ -3503,22 +3503,17 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"ok": False, "error": "隧道不存在"}, 404)
                     return
                 node_id = int(t["node_id"])
-                old_remote = int(t["remote_port"] or 0)
-                old_type = str(t["proxy_type"] or "")
                 if proxy_type in SECRET_KEY_PROXY_TYPES and not secret_key:
                     secret_key = t["secret_key"] or secrets.token_urlsafe(16)
                 if proxy_type in REMOTE_PORT_PROXY_TYPES:
+                    # 用户端口是预分配的：改隧道只需确认新端口仍属于本账号，
+                    # 不改动 ports 归属（否则旧端口会被误释放、从「端口资源」里消失）。
                     owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (node_id, user["id"], remote_port)).fetchone()
                     if not owned:
                         raise ValueError("这个公网端口不属于当前账号")
                     used = conn.execute("SELECT 1 FROM tunnels WHERE node_id=? AND remote_port=? AND proxy_type IN ('tcp','udp') AND id!=?", (node_id, remote_port, tid)).fetchone()
                     if used:
                         raise ValueError("该端口已被其他隧道使用")
-                    if old_type in REMOTE_PORT_PROXY_TYPES and old_remote and old_remote != remote_port:
-                        conn.execute("UPDATE ports SET user_id=NULL WHERE node_id=? AND port=? AND user_id=?", (node_id, old_remote, user["id"]))
-                    conn.execute("UPDATE ports SET user_id=? WHERE node_id=? AND port=? AND user_id IS NULL", (user["id"], node_id, remote_port))
-                elif old_type in REMOTE_PORT_PROXY_TYPES and old_remote:
-                    conn.execute("UPDATE ports SET user_id=NULL WHERE node_id=? AND port=? AND user_id=?", (node_id, old_remote, user["id"]))
                 conn.execute(
                     "UPDATE tunnels SET name=?, proxy_type=?, local_ip=?, local_port=?, remote_port=?, custom_domains=?, secret_key=? WHERE id=? AND user_id=?",
                     (name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, tid, user["id"]),

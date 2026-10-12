@@ -1002,14 +1002,14 @@ function bindUserTunnelForm(){
       if(isEdit){
         await api('/api/tunnels/update', {method:'POST', body:{...fd, id: editingTunnelId}});
         editingTunnelId = null;
-        show('隧道已更新，重新下载 frpc.toml 后重启 frpc 生效');
       } else {
         await api('/api/tunnels/create', {method:'POST', body:fd});
-        show('隧道已创建，重新下载 frpc.toml 后重启 frpc 生效');
       }
       tunnelFormDraft = {};
       closeTunnelModal();
       await loadDashboard('tunnels');
+      // 提示必须在重渲染之后再显示，否则会被 loadDashboard 开头的 hideFlash() 立刻清掉
+      show(isEdit ? '隧道已更新，重新下载 frpc.toml 后重启 frpc 生效' : '隧道已创建，重新下载 frpc.toml 后重启 frpc 生效');
     }catch(err){ show(err.message, true); }
   };
   applyTunnelFormMode();
