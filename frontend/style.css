@@ -1125,3 +1125,7 @@ html[data-theme="dark"] .legal-notice-body{color:#cbd5e1}
 html[data-theme="dark"] .legal-notice-body strong{color:#fca5a5}
 .auth-switch .auth-link{color:var(--primary);font-weight:500;text-decoration:none;cursor:pointer;transition:color .15s ease}.auth-switch .auth-link:hover{text-decoration:underline}html[data-theme="dark"] .auth-switch .auth-link{color:#60a5fa}
 .admin-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px;align-items:start}.admin-settings-grid>.card{margin:0}.admin-settings-grid .admin-ops-card{grid-column:1/-1}@media(max-width:900px){.admin-settings-grid{grid-template-columns:1fr}.admin-settings-grid .admin-ops-card{grid-column:auto}}
+
+/* --- Flash 提示条：登录后的应用布局里固定成浮层，避免被左侧固定侧栏遮挡 --- */
+body.is-app #flash{position:fixed!important;top:70px!important;right:24px!important;left:auto!important;bottom:auto!important;width:auto!important;max-width:min(560px,calc(100vw - 48px))!important;margin:0!important;z-index:70!important;box-shadow:0 10px 30px rgba(15,23,42,.18)}
+@media(max-width:760px){body.is-app #flash{top:auto!important;bottom:16px!important;left:14px!important;right:14px!important;max-width:none!important}}
