@@ -192,12 +192,18 @@ def db() -> sqlite3.Connection:
 
 
 def effective_setup_key() -> str:
-    """面板自定义的一键添加节点密钥优先，否则回退到环境变量 FML_SETUP_KEY。"""
+    """一键添加节点密钥：面板自定义优先，其次环境变量 FML_SETUP_KEY；
+    都没有时自动随机生成一个并持久化到设置（无需管理员手动配置）。"""
     try:
         with db() as conn:
             v = setting_get(conn, "setup_key", "")
-        if v:
-            return v
+            if v:
+                return v
+            if FML_SETUP_KEY:
+                return FML_SETUP_KEY
+            generated = "FMLS-" + secrets.token_urlsafe(24)
+            setting_set(conn, "setup_key", generated)
+            return generated
     except Exception:
         pass
     return FML_SETUP_KEY

@@ -2066,7 +2066,7 @@ function genNodeDeployScript(){
     show('请先填写：地区、节点名、frps 域名/地址、frps token、端口范围', true); return;
   }
   const setupKey = (adminSetupKey || '').trim();
-  if(!setupKey){ show('尚未设置「一键添加节点密钥」，请到「设置 · 运维入口」配置后再生成', true); return; }
+  if(!setupKey){ show('节点密钥获取失败，请刷新页面后重试', true); return; }
   const channel = (document.querySelector('#nodeFrpChannel') || {}).value || 'stable';
   const customVer = String((document.querySelector('#nodeFrpVersionWrap input') || {}).value || '').trim();
   const env = [
@@ -2126,15 +2126,6 @@ async function sendSmtpTest(){
   catch(err){ show(err.message, true); }
 }
 
-function copySetupKey(){
-  const el = document.querySelector('#setupKeyForm input[name="setup_key"]') || document.querySelector('#setupKeyValue');
-  const val = el ? (el.value !== undefined ? el.value : (el.textContent || '')) : '';
-  if(!val){ show('没有可复制的密钥', true); return; }
-  copyText(val);
-}
-function copyNodeScriptCmd(){
-  copyText('bash <(curl -fsSL https://raw.githubusercontent.com/bohu-t/lite-install/main/add-frps-node.sh)');
-}
 
 async function loadAdminHealth(){
   clearAdminDashboardTimer();
@@ -2259,11 +2250,10 @@ function reloadAdminCurrentPage(){
   return adminCurrentPage === 'settings' ? loadAdminSettings() : loadAdminDashboard();
 }
 
-function adminOpsCardHtml(setupHtml){
+function adminOpsCardHtml(){
   return `<section class="card admin-ops-card">
         <div class="section-title"><div><div class="section-kicker">OPERATIONS</div><h2>${stIcon('tools')}运维入口</h2></div></div>
         <div class="ops-list">
-          ${setupHtml}
           <div class="ops-item"><div class="label">下载模块</div><p class="muted small">为普通用户生成 frpc.toml 与 deploy-frpc.sh。</p><p class="row"><button onclick="openAdminFrpcModal()">为用户生成配置</button></p></div>
           <div class="ops-item"><div class="label">全量备份</div><p class="muted small">导出数据库与前端配置文件。</p><p class="row"><a class="btn" href="/admin/backup/full.zip">下载全量备份</a></p></div>
         </div>
@@ -2326,18 +2316,6 @@ function adminFrpcModalHtml(frpcUserOptions){
 function wireAdminSettingsForms(){
   const r2Form = document.querySelector('#r2ConfigForm');
   if(r2Form) r2Form.onsubmit = saveR2Config;
-  const setupKeyForm = document.querySelector('#setupKeyForm');
-  if(setupKeyForm){
-    setupKeyForm.onsubmit = async (e) => {
-      e.preventDefault();
-      const val = String(new FormData(e.target).get('setup_key') || '').trim();
-      try{
-        const r = await api('/api/admin/setup-key', {method:'POST', body:{setup_key: val}});
-        show(r.message || '已保存');
-        await reloadAdminCurrentPage();
-      }catch(err){ show(err.message, true); }
-    };
-  }
   const smtpForm = document.querySelector('#smtpForm');
   if(smtpForm){
     smtpForm.onsubmit = async (e) => {
@@ -2367,10 +2345,6 @@ async function loadAdminSettings(){
   }
   const smtp = data.smtp || {}; adminSmtp = smtp;
   const r2 = data.r2 || {};
-  const setupKeySourceLabel = data.setup_key_source === 'db' ? '面板自定义' : (data.setup_key_source === 'env' ? '环境变量 FML_SETUP_KEY' : '未设置');
-  const setupHtml = `
-    <div class="ops-item"><div class="label">一键添加节点密钥</div><form id="setupKeyForm" class="row setup-key-form"><input name="setup_key" value="${esc(data.setup_key || '')}" placeholder="自定义密钥（留空则清除，回退到环境变量）" autocomplete="off" spellcheck="false"><button type="submit">保存</button><button type="button" class="secondary" onclick="copySetupKey()">复制</button></form><p class="muted small">当前来源：${setupKeySourceLabel}；在新机器运行添加节点脚本时输入此密钥。</p></div>
-    <div class="ops-item"><div class="label">一键添加节点脚本</div><div class="copy-line"><code class="token">bash <(curl -fsSL https://raw.githubusercontent.com/bohu-t/lite-install/main/add-frps-node.sh)</code><button type="button" class="secondary" onclick="copyNodeScriptCmd()">复制命令</button></div><p class="muted small">在准备作为新节点的机器上执行；按提示输入面板地址、上面的密钥与节点信息即可完成注册（脚本从公开仓库拉取，不依赖本面板）。也可在「新增节点」页填好信息后生成预填好的一键脚本。</p></div>`;
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
   const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
   const frpcUsers = data.frpc_users || [];
@@ -2379,7 +2353,7 @@ async function loadAdminSettings(){
   const frpcUserOptions = frpcUsers.map(u => `<option value="${u.id}">${esc(u.username)} · ${esc(u.node_region || '-')} / ${esc(u.node_name || '-')} · 端口 ${u.port_count || 0} · 可用 ${(u.available_ports || []).length} · 隧道 ${u.tunnel_count || 0}</option>`).join('');
   app.innerHTML = appLayoutHtml(`
     <div class="admin-settings-grid">
-      ${adminOpsCardHtml(setupHtml)}
+      ${adminOpsCardHtml()}
       ${adminSmtpCardHtml(smtp)}
       ${adminBackupCardHtml(r2, r2Status, r2Source)}
     </div>
@@ -2411,10 +2385,6 @@ async function loadAdminDashboard(auto=false){
   const totalPorts = Number(portStats.total || 0);
   const freePorts = Number(portStats.free || Math.max(0, totalPorts - usedPorts));
   const portUsage = totalPorts > 0 ? ((usedPorts / totalPorts) * 100).toFixed(1) : '0.0';
-  const setupKeySourceLabel = data.setup_key_source === 'db' ? '面板自定义' : (data.setup_key_source === 'env' ? '环境变量 FML_SETUP_KEY' : '未设置');
-  const setupHtml = `
-    <div class="ops-item"><div class="label">一键添加节点密钥</div><form id="setupKeyForm" class="row setup-key-form"><input name="setup_key" value="${esc(data.setup_key || '')}" placeholder="自定义密钥（留空则清除，回退到环境变量）" autocomplete="off" spellcheck="false"><button type="submit">保存</button><button type="button" class="secondary" onclick="copySetupKey()">复制</button></form><p class="muted small">当前来源：${setupKeySourceLabel}；在新机器运行添加节点脚本时输入此密钥。</p></div>
-    <div class="ops-item"><div class="label">一键添加节点脚本</div><div class="copy-line"><code class="token">bash <(curl -fsSL https://raw.githubusercontent.com/bohu-t/lite-install/main/add-frps-node.sh)</code><button type="button" class="secondary" onclick="copyNodeScriptCmd()">复制命令</button></div><p class="muted small">在准备作为新节点的机器上执行；按提示输入面板地址、上面的密钥与节点信息即可完成注册（脚本从公开仓库拉取，不依赖本面板）。也可在「新增节点」页填好信息后生成预填好的一键脚本。</p></div>`;
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
   const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
   const frpcUsers = data.frpc_users || [];
