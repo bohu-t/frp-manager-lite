@@ -959,15 +959,29 @@ def dashboard_nodes_for_user(conn: sqlite3.Connection, user: sqlite3.Row | None 
 
 
 def frps_all_proxies(nodes: list[sqlite3.Row] | None = None) -> list[dict[str, Any]]:
-    proxies: list[dict[str, Any]] = []
     if nodes is None:
         with db() as conn:
             nodes = dashboard_nodes_for_user(conn)
-    for node in nodes:
-        for typ in PROXY_TYPE_ORDER:
-            data = frps_dashboard_get(f"/api/proxy/{typ}", node)
-            for p in data.get("proxies") or []:
-                proxies.append(normalize_frps_proxy(p, typ, node))
+    jobs = [(node, typ) for node in nodes for typ in PROXY_TYPE_ORDER]
+    if not jobs:
+        return []
+    # 并发拉取各节点 × 各代理类型：远端节点单次往返可能 1s+，串行会明显卡顿（节点越多越慢）。
+    results: list[dict[str, Any]] = [{} for _ in jobs]
+
+    def _fetch(idx: int, node: sqlite3.Row, typ: str) -> None:
+        try:
+            results[idx] = frps_dashboard_get(f"/api/proxy/{typ}", node)
+        except Exception:
+            results[idx] = {}
+
+    with ThreadPoolExecutor(max_workers=min(16, len(jobs))) as ex:
+        futures = [ex.submit(_fetch, i, node, typ) for i, (node, typ) in enumerate(jobs)]
+        for _ in as_completed(futures):
+            pass
+    proxies: list[dict[str, Any]] = []
+    for i, (node, typ) in enumerate(jobs):
+        for p in results[i].get("proxies") or []:
+            proxies.append(normalize_frps_proxy(p, typ, node))
     proxies.sort(key=lambda p: (p.get("node_region") or "", p.get("node_name") or "", p.get("username") or "", p.get("type") or "", p.get("name") or ""))
     return proxies
 
