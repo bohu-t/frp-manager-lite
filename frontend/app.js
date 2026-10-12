@@ -1607,12 +1607,10 @@ async function loadAdmin(section=currentAdminSection){
       <input type="hidden" name="kind" value="register">
       <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
       <div><label>备注</label><input name="note" placeholder="订单号/套餐名"></div>
-      <div><label>每枚可用次数</label><input name="max_uses" type="number" value="1" min="1" max="1" disabled><span class="muted small">固定 1 次</span></div>
       <div><label>注册后端口数</label><input name="max_ports" type="number" value="5" min="1" max="100"></div>
       <div><label>今日流量上限 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
       <div><label>速率策略 MB/s</label><input name="bandwidth_limit_mbs" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限；仅后台可见</span></div>
       <div><label>注册后账号有效期天数</label><input name="user_expires_days" type="number" value="30" min="0" max="3650"></div>
-      <div><label>密钥有效期天数</label><input name="key_expires_days" type="number" value="30" min="0" max="3650"></div>
       <div style="align-self:end"><button>生成密钥</button></div>
     </form></section>
     <section class="card" id="renew-keys"><div class="section-title"><h2>${stIcon('key')}生成续期密钥</h2><p>用户凭续期密钥在「个人中心 · 账号续期」自助延长账号有效期</p></div><form id="renewKeyForm" class="grid">
@@ -1620,7 +1618,6 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
       <div><label>备注</label><input name="note" placeholder="订单号/续期说明"></div>
       <div><label>续期天数</label><input name="user_expires_days" type="number" value="30" min="1" max="3650"><span class="muted small">用户使用后延长这么多天</span></div>
-      <div><label>密钥有效期天数</label><input name="key_expires_days" type="number" value="30" min="0" max="3650"><span class="muted small">0 表示密钥永不过期</span></div>
       <div style="grid-column:1/-1;display:flex;justify-content:flex-start"><button>生成续期密钥</button></div>
     </form></section>
     <section class="card"><div class="section-title"><div><h2>${stIcon('key')}密钥列表</h2><p>注册 / 续期密钥，单次使用</p></div><a class="btn" href="/admin/export/invite-keys.csv">导出未使用密钥 CSV</a></div><table><thead><tr><th>ID</th><th>类型</th><th>密钥</th><th>备注</th><th>使用</th><th>端口</th><th>流量/速率策略</th><th>有效期/续期</th><th>密钥到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table>${paginationHtml('keys', keysPage, (data.invite_keys || []).length, ADMIN_PAGE_SIZE)}</section>
@@ -1636,6 +1633,7 @@ async function loadAdmin(section=currentAdminSection){
     <section class="card"><div class="section-title"><h2>${stIcon('userPlus')}创建用户</h2><p>管理员直开账号，可指定接入节点</p></div><form id="createUserForm" class="grid">
       <div><label>用户名</label><input name="username" required></div>
       <div><label>初始密码</label><input name="password" type="password" required></div>
+      <div><label>邮箱</label><input name="email" type="email" placeholder="user@example.com（用于找回密码）"></div>
       <div><label>接入节点</label><select name="node_id" required>${adminNodeOptions}</select></div>
       <div><label>端口数量</label><input name="max_ports" type="number" value="5" min="1" max="100"></div>
       <div><label>今日流量上限 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>

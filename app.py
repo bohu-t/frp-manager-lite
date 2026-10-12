@@ -536,7 +536,7 @@ def public_user(user: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def insert_user_record(conn: sqlite3.Connection, username: str, password_hash_value: str, role: str, token: str, max_ports: int, expires_at: int, node_id: int | None, invite_key_used: str = "", traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0) -> sqlite3.Cursor:
+def insert_user_record(conn: sqlite3.Connection, username: str, password_hash_value: str, role: str, token: str, max_ports: int, expires_at: int, node_id: int | None, invite_key_used: str = "", traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0, email: str = "") -> sqlite3.Cursor:
     """Insert a user without any user-facing license binding.
 
     Older deployments may still have legacy users.license_key/machine_id columns with
@@ -552,6 +552,9 @@ def insert_user_record(conn: sqlite3.Connection, username: str, password_hash_va
     if "bandwidth_limit_kbps" in table_cols:
         cols.insert(-1, "bandwidth_limit_kbps")
         vals.insert(-1, int(bandwidth_limit_kbps or 0))
+    if "email" in table_cols:
+        cols.insert(-1, "email")
+        vals.insert(-1, str(email or ""))
     if "invite_key_used" in table_cols:
         cols.insert(4, "invite_key_used")
         vals.insert(4, invite_key_used)
@@ -1668,10 +1671,13 @@ def available_ports_for_assignment(conn: sqlite3.Connection, node_id: int, limit
     ).fetchall()
 
 
-def create_user(username: str, password: str, max_ports: int, expires_days: int, node_id: int, traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0) -> tuple[bool, str]:
+def create_user(username: str, password: str, max_ports: int, expires_days: int, node_id: int, traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0, email: str = "") -> tuple[bool, str]:
     username = username.strip()
+    email = str(email or "").strip()[:120]
     if not username or len(username) > 32 or not username.replace("_", "").replace("-", "").isalnum():
         return False, "用户名只能包含字母、数字、下划线、短横线，长度 1-32"
+    if email and ("@" not in email or len(email) < 5):
+        return False, "邮箱格式不正确"
     if len(password) < 6:
         return False, "密码至少 6 位"
     if max_ports < 1 or max_ports > 100:
@@ -1691,7 +1697,7 @@ def create_user(username: str, password: str, max_ports: int, expires_days: int,
         if len(free_ports) < max_ports:
             return False, f"端口池不足，只剩 {len(free_ports)} 个可用端口"
         try:
-            cur = insert_user_record(conn, username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, expires_at, node_id, "", traffic_limit_bytes, bandwidth_limit_kbps)
+            cur = insert_user_record(conn, username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, expires_at, node_id, "", traffic_limit_bytes, bandwidth_limit_kbps, email)
         except sqlite3.IntegrityError:
             return False, "用户名已存在"
         user_id = cur.lastrowid
@@ -3726,6 +3732,7 @@ class Handler(BaseHTTPRequestHandler):
             int(data.get("node_id", 0)),
             traffic_gb_to_bytes(data.get("traffic_limit_gb", 0)),
             speed_mbs_to_kbps(data.get("bandwidth_limit_mbs", 0)),
+            str(data.get("email", "")),
         )
         self.send_json({"ok": ok, "message": msg, "error": None if ok else msg}, 200 if ok else 400)
 
@@ -3966,10 +3973,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         ok, msg, keys = create_invite_keys_batch(
             str(data.get("note", "")),
-            int(data.get("max_uses", 1)),
+            1,
             int(data.get("max_ports", DEFAULT_MAX_PORTS)),
             int(data.get("user_expires_days", 30)),
-            int(data.get("key_expires_days", 30)),
+            0,
             admin["id"],
             int(data.get("count", 1)),
             traffic_gb_to_bytes(data.get("traffic_limit_gb", 0)),
