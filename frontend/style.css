@@ -1129,3 +1129,10 @@ html[data-theme="dark"] .legal-notice-body strong{color:#fca5a5}
 /* --- Flash 提示条：登录后的应用布局里固定成浮层，避免被左侧固定侧栏遮挡 --- */
 body.is-app #flash{position:fixed!important;top:70px!important;right:24px!important;left:auto!important;bottom:auto!important;width:auto!important;max-width:min(560px,calc(100vw - 48px))!important;margin:0!important;z-index:70!important;box-shadow:0 10px 30px rgba(15,23,42,.18)}
 @media(max-width:760px){body.is-app #flash{top:auto!important;bottom:16px!important;left:14px!important;right:14px!important;max-width:none!important}}
+
+/* --- 应用布局深色主题：补全背景/文字（否则切深色只有卡片变暗、画布仍为浅色）--- */
+html[data-theme="dark"] body.is-app{background:#0f172a;color:#e2e8f0}
+html[data-theme="dark"] .app-shell{background:#0f172a}
+html[data-theme="dark"] .workspace-main{background:#0f172a}
+html[data-theme="dark"] .workspace-topbar{background:#1e293b}
+html[data-theme="dark"] .topbar-greeting,html[data-theme="dark"] .topbar-breadcrumb{color:#cbd5e1}
