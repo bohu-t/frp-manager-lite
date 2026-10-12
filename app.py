@@ -3335,6 +3335,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/tunnels/create":
             self.tunnel_create(user, data)
+        elif path == "/api/tunnels/update":
+            self.tunnel_update(user, data)
         elif path == "/api/tunnels/toggle":
             tid = int(data.get("id", 0))
             with db() as conn:
@@ -3463,6 +3465,68 @@ class Handler(BaseHTTPRequestHandler):
             if custom_domains:
                 detail += f" domains={custom_domains}"
             audit("tunnel_create", user, user["node_id"], remote_port or None, proxy_type, detail)
+            self.send_json({"ok": True})
+        except sqlite3.IntegrityError:
+            self.send_json({"ok": False, "error": "隧道名称或公网端口已被使用"}, 400)
+        except Exception as e:
+            self.send_json({"ok": False, "error": str(e)}, 400)
+
+    def tunnel_update(self, user: sqlite3.Row, data: dict[str, Any]) -> None:
+        if user["role"] == "admin":
+            self.send_json({"ok": False, "error": "管理员不能修改隧道"}, 403)
+            return
+        try:
+            tid = int(data.get("id", 0))
+            name = str(data.get("name", "")).strip()
+            proxy_type = str(data.get("proxy_type", "tcp")).lower()
+            local_ip = str(data.get("local_ip", "127.0.0.1")).strip()
+            local_port = int(data.get("local_port", 0))
+            remote_port = int(data.get("remote_port", 0) or 0)
+            custom_domains = ",".join([d.strip().lower() for d in str(data.get("custom_domains", "")).replace("\n", ",").split(",") if d.strip()])[:500]
+            secret_key = str(data.get("secret_key", "")).strip()[:120]
+            if not name or len(name) > 40 or not name.replace("_", "").replace("-", "").isalnum():
+                raise ValueError("隧道名称只能包含字母、数字、下划线、短横线，长度 1-40")
+            if proxy_type not in ALLOWED_PROXY_TYPES:
+                raise ValueError("协议不支持")
+            if not (1 <= local_port <= 65535):
+                raise ValueError("本地端口不合法")
+            if proxy_type in REMOTE_PORT_PROXY_TYPES:
+                if not (1 <= remote_port <= 65535):
+                    raise ValueError("TCP/UDP 必须选择公网端口")
+            else:
+                remote_port = 0
+            if proxy_type in DOMAIN_PROXY_TYPES and not custom_domains:
+                raise ValueError("HTTP/HTTPS/TCPMUX 必须填写自定义域名")
+            with db() as conn:
+                t = conn.execute("SELECT * FROM tunnels WHERE id=? AND user_id=?", (tid, user["id"])).fetchone()
+                if not t:
+                    self.send_json({"ok": False, "error": "隧道不存在"}, 404)
+                    return
+                node_id = int(t["node_id"])
+                old_remote = int(t["remote_port"] or 0)
+                old_type = str(t["proxy_type"] or "")
+                if proxy_type in SECRET_KEY_PROXY_TYPES and not secret_key:
+                    secret_key = t["secret_key"] or secrets.token_urlsafe(16)
+                if proxy_type in REMOTE_PORT_PROXY_TYPES:
+                    owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (node_id, user["id"], remote_port)).fetchone()
+                    if not owned:
+                        raise ValueError("这个公网端口不属于当前账号")
+                    used = conn.execute("SELECT 1 FROM tunnels WHERE node_id=? AND remote_port=? AND proxy_type IN ('tcp','udp') AND id!=?", (node_id, remote_port, tid)).fetchone()
+                    if used:
+                        raise ValueError("该端口已被其他隧道使用")
+                    if old_type in REMOTE_PORT_PROXY_TYPES and old_remote and old_remote != remote_port:
+                        conn.execute("UPDATE ports SET user_id=NULL WHERE node_id=? AND port=? AND user_id=?", (node_id, old_remote, user["id"]))
+                    conn.execute("UPDATE ports SET user_id=? WHERE node_id=? AND port=? AND user_id IS NULL", (user["id"], node_id, remote_port))
+                elif old_type in REMOTE_PORT_PROXY_TYPES and old_remote:
+                    conn.execute("UPDATE ports SET user_id=NULL WHERE node_id=? AND port=? AND user_id=?", (node_id, old_remote, user["id"]))
+                conn.execute(
+                    "UPDATE tunnels SET name=?, proxy_type=?, local_ip=?, local_port=?, remote_port=?, custom_domains=?, secret_key=? WHERE id=? AND user_id=?",
+                    (name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, tid, user["id"]),
+                )
+            detail = f"{name} -> {local_ip}:{local_port}"
+            if custom_domains:
+                detail += f" domains={custom_domains}"
+            audit("tunnel_update", user, node_id, remote_port or None, proxy_type, detail)
             self.send_json({"ok": True})
         except sqlite3.IntegrityError:
             self.send_json({"ok": False, "error": "隧道名称或公网端口已被使用"}, 400)

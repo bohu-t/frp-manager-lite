@@ -22,6 +22,8 @@ let nodeHealthPage = 1;
 let tunnelModalOpen = false;
 let adminFrpcModalOpen = false;
 let tunnelFormDraft = {};
+let editingTunnelId = null;
+let lastTunnels = [];
 let adminFrpcUsers = [];
 let adminSmtp = {};
 let adminCurrentPage = 'dashboard';
@@ -994,15 +996,23 @@ function bindUserTunnelForm(){
   syncProxyFields();
   if(tunnelForm) tunnelForm.onsubmit = async (e) => {
     e.preventDefault();
-    const fd = new FormData(e.target);
+    const fd = Object.fromEntries(new FormData(e.target));
+    const isEdit = !!editingTunnelId;
     try{
-      await api('/api/tunnels/create', {method:'POST', body:Object.fromEntries(fd)});
+      if(isEdit){
+        await api('/api/tunnels/update', {method:'POST', body:{...fd, id: editingTunnelId}});
+        editingTunnelId = null;
+        show('隧道已更新，重新下载 frpc.toml 后重启 frpc 生效');
+      } else {
+        await api('/api/tunnels/create', {method:'POST', body:fd});
+        show('隧道已创建，重新下载 frpc.toml 后重启 frpc 生效');
+      }
       tunnelFormDraft = {};
       closeTunnelModal();
-      show('隧道已创建，重新下载 frpc.toml 后重启 frpc 生效');
       await loadDashboard('tunnels');
     }catch(err){ show(err.message, true); }
   };
+  applyTunnelFormMode();
 }
 
 async function loadDashboard(view='overview'){
@@ -1038,6 +1048,7 @@ async function loadDashboard(view='overview'){
     portsHtml = `<div class="ports-summary"><strong>端口池</strong>：${ps.total || 0} 个 · 已用 ${ps.used || 0} 个 · 可用 ${ps.free || 0} 个</div>
       ${usedPorts ? `<div><strong>已用的端口：</strong>${usedPorts}</div>` : '<p class="muted small">暂无已使用的端口</p>'}`;
   }
+  lastTunnels = data.tunnels || [];
   const tunnelRows = data.tunnels.map(t => {
     const endpointRaw = tunnelEndpointText(t, data.frps);
     const endpointScheme = t.proxy_type === 'https' ? 'https://' : (['http','tcp'].includes(t.proxy_type) ? 'http://' : '');
@@ -1062,6 +1073,7 @@ async function loadDashboard(view='overview'){
         <span class="tc-chip"><i>连接</i><b>${runtime.available ? runtime.connections : '-'}</b></span>
         <span class="tc-actions">
           <button class="secondary" onclick="loadDashboard('tunnels')">刷新</button>
+          <button class="secondary" onclick="editTunnel(${t.id})">修改</button>
           <button class="secondary" onclick="toggleTunnel(${t.id})">${t.enabled ? '停用' : '启用'}</button>
           <button class="danger" onclick="deleteTunnel(${t.id})">删除</button>
         </span>
@@ -1190,7 +1202,7 @@ async function loadDashboard(view='overview'){
   if(view === 'tunnels'){
     app.innerHTML = appLayoutHtml(`
       <section class="card tunnel-create-card" id="tunnelCreateCard">
-        <div class="section-title"><div><div class="section-kicker">CREATE TUNNEL</div><h2>${stIcon('plus')}创建隧道</h2><p>填好本地服务和公网访问方式，创建后重新下载 frpc.toml 并重启客户端即可生效。</p></div></div>
+        <div class="section-title"><div><div class="section-kicker">CREATE TUNNEL</div><h2 id="tunnelFormTitle">${stIcon('plus')}创建隧道</h2><p id="tunnelFormHint">填好本地服务和公网访问方式，创建后重新下载 frpc.toml 并重启客户端即可生效。</p></div></div>
         <form id="tunnelForm" class="grid tunnel-create-form">
           <div><label>名称</label><input name="name" value="${esc(tunnelFormDraft.name || '')}" placeholder="web" required></div>
           <div><label>类型</label><select name="proxy_type" id="proxyTypeSelect">${proxyTypeOptions}</select></div>
@@ -1199,7 +1211,8 @@ async function loadDashboard(view='overview'){
           <div class="remote-port-field"><label>公网端口</label>${remotePortField}</div>
           <div class="domain-field hidden"><label>自定义域名</label><input name="custom_domains" value="${esc(tunnelFormDraft.custom_domains || '')}" placeholder="app.example.com,api.example.com"></div>
           <div class="secret-field hidden"><label>访问密钥</label><input name="secret_key" value="${esc(tunnelFormDraft.secret_key || '')}" placeholder="留空自动生成"></div>
-          <div class="form-actions tunnel-form-actions"><button>创建隧道</button><button type="button" class="secondary" onclick="resetTunnelForm()">清空重填</button></div>
+          <div id="tunnelEditBanner" class="muted small hidden" style="grid-column:1/-1;margin:0">正在修改隧道 <b id="tunnelEditName"></b>（#<span id="tunnelEditId"></span>），保存后重新下载 frpc.toml 生效。</div>
+          <div class="form-actions tunnel-form-actions"><button id="tunnelSubmitBtn">创建隧道</button><button type="button" class="secondary" onclick="resetTunnelForm()">清空重填</button><button type="button" class="secondary hidden" id="tunnelCancelEditBtn" onclick="cancelTunnelEdit()">取消修改</button></div>
         </form>
         <p class="muted small">HTTP / HTTPS / TCPMUX 需要 frps 已配置 vhostHTTPPort / vhostHTTPSPort / tcpmuxHTTPConnectPort 等对应能力。</p>
       </section>
@@ -1337,10 +1350,57 @@ function focusTunnelForm(){
   if(input) setTimeout(() => input.focus({preventScroll:true}), 260);
 }
 function resetTunnelForm(){
+  editingTunnelId = null;
   tunnelFormDraft = {};
-  const form = document.querySelector('#tunnelForm');
-  if(form) form.reset();
-  focusTunnelForm();
+  loadDashboard('tunnels').then(() => { applyTunnelFormMode(); focusTunnelForm(); });
+}
+// 表单模式：创建 / 修改 切换
+function applyTunnelFormMode(){
+  const isEdit = !!editingTunnelId;
+  const title = document.querySelector('#tunnelFormTitle');
+  const hint = document.querySelector('#tunnelFormHint');
+  const submitBtn = document.querySelector('#tunnelSubmitBtn');
+  const cancelBtn = document.querySelector('#tunnelCancelEditBtn');
+  const banner = document.querySelector('#tunnelEditBanner');
+  if(title) title.innerHTML = isEdit ? `${stIcon('edit')}修改隧道` : `${stIcon('plus')}创建隧道`;
+  if(hint) hint.textContent = isEdit
+    ? '改完点「保存修改」，然后重新下载 frpc.toml 并重启客户端即可生效。'
+    : '填好本地服务和公网访问方式，创建后重新下载 frpc.toml 并重启客户端即可生效。';
+  if(submitBtn) submitBtn.textContent = isEdit ? '保存修改' : '创建隧道';
+  if(cancelBtn) cancelBtn.classList.toggle('hidden', !isEdit);
+  if(banner){
+    banner.classList.toggle('hidden', !isEdit);
+    if(isEdit){
+      const t = (lastTunnels || []).find(x => Number(x.id) === Number(editingTunnelId));
+      const nameEl = document.querySelector('#tunnelEditName');
+      const idEl = document.querySelector('#tunnelEditId');
+      if(nameEl) nameEl.textContent = t ? t.name : '';
+      if(idEl) idEl.textContent = editingTunnelId;
+    }
+  }
+}
+function editTunnel(id){
+  const t = (lastTunnels || []).find(x => Number(x.id) === Number(id));
+  if(!t){ show('找不到该隧道，请刷新后重试', true); return; }
+  editingTunnelId = Number(id);
+  tunnelFormDraft = {
+    name: t.name || '',
+    proxy_type: t.proxy_type || 'tcp',
+    local_ip: t.local_ip || '127.0.0.1',
+    local_port: t.local_port != null ? String(t.local_port) : '',
+    remote_port: t.remote_port ? String(t.remote_port) : '',
+    custom_domains: t.custom_domains || '',
+    secret_key: t.secret_key || '',
+  };
+  loadDashboard('tunnels').then(() => {
+    applyTunnelFormMode();
+    setTimeout(focusTunnelForm, 120);
+  });
+}
+function cancelTunnelEdit(){
+  editingTunnelId = null;
+  tunnelFormDraft = {};
+  loadDashboard('tunnels').then(() => applyTunnelFormMode());
 }
 // 创建隧道已改为页面内表单（不再用弹窗）；保留旧函数名做兼容。
 function openTunnelModal(){ loadDashboard('tunnels').then(() => setTimeout(focusTunnelForm, 120)); }
