@@ -2520,8 +2520,6 @@ class Handler(BaseHTTPRequestHandler):
             self.download_frpc_deploy_script()
         elif path == "/config/frps.example.toml":
             self.download_frps_example()
-        elif path == "/setup/add-frps-node.sh":
-            self.download_node_script()
         elif path == "/admin/export/invite-keys.csv":
             self.export_invite_keys_csv()
         elif path == "/admin/backup/full.zip":
@@ -3967,15 +3965,6 @@ class Handler(BaseHTTPRequestHandler):
         cfg = tunnel_config(user, node, tunnels)
         script = frpc_deploy_script(cfg)
         self.send_body(script.encode(), 200, "application/x-sh; charset=utf-8", {"Content-Disposition": 'attachment; filename="deploy-frpc.sh"'})
-
-    def download_node_script(self) -> None:
-        """一键添加 frps 节点脚本。脚本本身不含敏感信息（与 GitHub 上公开版本一致），
-        公开可下载，方便在新节点机器上直接 curl 拉取执行。"""
-        script_path = BASE_DIR / "scripts" / "add-frps-node.sh"
-        if not script_path.is_file():
-            self.send_json({"ok": False, "error": "节点脚本不存在，请重新构建镜像"}, 404)
-            return
-        self.send_body(script_path.read_bytes(), 200, "application/x-sh; charset=utf-8", {"Content-Disposition": 'attachment; filename="add-frps-node.sh"'})
 
     def download_frps_example(self) -> None:
         if not self.require_admin() or not self.require_software_license():
