@@ -937,6 +937,39 @@ def start_node_health_sampler() -> None:
     threading.Thread(target=_loop, name="node-health-sampler", daemon=True).start()
 
 
+NEW_NODE_VERIFY_ATTEMPTS = int(os.getenv("FML_NEW_NODE_VERIFY_ATTEMPTS", "5") or "5")
+NEW_NODE_VERIFY_GAP = float(os.getenv("FML_NEW_NODE_VERIFY_GAP", "2") or "2")
+
+
+def quick_verify_new_node(node: dict[str, Any]) -> None:
+    """新节点接入后立即连续探测几次（连续 2 次在线即确认），并刷新健康/映射快照。"""
+    global _node_health_ts
+    attempts = max(1, NEW_NODE_VERIFY_ATTEMPTS)
+    gap = max(0.5, NEW_NODE_VERIFY_GAP)
+    result: dict[str, Any] | None = None
+    online_streak = 0
+    for i in range(attempts):
+        result = check_node_auth_port(node)
+        online_streak = online_streak + 1 if result.get("auth_status") == "online" else 0
+        if online_streak >= 2:
+            break
+        if i < attempts - 1:
+            time.sleep(gap)
+    if result is not None:
+        with _node_health_lock:
+            _node_health_cache[_node_health_key(node)] = {k: result.get(k) for k in ("auth_status", "auth_port_ok", "auth_checked_at", "auth_latency_ms", "auth_message")}
+            _node_health_ts = time.time()
+    try:
+        refresh_proxy_snapshot()
+    except Exception:
+        pass
+
+
+def spawn_new_node_verify(node: dict[str, Any]) -> None:
+    """后台线程执行新节点连续校验，不阻塞注册/创建请求。"""
+    threading.Thread(target=quick_verify_new_node, args=(dict(node),), name="verify-new-node", daemon=True).start()
+
+
 def check_tunnel_public_port(tunnel: dict[str, Any]) -> dict[str, Any]:
     """Best-effort user-facing mapping check for TCP tunnels."""
     if not tunnel.get("enabled"):
@@ -2748,6 +2781,8 @@ class Handler(BaseHTTPRequestHandler):
                     "INSERT OR IGNORE INTO ports(node_id, port, user_id, created_at) VALUES(?,?,NULL,?)",
                     [(node_id, p, now()) for p in range(port_start, port_end + 1)],
                 )
+            # 新节点接入：立即连续探测几次确认正常（不阻塞响应）
+            spawn_new_node_verify({"name": name, "server_addr": server_addr, "server_port": server_port, "active": True})
             self.send_json({"ok": True, "message": f"节点 {name} 注册成功", "node_id": node_id}, 201)
         except ValueError as e:
             self.send_json({"ok": False, "error": str(e)}, 400)
@@ -3988,6 +4023,8 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 node_id = int(cur.lastrowid)
                 conn.executemany("INSERT OR IGNORE INTO ports(node_id, port, created_at) VALUES(?,?,?)", [(node_id, p, now()) for p in range(port_start, port_end + 1)])
+            # 新节点创建：立即连续探测几次确认正常（不阻塞响应）
+            spawn_new_node_verify({"name": name, "server_addr": server_addr, "server_port": server_port, "active": True})
             self.send_json({"ok": True, "message": f"节点 {region} / {name} 已创建"})
         except sqlite3.IntegrityError:
             self.send_json({"ok": False, "error": "节点名称已存在"}, 400)
