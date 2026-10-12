@@ -860,12 +860,81 @@ def check_node_auth_port(node: dict[str, Any]) -> dict[str, Any]:
 def attach_node_auth_port_status(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not nodes:
         return nodes
+    pending: list[dict[str, Any]] = []
+    for n in nodes:
+        cached = node_health_lookup(n)
+        if cached is not None:
+            n.update(cached)
+        else:
+            pending.append(n)
+    return probe_node_auth_ports(pending) if pending else nodes
+
+
+# --- 节点健康快照：后台定时探测各节点 auth/bind 端口，页面读缓存（不再每次实时探测）---
+NODE_HEALTH_SAMPLE_SECONDS = int(os.getenv("FML_NODE_HEALTH_SAMPLE_SECONDS", "600") or "600")
+_node_health_lock = threading.Lock()
+_node_health_cache: dict[str, dict[str, Any]] = {}
+_node_health_ts = 0.0
+_node_health_sampler_started = False
+
+
+def _node_health_key(node: dict[str, Any]) -> str:
+    return f"{node.get('server_addr', '')}:{node.get('server_port', '')}"
+
+
+def probe_node_auth_ports(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not nodes:
+        return nodes
     max_workers = max(1, min(NODE_CHECK_MAX_WORKERS, len(nodes)))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(check_node_auth_port, n): n for n in nodes}
         for fut in as_completed(futures):
             futures[fut].update(fut.result())
     return nodes
+
+
+def node_health_lookup(node: dict[str, Any]) -> dict[str, Any] | None:
+    with _node_health_lock:
+        ts = _node_health_ts
+        cached = _node_health_cache.get(_node_health_key(node))
+    if not cached:
+        return None
+    if ts and (time.time() - ts) > max(300, NODE_HEALTH_SAMPLE_SECONDS * 3):
+        return None
+    return dict(cached)
+
+
+def refresh_node_health_snapshot() -> None:
+    global _node_health_ts
+    with db() as conn:
+        rows = [node_public(r) for r in conn.execute("SELECT * FROM nodes ORDER BY id")]
+    if rows:
+        probe_node_auth_ports(rows)
+    cache: dict[str, dict[str, Any]] = {}
+    for n in rows:
+        cache[_node_health_key(n)] = {k: n.get(k) for k in ("auth_status", "auth_port_ok", "auth_checked_at", "auth_latency_ms", "auth_message")}
+    with _node_health_lock:
+        _node_health_cache.clear()
+        _node_health_cache.update(cache)
+        _node_health_ts = time.time()
+
+
+def start_node_health_sampler() -> None:
+    global _node_health_sampler_started
+    if _node_health_sampler_started:
+        return
+    _node_health_sampler_started = True
+
+    def _loop() -> None:
+        time.sleep(8)
+        while True:
+            try:
+                refresh_node_health_snapshot()
+            except Exception:
+                pass
+            time.sleep(max(30, NODE_HEALTH_SAMPLE_SECONDS))
+
+    threading.Thread(target=_loop, name="node-health-sampler", daemon=True).start()
 
 
 def check_tunnel_public_port(tunnel: dict[str, Any]) -> dict[str, Any]:
@@ -987,7 +1056,7 @@ def frps_all_proxies(nodes: list[sqlite3.Row] | None = None) -> list[dict[str, A
 
 
 # --- 映射快照缓存：后台定时采集各节点 dashboard，页面直接读缓存（不再每次实时拉取）------
-PROXY_SAMPLE_SECONDS = int(os.getenv("FML_PROXY_SAMPLE_SECONDS", "15") or "15")
+PROXY_SAMPLE_SECONDS = int(os.getenv("FML_PROXY_SAMPLE_SECONDS", "600") or "600")
 _proxy_snapshot_lock = threading.Lock()
 _proxy_snapshot: dict[str, Any] = {"ts": 0.0, "proxies": [], "error": ""}
 _proxy_sampler_started = False
@@ -3024,8 +3093,9 @@ class Handler(BaseHTTPRequestHandler):
                 user_dashboard = frps_user_dashboard(user["username"], user)
             node_payload = node_public(node) if node else None
             if node_payload:
-                # Measure panel→node auth/bind port latency (same probe as node health).
-                node_payload.update(check_node_auth_port(node_payload))
+                # 用节点健康快照（后台定时采集），避免每次打开概览都实时探测。
+                health = node_health_lookup(node_payload)
+                node_payload.update(health if health is not None else check_node_auth_port(node_payload))
                 node_payload["latency_ms"] = node_payload.get("auth_latency_ms")
             self.send_json({"ok": True, "user": public_user(user), "software_license": sw_license, "node": node_payload, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
             return
@@ -4151,6 +4221,7 @@ def main() -> None:
     start_traffic_sampler()
     start_host_sampler()
     start_proxy_sampler()
+    start_node_health_sampler()
     print(f"{APP_NAME} separated server listening on http://{HOST}:{PORT}")
     print(f"DB: {DB_PATH}")
     if ADMIN_PASSWORD == "admin123":
