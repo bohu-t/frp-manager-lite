@@ -2367,8 +2367,14 @@ function adminNotifyCardHtml(notify){
   const yn = (v, d) => (v === undefined || v === null ? d : !!v);
   const channels = n.channels || [];
   const cur = n.type || '';
-  const chips = [`<button type="button" class="notify-chip${cur === '' ? ' active' : ''}" data-channel="" onclick="selectNotifyChannel('')">不通知</button>`]
-    .concat(channels.map(c => `<button type="button" class="notify-chip${c.type === cur ? ' active' : ''}" data-channel="${esc(c.type)}" onclick="selectNotifyChannel('${esc(c.type)}')">${esc(c.name)}</button>`)).join('');
+  const primaryOrder = ['telegramBot','dingtalkBot','lark','bark','weWorkApp'];
+  const byType = {};
+  channels.forEach(c => { byType[c.type] = c; });
+  const chipHtml = c => `<button type="button" class="notify-chip${c.type === cur ? ' active' : ''}" data-channel="${esc(c.type)}" data-name="${esc(c.name)}" onclick="openNotifyConfig('${esc(c.type)}')">${esc(c.name)}</button>`;
+  const primaryChips = primaryOrder.filter(t => byType[t]).map(t => chipHtml(byType[t])).join('');
+  const otherChannels = channels.filter(c => !primaryOrder.includes(c.type));
+  const otherChips = otherChannels.map(chipHtml).join('');
+  const curInOther = otherChannels.some(c => c.type === cur);
   const groups = channels.map(c => {
     const inner = (c.fields || []).map(f => adminNotifyFieldHtml(f, n.params || {})).join('');
     return `<div class="notify-channel-fields" data-channel="${esc(c.type)}" style="display:${c.type === cur ? 'grid' : 'none'}">${inner}</div>`;
@@ -2377,7 +2383,7 @@ function adminNotifyCardHtml(notify){
     <div class="settings-card-head"><span class="settings-card-icon icon-blue">${stIcon('bell')}</span><div><h2>通知设置</h2><p>配置系统通知规则和渠道，及时获取异常信息。</p></div><span class="status-badge ${n.enabled ? 'ok' : 'bad'}"><i></i>${n.enabled ? '已开启' : '已关闭'}</span></div>
     <form id="notifyForm" class="settings-form">
       <div class="notify-row">
-        <div class="notify-row-label"><label>通知开关</label><span class="muted small">开启后节点异常/恢复会按下方渠道推送</span></div>
+        <div class="notify-row-label"><label>通知开关</label><span class="muted small">开启后节点异常/恢复会按所选渠道推送</span></div>
         <div class="notify-row-control"><label class="switch"><input type="checkbox" name="enabled" value="1"${n.enabled ? ' checked' : ''} onchange="syncNotifySwitch(this)"><span class="switch-track"><span class="switch-thumb"></span></span></label><span class="switch-state" id="notifySwitchState">${n.enabled ? '已开启' : '已关闭'}</span></div>
       </div>
       <div class="notify-row">
@@ -2389,12 +2395,19 @@ function adminNotifyCardHtml(notify){
         <div class="notify-row-control"><label class="check"><input type="checkbox" name="on_down" value="1"${yn(n.on_down, true) ? ' checked' : ''}> 节点异常（离线）</label><label class="check"><input type="checkbox" name="on_up" value="1"${yn(n.on_up, true) ? ' checked' : ''}> 节点恢复（上线）</label></div>
       </div>
       <div class="notify-row notify-row-block">
-        <div class="notify-row-label"><label>通知渠道</label></div>
-        <div class="notify-chips">${chips}</div>
+        <div class="notify-row-label"><label>通知渠道</label><span class="muted small">选择渠道后在弹窗中配置参数</span></div>
+        <div class="notify-chips" id="notifyChipsPrimary">${primaryChips}<button type="button" class="notify-chip notify-chip-more" id="notifyMoreBtn" onclick="toggleNotifyMore()">其他 ▾</button></div>
+        <div class="notify-chips notify-chips-more${curInOther ? '' : ' hidden'}" id="notifyChipsMore">${otherChips}</div>
       </div>
       <input type="hidden" name="notify_type" id="notifyTypeSelect" value="${esc(cur)}">
-      <div class="notify-config">${groups}</div>
       <div class="form-actions"><button type="submit">保存设置</button><button type="button" class="secondary" onclick="sendNotifyTest()">发送测试通知</button></div>
+      <div id="notifyConfigModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="notifyConfigTitle" onclick="if(event.target===this)closeNotifyConfig()">
+        <section class="modal-page card notify-config-modal">
+          <div class="section-title modal-title"><div><h2 id="notifyConfigTitle">渠道配置</h2><p>填写所选渠道的参数，点「保存设置」后生效。</p></div><button type="button" class="secondary modal-close" onclick="closeNotifyConfig()">关闭 ×</button></div>
+          <div class="notify-config">${groups}</div>
+          <div class="form-actions"><button type="button" onclick="closeNotifyConfig()">完成</button></div>
+        </section>
+      </div>
     </form>
   </section>`;
 }
@@ -2434,8 +2447,37 @@ function selectNotifyChannel(type){
   if(sel) sel.value = type;
   const form = document.querySelector('#notifyForm');
   if(!form) return;
-  form.querySelectorAll('.notify-chip').forEach(c => c.classList.toggle('active', (c.dataset.channel || '') === type));
+  let activeName = '';
+  form.querySelectorAll('.notify-chip[data-channel]').forEach(c => {
+    const on = (c.dataset.channel || '') === type;
+    c.classList.toggle('active', on);
+    if(on) activeName = c.dataset.name || '';
+  });
   form.querySelectorAll('.notify-channel-fields').forEach(g => { g.style.display = (g.dataset.channel === type) ? 'grid' : 'none'; });
+  const title = document.querySelector('#notifyConfigTitle');
+  if(title) title.textContent = activeName ? (activeName + ' 配置') : '渠道配置';
+  const more = document.querySelector('#notifyChipsMore');
+  if(more && type){
+    const inMore = !!more.querySelector(`.notify-chip[data-channel="${type}"]`);
+    more.classList.toggle('hidden', !inMore);
+  }
+}
+function openNotifyConfig(type){
+  selectNotifyChannel(type);
+  const modal = document.querySelector('#notifyConfigModal');
+  if(modal) modal.classList.remove('hidden');
+}
+function closeNotifyConfig(){
+  const modal = document.querySelector('#notifyConfigModal');
+  if(modal) modal.classList.add('hidden');
+}
+function toggleNotifyMore(){
+  const more = document.querySelector('#notifyChipsMore');
+  const btn = document.querySelector('#notifyMoreBtn');
+  if(!more) return;
+  const show = more.classList.contains('hidden');
+  more.classList.toggle('hidden', !show);
+  if(btn) btn.textContent = show ? '其他 ▴' : '其他 ▾';
 }
 function syncNotifySwitch(el){
   const s = document.querySelector('#notifySwitchState');
