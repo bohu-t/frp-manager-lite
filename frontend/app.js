@@ -1591,7 +1591,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>节点名</label><input name="name" placeholder="hk-1" required></div>
       <div><label>frps 域名/地址</label><input name="server_addr" placeholder="hk.example.com" required></div>
       <div><label>frps bindPort</label><input name="server_port" type="number" value="7000" min="1" max="65535"></div>
-      <div><label>frps token</label><input name="auth_token" placeholder="CHANGE_ME" required></div>
+      <div><label>frps token</label><input name="auth_token" id="nodeAuthToken" value="${esc(genRandomToken())}" required><span class="muted small">已随机生成，可直接使用；<button type="button" class="link-btn" onclick="document.querySelector('#nodeAuthToken').value=genRandomToken()">重新生成</button></span></div>
       <div><label>带宽（Mbps）</label><input name="bandwidth_mbps" type="number" value="0" min="0" step="1"><span class="muted small">0 表示不限</span></div>
       <div><label>端口起始</label><input name="port_start" type="number" value="20000" min="1" max="65535"></div>
       <div><label>端口结束</label><input name="port_end" type="number" value="20199" min="1" max="65535"></div>
@@ -2052,6 +2052,16 @@ async function nodeDelete(id){ if(confirm('删除节点会删除空端口池；�
 // 一键添加节点脚本（公开仓库版，不依赖本面板）
 const NODE_INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/bohu-t/lite-install/main/add-frps-node.sh';
 function shellQuote(v){ return `'${String(v).replace(/'/g, `'\\''`)}'`; }
+function genRandomToken(len){
+  const n = Math.max(8, Number(len) || 32);
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const bytes = new Uint8Array(n);
+  if(window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+  else for(let i=0;i<n;i++) bytes[i] = Math.floor(Math.random() * 256);
+  let out = '';
+  for(let i=0;i<n;i++) out += chars[bytes[i] % chars.length];
+  return out;
+}
 function genNodeDeployScript(){
   const form = document.querySelector('#nodeForm');
   if(!form) return;
@@ -2257,7 +2267,6 @@ function adminOpsCardHtml(){
         <div class="section-title"><div><div class="section-kicker">OPERATIONS</div><h2>${stIcon('tools')}运维入口</h2></div></div>
         <div class="ops-list">
           <div class="ops-item"><div class="label">下载模块</div><p class="muted small">为普通用户生成 frpc.toml 与 deploy-frpc.sh。</p><p class="row"><button onclick="openAdminFrpcModal()">为用户生成配置</button></p></div>
-          <div class="ops-item"><div class="label">全量备份</div><p class="muted small">导出数据库与前端配置文件。</p><p class="row"><a class="btn" href="/admin/backup/full.zip">下载全量备份</a></p></div>
         </div>
       </section>`;
 }
@@ -2281,6 +2290,7 @@ function adminBackupCardHtml(r2, r2Status, r2Source){
   return `<section class="card admin-backup-card">
         <div class="section-title"><div><div class="section-kicker">BACKUP</div><h2>${stIcon('backup')}备份与恢复</h2></div><span class="section-count">R2 ${r2.configured ? '已配置' : '未配置'}</span></div>
         <div class="ops-list">
+          <div class="ops-item"><div class="label">下载全量备份</div><p class="muted small">导出数据库与前端配置文件。</p><p class="row"><a class="btn" href="/admin/backup/full.zip">下载全量备份</a></p></div>
           <div class="ops-item"><div class="label">恢复全量备份</div><p class="row"><input id="restoreBackupFile" type="file" accept=".zip,application/zip"><button class="danger" onclick="restoreFullBackup()">恢复备份</button></p><p class="muted small">会要求输入 RESTORE，并在恢复前自动保存当前备份。</p></div>
           <div class="ops-item"><div class="label">Cloudflare R2</div><p class="muted small">${r2Status} · ${esc(r2Source)}</p><p class="row"><button class="secondary" onclick="backupToR2()">上传备份到 R2</button></p></div>
         </div>
