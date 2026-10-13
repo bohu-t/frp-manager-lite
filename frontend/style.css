@@ -1237,6 +1237,7 @@ html[data-theme="dark"] .app-shell.is-settings input,html[data-theme="dark"] .ap
 
 /* ---- notify ---- */
 .app-shell.is-settings .notify-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--divider)}
+.app-shell.is-settings .notify-row:not(.notify-row-block){padding-right:56px}
 .app-shell.is-settings .notify-row:last-of-type{border-bottom:0}
 .app-shell.is-settings .notify-row-block{grid-template-columns:1fr}
 .app-shell.is-settings .notify-row-label label{margin:0}
@@ -1315,6 +1316,7 @@ html[data-theme="dark"] .app-shell.is-settings input,html[data-theme="dark"] .ap
   .app-shell.is-settings .settings-head-actions{width:100%;justify-content:space-between}
   .app-shell.is-settings .card{padding:16px}
   .app-shell.is-settings .notify-row{grid-template-columns:1fr}
+  .app-shell.is-settings .notify-row:not(.notify-row-block){padding-right:0}
   .app-shell.is-settings .notify-row.notify-row-duo{grid-template-columns:1fr}
   .app-shell.is-settings .notify-row-control{justify-content:flex-start}
   .app-shell.is-settings .backup-units{grid-template-columns:repeat(2,minmax(0,1fr))}
