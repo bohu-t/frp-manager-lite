@@ -1382,3 +1382,6 @@ html[data-theme="dark"] .app-shell.is-settings input,html[data-theme="dark"] .ap
 
 /* === 统一字体：全局采用设置页的字体栈 === */
 body,.app-shell{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+
+/* 侧栏导航字号/字重统一（与设置页一致；按钮字体保持原样） */
+.side-link{font-size:13px;font-weight:500}
