@@ -2551,8 +2551,8 @@ async function loadAdminSettings(){
     <div class="admin-settings-grid">
       ${adminNotifyCardHtml(notify)}
       ${adminSmtpCardHtml(smtp)}
-      ${adminBackupCardHtml(r2, r2Status, r2Source)}
       ${adminOpsCardHtml()}
+      ${adminBackupCardHtml(r2, r2Status, r2Source)}
       ${adminR2CardHtml(r2, r2Status, r2Source)}
     </div>
     ${adminFrpcModalHtml(frpcUserOptions)}
