@@ -2310,7 +2310,7 @@ function adminNotifyCardHtml(notify){
   const n = notify || {};
   const yn = (v, d) => (v === undefined || v === null ? d : !!v);
   return `<section class="card admin-notify-card">
-        <div class="section-title"><div><div class="section-kicker">NOTIFY</div><h2>${stIcon('bell')}通知设置</h2><p>节点异常 / 恢复时通过邮件或 Webhook 提醒（当前主要用于节点异常通知）</p></div><span class="status-badge ${n.enabled ? 'ok' : 'bad'}"><i></i>${n.enabled ? '已启用' : '未启用'}</span></div>
+        <div class="section-title"><div><div class="section-kicker">NOTIFY</div><h2>${stIcon('bell')}通知设置</h2><p>节点异常 / 恢复时通过邮件、Webhook 或青龙通知提醒（当前主要用于节点异常通知）</p></div><span class="status-badge ${n.enabled ? 'ok' : 'bad'}"><i></i>${n.enabled ? '已启用' : '未启用'}</span></div>
         <form id="notifyForm" class="grid">
           <div><label>通知开关</label><select name="enabled"><option value="1"${n.enabled ? ' selected' : ''}>启用</option><option value="0"${n.enabled ? '' : ' selected'}>停用</option></select></div>
           <div><label>冷却时间（分钟）</label><input name="cooldown_minutes" type="number" min="0" max="1440" value="${esc(n.cooldown_minutes ?? 30)}"><span class="muted small">同一节点重复通知的最小间隔，0 表示不限制</span></div>
@@ -2319,6 +2319,9 @@ function adminNotifyCardHtml(notify){
           <div><label>收件人邮箱</label><input name="email_to" value="${esc(n.email_to || '')}" placeholder="多个用逗号分隔"></div>
           <div><label>Webhook 通知</label><select name="webhook_enabled"><option value="1"${n.webhook_enabled ? ' selected' : ''}>启用</option><option value="0"${n.webhook_enabled ? '' : ' selected'}>停用</option></select></div>
           <div><label>Webhook 地址</label><input name="webhook_url" value="${esc(n.webhook_url || '')}" placeholder="https://..."></div>
+          <div><label>青龙通知</label><select name="ql_enabled"><option value="1"${n.ql_enabled ? ' selected' : ''}>启用</option><option value="0"${n.ql_enabled ? '' : ' selected'}>停用</option></select><span class="muted small">复用青龙面板的通知渠道</span></div>
+          <div><label>青龙地址</label><input name="ql_url" value="${esc(n.ql_url || '')}" placeholder="http://192.168.124.168:5700"></div>
+          <div><label>青龙应用 Token</label><input name="ql_token" value="${esc(n.ql_token || '')}" placeholder="应用授权 Token（需 system 权限）"></div>
           <div style="grid-column:1/-1"><label>Webhook 请求体模板（JSON）</label><textarea name="webhook_template" rows="3" spellcheck="false">${esc(n.webhook_template || '')}</textarea><span class="muted small">支持占位符 <code>{{title}}</code>、<code>{{content}}</code>；留空则发送默认 JSON</span></div>
           <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存通知设置</button><button type="button" class="secondary" onclick="sendNotifyTest()">发送测试通知</button></div>
         </form>
@@ -2381,6 +2384,9 @@ function wireAdminSettingsForms(){
         webhook_enabled: fd.get('webhook_enabled'),
         webhook_url: fd.get('webhook_url'),
         webhook_template: fd.get('webhook_template'),
+        ql_enabled: fd.get('ql_enabled'),
+        ql_url: fd.get('ql_url'),
+        ql_token: fd.get('ql_token'),
         cooldown_minutes: fd.get('cooldown_minutes'),
       };
       try{

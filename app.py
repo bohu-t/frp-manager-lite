@@ -306,6 +306,9 @@ def notify_config(conn: sqlite3.Connection) -> dict[str, Any]:
         "webhook_enabled": setting_get(conn, "notify_webhook_enabled", "0") == "1",
         "webhook_url": setting_get(conn, "notify_webhook_url", ""),
         "webhook_template": setting_get(conn, "notify_webhook_template", NOTIFY_DEFAULT_TEMPLATE),
+        "ql_enabled": setting_get(conn, "notify_ql_enabled", "0") == "1",
+        "ql_url": setting_get(conn, "notify_ql_url", ""),
+        "ql_token": setting_get(conn, "notify_ql_token", ""),
         "cooldown_minutes": max(0, int(setting_get(conn, "notify_cooldown_minutes", "30") or "30")),
     }
 
@@ -320,6 +323,9 @@ def notify_public(cfg: dict[str, Any]) -> dict[str, Any]:
         "webhook_enabled": bool(cfg.get("webhook_enabled")),
         "webhook_url": cfg.get("webhook_url", ""),
         "webhook_template": cfg.get("webhook_template", NOTIFY_DEFAULT_TEMPLATE),
+        "ql_enabled": bool(cfg.get("ql_enabled")),
+        "ql_url": cfg.get("ql_url", ""),
+        "ql_token": cfg.get("ql_token", ""),
         "cooldown_minutes": int(cfg.get("cooldown_minutes", 30)),
     }
 
@@ -366,6 +372,41 @@ def send_webhook_notification(url: str, title: str, content: str, template: str)
         return False, f"{e.__class__.__name__}: {e}"
 
 
+def send_qinglong_notification(url: str, token: str, title: str, content: str) -> tuple[bool, str]:
+    """通过青龙面板 OpenAPI 发送通知（复用青龙已配置的通知渠道）。"""
+    if not url or not token:
+        return False, "未配置青龙地址或应用 Token"
+    endpoint = str(url).rstrip("/") + "/open/system/notify"
+    payload = json.dumps({"title": title, "content": content}, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint, data=payload, method="PUT",
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        raw = ""
+        try:
+            raw = e.read().decode("utf-8", "replace")
+        except Exception:
+            pass
+        try:
+            msg = json.loads(raw).get("message")
+        except Exception:
+            msg = None
+        return False, msg or f"HTTP {e.code}"
+    except Exception as e:
+        return False, f"{e.__class__.__name__}: {e}"
+    try:
+        data = json.loads(raw) if raw else {}
+    except Exception:
+        data = {}
+    if data.get("code") == 200:
+        return True, "已发送"
+    return False, data.get("message") or (raw[:200] or "未知错误")
+
+
 def send_notification(title: str, content: str, force: bool = False) -> dict[str, Any]:
     """按配置通过邮件/Webhook 发送通知；返回各渠道结果。"""
     try:
@@ -386,6 +427,9 @@ def send_notification(title: str, content: str, force: bool = False) -> dict[str
     if cfg["webhook_enabled"]:
         ok, msg = send_webhook_notification(cfg["webhook_url"], title, content, cfg["webhook_template"])
         results.append({"channel": "webhook", "ok": ok, "message": msg})
+    if cfg["ql_enabled"]:
+        ok, msg = send_qinglong_notification(cfg["ql_url"], cfg["ql_token"], title, content)
+        results.append({"channel": "qinglong", "ok": ok, "message": msg})
     if not results:
         return {"ok": False, "error": "未启用任何通知方式（邮件/Webhook）", "results": []}
     return {"ok": any(r["ok"] for r in results), "results": results}
@@ -4127,6 +4171,8 @@ class Handler(BaseHTTPRequestHandler):
         webhook_url = str(data.get("webhook_url", "")).strip()[:500]
         webhook_template = str(data.get("webhook_template", "")).strip() or NOTIFY_DEFAULT_TEMPLATE
         webhook_template = webhook_template[:2000]
+        ql_url = str(data.get("ql_url", "")).strip()[:500]
+        ql_token = str(data.get("ql_token", "")).strip()[:500]
         try:
             cooldown = int(data.get("cooldown_minutes", 30) or 0)
         except (TypeError, ValueError):
@@ -4141,9 +4187,12 @@ class Handler(BaseHTTPRequestHandler):
             setting_set(conn, "notify_webhook_enabled", _flag(data.get("webhook_enabled")))
             setting_set(conn, "notify_webhook_url", webhook_url)
             setting_set(conn, "notify_webhook_template", webhook_template)
+            setting_set(conn, "notify_ql_enabled", _flag(data.get("ql_enabled")))
+            setting_set(conn, "notify_ql_url", ql_url)
+            setting_set(conn, "notify_ql_token", ql_token)
             setting_set(conn, "notify_cooldown_minutes", str(cooldown))
             cfg = notify_config(conn)
-        audit("notify_config_update", admin, None, None, "", f"更新通知设置：enabled={cfg['enabled']} email={cfg['email_enabled']} webhook={cfg['webhook_enabled']}")
+        audit("notify_config_update", admin, None, None, "", f"更新通知设置：enabled={cfg['enabled']} email={cfg['email_enabled']} webhook={cfg['webhook_enabled']} qinglong={cfg['ql_enabled']}")
         self.send_json({"ok": True, "message": "通知设置已保存", "notify": notify_public(cfg)})
 
     def admin_notify_test(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
