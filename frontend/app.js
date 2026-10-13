@@ -2326,7 +2326,7 @@ function adminNotifyCardHtml(notify){
     .concat(channels.map(c => `<option value="${esc(c.type)}"${c.type === cur ? ' selected' : ''}>${esc(c.name)}</option>`)).join('');
   const groups = channels.map(c => {
     const inner = (c.fields || []).map(f => adminNotifyFieldHtml(f, n.params || {})).join('');
-    return `<div class="notify-channel-fields" data-channel="${esc(c.type)}" style="grid-column:1/-1;display:${c.type === cur ? 'grid' : 'none'};gap:12px 16px;grid-template-columns:repeat(2,minmax(0,1fr))">${inner}</div>`;
+    return `<div class="notify-channel-fields" data-channel="${esc(c.type)}" style="grid-column:1/-1;display:${c.type === cur ? 'grid' : 'none'};gap:12px 16px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">${inner}</div>`;
   }).join('');
   return `<section class="card admin-notify-card">
         <div class="section-title"><div><div class="section-kicker">NOTIFY</div><h2>${stIcon('bell')}通知设置</h2><p>节点异常 / 恢复时通过所选渠道推送（当前主要用于节点异常通知）</p></div><span class="status-badge ${n.enabled ? 'ok' : 'bad'}"><i></i>${n.enabled ? '已启用' : '未启用'}</span></div>
@@ -2444,12 +2444,16 @@ async function loadAdminSettings(){
   const frpcUserOptions = frpcUsers.map(u => `<option value="${u.id}">${esc(u.username)} · ${esc(u.node_region || '-')} / ${esc(u.node_name || '-')} · 端口 ${u.port_count || 0} · 可用 ${(u.available_ports || []).length} · 隧道 ${u.tunnel_count || 0}</option>`).join('');
   app.innerHTML = appLayoutHtml(`
     <div class="admin-settings-grid">
-      ${adminOpsCardHtml()}
-      ${adminSmtpCardHtml(smtp)}
-      ${adminNotifyCardHtml(notify)}
-      ${adminBackupCardHtml(r2, r2Status, r2Source)}
+      <div class="admin-settings-col">
+        ${adminNotifyCardHtml(notify)}
+        ${adminOpsCardHtml()}
+      </div>
+      <div class="admin-settings-col">
+        ${adminSmtpCardHtml(smtp)}
+        ${adminBackupCardHtml(r2, r2Status, r2Source)}
+        ${adminR2CardHtml(r2, r2Status, r2Source)}
+      </div>
     </div>
-    ${adminR2CardHtml(r2, r2Status, r2Source)}
     ${adminFrpcModalHtml(frpcUserOptions)}
   `, 'admin-settings', '设置');
   wireAdminSettingsForms();
