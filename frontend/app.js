@@ -5,6 +5,7 @@ let currentUser = null;
 let softwareLicense = null;
 let currentAdminSection = 'users';
 let adminDashboardTimer = null;
+let panelVersion = '';
 let tunnelPreviewTimer = null;
 let csrfToken = null;
 let clientNodeProbeUrl = '';
@@ -397,7 +398,12 @@ const UIICONS = {
   cloud:'<path d="M7.5 18.5h9a4 4 0 0 0 .4-8A5.5 5.5 0 0 0 6.6 9.6 4.2 4.2 0 0 0 7.5 18.5Z"/>',
   edit:'<path d="M4 20h4l10-10-4-4L4 16z"/><path d="M13.5 5.5 18.5 10.5"/>',
   gear:'<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6.2 6.2l1.6 1.6M16.2 16.2l1.6 1.6M17.8 6.2l-1.6 1.6M7.8 16.2l-1.6 1.6"/>',
-  download:'<path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14"/>'
+  download:'<path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14"/>',
+  mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M4 7.2 12 13l8-5.8"/>',
+  upload:'<path d="M12 16V5m0 0-4 4m4-4 4 4M5 19h14"/>',
+  bucket:'<path d="M5.5 7h13l-1.2 12.1a2 2 0 0 1-2 1.9H8.7a2 2 0 0 1-2-1.9Z"/><path d="M4.5 7h15"/><path d="M9.5 4h5l1 3h-7z"/>',
+  database:'<ellipse cx="12" cy="6" rx="7" ry="2.8"/><path d="M5 6v12c0 1.6 3.1 2.8 7 2.8s7-1.2 7-2.8V6"/><path d="M5 12c0 1.6 3.1 2.8 7 2.8s7-1.2 7-2.8"/>',
+  cloudUpload:'<path d="M7.5 18h9a4 4 0 0 0 .4-8A5.5 5.5 0 0 0 6.6 9.1 4.2 4.2 0 0 0 7.5 18Z"/><path d="M12 15v-4m0 0-1.8 1.8M12 11l1.8 1.8"/>'
 };
 function uiIcon(name, cls){
   const body = UIICONS[name];
@@ -612,21 +618,34 @@ function appSidebarHtml(kind='dashboard'){
     const active = kind === action || (section && kind === section) ? ' active' : '';
     return `<button class="side-link${active}" data-nav="${action}"${section ? ` data-section="${section}"` : ''}>${sideIcon(icon)}<span class="side-link-label">${label}</span><span class="side-link-arrow">›</span></button>`;
   }).join('');
+  const brandName = kind === 'admin-settings' ? 'FRP 管理器' : 'Frp 管理台';
+  const brandSub = kind === 'admin-settings' ? '<span class="brand-tag">Lite</span>' : '内网穿透管理平台';
+  const serviceSub = (kind === 'admin-settings' && panelVersion) ? ('版本 ' + esc(panelVersion)) : 'FRP 管理服务';
   return `<aside class="app-sidebar">
-    <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>Frp 管理台</strong><span>内网穿透管理平台</span></div></div>
+    <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>${brandName}</strong><span>${brandSub}</span></div></div>
     <div class="sidebar-section-label">工作空间</div>${links}
     ${isAdmin ? '' : `<div class="sidebar-section-label sidebar-tools-label">快速工具</div>
       <button class="side-link${kind === 'dashboard-config' ? ' active' : ''}" data-nav="dashboard-config">${sideIcon('download')}<span class="side-link-label">配置下载</span><span class="side-link-arrow">›</span></button>
       <button class="side-link${kind === 'dashboard-editor' ? ' active' : ''}" data-nav="dashboard-editor">${sideIcon('edit')}<span class="side-link-label">在线配置</span><span class="side-link-arrow">›</span></button>`}
     <div class="sidebar-spacer"></div>
-    <div class="sidebar-service-status"><span class="sidebar-service-dot"></span><span><strong>服务运行中</strong><small>FRP 管理服务</small></span></div>
+    <div class="sidebar-service-status"><span class="sidebar-service-dot"></span><span><strong>服务运行中</strong><small>${serviceSub}</small></span></div>
     <div class="sidebar-user-card"><span class="sidebar-user-avatar">${esc(String(username).slice(0,1).toUpperCase())}</span><span class="sidebar-user-copy"><strong>${esc(username)}</strong><small>${isAdmin ? '系统管理员' : '普通用户'}</small></span><button type="button" data-nav="logout" title="退出登录" aria-label="退出登录">↗</button></div>
   </aside>`;
 }
 
+function settingsTopbarHtml(title){
+  const username = currentUser?.username || '管理员';
+  const initial = esc(String(username).slice(0, 1).toUpperCase());
+  return `<div class="workspace-topbar settings-topbar">
+    <div class="settings-head"><span class="settings-head-icon">${stIcon('gear')}</span><div class="settings-head-copy"><h1>${esc(title || '管理员设置')}</h1><p>配置系统通知、邮件、备份、运维和存储等相关设置</p></div></div>
+    <div class="topbar-actions settings-head-actions"><span class="settings-admin"><span class="settings-admin-avatar">${initial}</span><span class="settings-admin-name">${esc(username)}</span></span><button type="button" class="secondary settings-logout" data-nav="logout">退出登录</button></div>
+  </div>`;
+}
+
 function appLayoutHtml(content, kind='dashboard', topTitle='工作区'){
   const username = currentUser?.username || '用户';
-  return `<div class="app-shell">${appSidebarHtml(kind)}<main class="workspace-main"><div class="workspace-topbar"><div class="topbar-welcome"><svg class="topbar-welcome-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><path d="M683.232 304.576c-51.52 52.992-103.072 105.76-154.624 158.304-37.76 38.496-74.944 77.376-112.96 115.36-5.76 5.76-14.976 11.392-22.528 11.264-13.824 0-20.288-16.768-13.824-31.168 16.864-36.992 34.624-73.504 50.624-110.72 4.992-11.36 7.584-23.68 7.68-36.128a34.528 34.528 0 0 0-16-28.864 32.96 32.96 0 0 0-32.352-1.6c-8.992 4-16.704 10.528-22.272 18.784-41.824 75.328-83.584 150.624-123.328 226.976-15.168 28.896-20.064 61.76-19.616 95.168 1.664 66.624 30.08 121.696 71.232 171.296 35.456 42.656 76.032 77.472 130.624 91.36 58.688 15.04 115.04 6.336 169.344-19.2a418.976 418.976 0 0 0 121.152-87.584c65.632-66.944 131.2-133.952 196.672-201.056 10.432-10.592 18.432-21.856 13.408-38.656-9.6-31.264-40.224-40.416-63.52-17.408-31.776 31.52-62.816 64-94.208 96-3.488 3.584-6.976 9.408-10.944 9.408-8.384 0.864-19.744 1.92-24.96-2.816-4.576-4.032-3.584-16.096-2.368-24.192 0.64-4.704 6.528-8.48 10.304-12.416 54.272-55.776 108.704-111.168 162.72-167.072 21.376-21.696 14.016-56-13.376-63.68-18.048-5.12-32.224 2.336-45.056 15.52-49.44 51.296-99.264 102.304-148.992 153.344a101.024 101.024 0 0 1-10.752 10.24 18.112 18.112 0 0 1-25.6-1.216 19.136 19.136 0 0 1-2.56-25.92c3.712-5.344 7.968-10.272 12.704-14.72 65.792-67.36 131.552-134.816 197.28-202.336 23.904-24.384 16.32-58.944-14.528-67.584-15.232-4.352-26.944 2.816-37.056 13.056a26194.304 26194.304 0 0 0-106.88 108.736c-31.648 32.48-63.136 65.184-94.784 97.504-4.16 4.256-8.576 10.368-13.536 11.104a33.28 33.28 0 0 1-22.496-3.2 16.544 16.544 0 0 1-3.392-24.096c3.424-4.864 7.264-9.44 11.488-13.632 51.52-52.896 103.072-105.536 154.368-158.528 21.6-22.304 15.392-55.584-11.968-64.224-17.952-5.664-32.224 1.28-45.12 14.592z m-410.496 15.744c-19.744 3.104-32 16.768-41.28 34.56-16.832 32-33.6 63.968-50.24 95.904l-33.152 64.16a1594.88 1594.88 0 0 1-17.056 31.744c-55.584 99.776-41.92 209.504 19.52 299.744 33.728 49.504 73.6 90.624 129.664 108.864 4.8 1.6 9.728 3.104 14.624 4.704a12.128 12.128 0 0 0 3.648-0.48c-18.368-22.784-37.408-44.16-53.856-67.616-39.584-56.256-64.064-118.976-62.176-191.232 1.408-53.28 16.384-102.88 40.448-149.12 29.696-57.056 59.584-113.92 89.696-170.56 7.616-14.112 11.424-27.04 1.216-41.504-9.12-14.464-25.152-21.824-41.056-18.816v-0.32z m267.52-85.888c-31.552 32.448-60.864 67.776-92.256 103.04 18.432 21.344 24.736 46.976 20.928 78.528 3.84-3.072 5.632-4.224 7.136-5.76 41.536-45.6 82.752-91.52 124.736-136.512 9.6-10.24 8.864-18.432 2.112-28.96-13.664-21.344-44.8-28.672-62.656-10.336zM403.456 64L352 85.44c21.248 24.768 41.44 48.16 64 74.56-4.48-33.856-8.32-63.744-12.448-96h-0.096z m184.256 0L576 158.688l3.616 1.312c19.52-23.232 38.976-46.592 60.384-72l-52.544-23.968 0.256-0.032zM448 32l30.144 96h3.264c9.984-31.296 19.968-62.784 30.592-96h-64z" fill="#FFDA00"></path></svg><span class="topbar-greeting">欢迎回来，${esc(username)}</span><span class="topbar-breadcrumb"><span>/ ${esc(topTitle)}</span></span></div><div class="topbar-actions"><button type="button" class="topbar-icon-button" data-nav="theme-toggle" title="切换亮色/暗色" aria-label="切换亮色/暗色">◐</button></div></div>${content}</main></div>`;
+  const isSettings = kind === 'admin-settings';
+  return `<div class="app-shell${isSettings ? ' is-settings' : ''}">${appSidebarHtml(kind)}<main class="workspace-main">${isSettings ? settingsTopbarHtml(topTitle) : ''}<div class="workspace-topbar${isSettings ? ' hidden' : ''}"><div class="topbar-welcome"><svg class="topbar-welcome-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><path d="M683.232 304.576c-51.52 52.992-103.072 105.76-154.624 158.304-37.76 38.496-74.944 77.376-112.96 115.36-5.76 5.76-14.976 11.392-22.528 11.264-13.824 0-20.288-16.768-13.824-31.168 16.864-36.992 34.624-73.504 50.624-110.72 4.992-11.36 7.584-23.68 7.68-36.128a34.528 34.528 0 0 0-16-28.864 32.96 32.96 0 0 0-32.352-1.6c-8.992 4-16.704 10.528-22.272 18.784-41.824 75.328-83.584 150.624-123.328 226.976-15.168 28.896-20.064 61.76-19.616 95.168 1.664 66.624 30.08 121.696 71.232 171.296 35.456 42.656 76.032 77.472 130.624 91.36 58.688 15.04 115.04 6.336 169.344-19.2a418.976 418.976 0 0 0 121.152-87.584c65.632-66.944 131.2-133.952 196.672-201.056 10.432-10.592 18.432-21.856 13.408-38.656-9.6-31.264-40.224-40.416-63.52-17.408-31.776 31.52-62.816 64-94.208 96-3.488 3.584-6.976 9.408-10.944 9.408-8.384 0.864-19.744 1.92-24.96-2.816-4.576-4.032-3.584-16.096-2.368-24.192 0.64-4.704 6.528-8.48 10.304-12.416 54.272-55.776 108.704-111.168 162.72-167.072 21.376-21.696 14.016-56-13.376-63.68-18.048-5.12-32.224 2.336-45.056 15.52-49.44 51.296-99.264 102.304-148.992 153.344a101.024 101.024 0 0 1-10.752 10.24 18.112 18.112 0 0 1-25.6-1.216 19.136 19.136 0 0 1-2.56-25.92c3.712-5.344 7.968-10.272 12.704-14.72 65.792-67.36 131.552-134.816 197.28-202.336 23.904-24.384 16.32-58.944-14.528-67.584-15.232-4.352-26.944 2.816-37.056 13.056a26194.304 26194.304 0 0 0-106.88 108.736c-31.648 32.48-63.136 65.184-94.784 97.504-4.16 4.256-8.576 10.368-13.536 11.104a33.28 33.28 0 0 1-22.496-3.2 16.544 16.544 0 0 1-3.392-24.096c3.424-4.864 7.264-9.44 11.488-13.632 51.52-52.896 103.072-105.536 154.368-158.528 21.6-22.304 15.392-55.584-11.968-64.224-17.952-5.664-32.224 1.28-45.12 14.592z m-410.496 15.744c-19.744 3.104-32 16.768-41.28 34.56-16.832 32-33.6 63.968-50.24 95.904l-33.152 64.16a1594.88 1594.88 0 0 1-17.056 31.744c-55.584 99.776-41.92 209.504 19.52 299.744 33.728 49.504 73.6 90.624 129.664 108.864 4.8 1.6 9.728 3.104 14.624 4.704a12.128 12.128 0 0 0 3.648-0.48c-18.368-22.784-37.408-44.16-53.856-67.616-39.584-56.256-64.064-118.976-62.176-191.232 1.408-53.28 16.384-102.88 40.448-149.12 29.696-57.056 59.584-113.92 89.696-170.56 7.616-14.112 11.424-27.04 1.216-41.504-9.12-14.464-25.152-21.824-41.056-18.816v-0.32z m267.52-85.888c-31.552 32.448-60.864 67.776-92.256 103.04 18.432 21.344 24.736 46.976 20.928 78.528 3.84-3.072 5.632-4.224 7.136-5.76 41.536-45.6 82.752-91.52 124.736-136.512 9.6-10.24 8.864-18.432 2.112-28.96-13.664-21.344-44.8-28.672-62.656-10.336zM403.456 64L352 85.44c21.248 24.768 41.44 48.16 64 74.56-4.48-33.856-8.32-63.744-12.448-96h-0.096z m184.256 0L576 158.688l3.616 1.312c19.52-23.232 38.976-46.592 60.384-72l-52.544-23.968 0.256-0.032zM448 32l30.144 96h3.264c9.984-31.296 19.968-62.784 30.592-96h-64z" fill="#FFDA00"></path></svg><span class="topbar-greeting">欢迎回来，${esc(username)}</span><span class="topbar-breadcrumb"><span>/ ${esc(topTitle)}</span></span></div><div class="topbar-actions"><button type="button" class="topbar-icon-button" data-nav="theme-toggle" title="切换亮色/暗色" aria-label="切换亮色/暗色">◐</button></div></div>${content}</main></div>`;
 }
 
 function setNav(){
@@ -2273,37 +2292,63 @@ function reloadAdminCurrentPage(){
 
 function adminOpsCardHtml(){
   return `<section class="card admin-ops-card">
-        <div class="section-title"><div><div class="section-kicker">OPERATIONS</div><h2>${stIcon('tools')}运维入口</h2></div></div>
-        <div class="ops-list">
-          <div class="ops-item"><div class="label">下载模块</div><p class="muted small">为普通用户生成 frpc.toml 与 deploy-frpc.sh。</p><p class="row"><button onclick="openAdminFrpcModal()">为用户生成配置</button></p></div>
-        </div>
-      </section>`;
+    <div class="settings-card-head"><span class="settings-card-icon icon-purple">${stIcon('tools')}</span><div><h2>运维入口</h2><p>提供系统运维维护相关工具和功能。</p></div></div>
+    <div class="ops-list">
+      <button type="button" class="ops-row" onclick="openAdminFrpcModal()">
+        <span class="ops-row-icon">${stIcon('file')}</span>
+        <span class="ops-row-copy"><b>为用户生成 frpc 配置</b><small>选择用户、添加隧道，生成并下载 frpc.toml 与部署脚本。</small></span>
+        <span class="ops-row-arrow">›</span>
+      </button>
+    </div>
+  </section>`;
 }
 
 function adminSmtpCardHtml(smtp){
   return `<section class="card admin-smtp-card">
-        <div class="section-title"><div><div class="section-kicker">MAIL</div><h2>${stIcon('cloud')}邮件设置</h2><p>用于「忘记密码」邮箱验证码；Gmail 用应用专用密码，推荐 587 + STARTTLS</p></div><span class="status-badge ${smtp.configured ? 'ok' : 'bad'}"><i></i>${smtp.configured ? '已配置' : '未配置'}</span></div>
-        <form id="smtpForm" class="grid">
-          <div><label>SMTP 服务器</label><input name="host" value="${esc(smtp.host || '')}" placeholder="smtp.gmail.com"></div>
-          <div><label>端口</label><input name="port" type="number" value="${esc(smtp.port || 587)}" min="1" max="65535"></div>
-          <div><label>账号</label><input name="user" value="${esc(smtp.user || '')}" placeholder="you@gmail.com"></div>
-          <div><label>密码 / 应用专用密码</label><input name="password" type="password" placeholder="${smtp.password_set ? '已设置，留空不修改' : '应用专用密码'}"></div>
-          <div><label>发件人地址</label><input name="from_addr" value="${esc(smtp.from_addr || '')}" placeholder="留空则用账号"></div>
-          <div><label>加密方式</label><select name="ssl"><option value="0"${smtp.ssl ? '' : ' selected'}>STARTTLS（587）</option><option value="1"${smtp.ssl ? ' selected' : ''}>SSL（465）</option></select></div>
-          <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存</button><button type="button" class="secondary" onclick="sendSmtpTest()">发送测试邮件</button></div>
-        </form>
-      </section>`;
+    <div class="settings-card-head"><span class="settings-card-icon icon-blue">${stIcon('mail')}</span><div><h2>邮件设置</h2><p>配置 SMTP 服务器信息，用于发送通知和邮件。</p></div><span class="status-badge ${smtp.configured ? 'ok' : 'bad'}"><i></i>${smtp.configured ? '已配置' : '未配置'}</span></div>
+    <form id="smtpForm" class="settings-form form-grid">
+      <div><label>SMTP 服务器</label><input name="host" value="${esc(smtp.host || '')}" placeholder="smtp.gmail.com"></div>
+      <div><label>端口</label><input name="port" type="number" value="${esc(smtp.port || 587)}" min="1" max="65535"></div>
+      <div><label>账号</label><input name="user" value="${esc(smtp.user || '')}" placeholder="you@gmail.com"></div>
+      <div><label>密码 / 应用专用密码</label><input name="password" type="password" placeholder="${smtp.password_set ? '已设置，留空不修改' : '应用专用密码'}"></div>
+      <div><label>发件人地址</label><input name="from_addr" value="${esc(smtp.from_addr || '')}" placeholder="留空则用账号"></div>
+      <div><label>加密方式</label><select name="ssl"><option value="0"${smtp.ssl ? '' : ' selected'}>STARTTLS（587）</option><option value="1"${smtp.ssl ? ' selected' : ''}>SSL（465）</option></select></div>
+      <div class="form-actions span-2"><button type="submit">保存设置</button><button type="button" class="secondary" onclick="sendSmtpTest()">发送测试邮件</button></div>
+    </form>
+  </section>`;
 }
 
 function adminBackupCardHtml(r2, r2Status, r2Source){
   return `<section class="card admin-backup-card">
-        <div class="section-title"><div><div class="section-kicker">BACKUP</div><h2>${stIcon('backup')}备份与恢复</h2></div><span class="section-count">R2 ${r2.configured ? '已配置' : '未配置'}</span></div>
-        <div class="ops-list">
-          <div class="ops-item"><div class="label">下载全量备份</div><p class="muted small">导出数据库与前端配置文件。</p><p class="row"><a class="btn" href="/admin/backup/full.zip">下载全量备份</a></p></div>
-          <div class="ops-item"><div class="label">恢复全量备份</div><p class="row"><input id="restoreBackupFile" type="file" accept=".zip,application/zip"><button class="danger" onclick="restoreFullBackup()">恢复备份</button></p><p class="muted small">会要求输入 RESTORE，并在恢复前自动保存当前备份。</p></div>
-          <div class="ops-item"><div class="label">Cloudflare R2</div><p class="muted small">${r2Status} · ${esc(r2Source)}</p><p class="row"><button class="secondary" onclick="backupToR2()">上传备份到 R2</button></p></div>
-        </div>
-      </section>`;
+    <div class="settings-card-head"><span class="settings-card-icon icon-green">${stIcon('cloud')}</span><div><h2>备份与恢复</h2><p>管理系统数据备份与恢复，支持本地和云存储。</p></div></div>
+    <div class="backup-units">
+      <div class="backup-unit">
+        <span class="backup-unit-icon icon-blue">${stIcon('download')}</span>
+        <b>下载全量备份</b>
+        <p>导出数据库与前端配置文件。</p>
+        <a class="btn" href="/admin/backup/full.zip">下载备份</a>
+      </div>
+      <div class="backup-unit">
+        <span class="backup-unit-icon icon-green">${stIcon('upload')}</span>
+        <b>上传备份恢复</b>
+        <p>选择全量备份 zip，恢复前会自动保存当前备份。</p>
+        <div class="backup-unit-action"><input id="restoreBackupFile" type="file" accept=".zip,application/zip"><button type="button" class="danger" onclick="restoreFullBackup()">恢复备份</button></div>
+      </div>
+      <div class="backup-unit">
+        <span class="backup-unit-icon icon-orange">${stIcon('cloudUpload')}</span>
+        <b>R2 备份上传</b>
+        <p>将当前全量备份上传到 Cloudflare R2。</p>
+        <button type="button" class="secondary" onclick="backupToR2()">上传备份</button>
+      </div>
+      <div class="backup-unit">
+        <span class="backup-unit-icon icon-purple">${stIcon('database')}</span>
+        <b>备份配置状态</b>
+        <p>${r2.configured ? 'R2 已配置，可上传云端备份。' : 'R2 未配置，仅支持本地备份。'}</p>
+        <button type="button" class="secondary" onclick="loadAdminSettings()">查看状态</button>
+      </div>
+    </div>
+    <div class="backup-summary"><span>本地备份：<b class="ok">可用</b></span><span>R2 云备份：${r2Status} · ${esc(r2Source)}</span></div>
+  </section>`;
 }
 
 function adminNotifyFieldHtml(f, params){
@@ -2322,37 +2367,51 @@ function adminNotifyCardHtml(notify){
   const yn = (v, d) => (v === undefined || v === null ? d : !!v);
   const channels = n.channels || [];
   const cur = n.type || '';
-  const opts = ['<option value="">不通知（已关闭）</option>']
-    .concat(channels.map(c => `<option value="${esc(c.type)}"${c.type === cur ? ' selected' : ''}>${esc(c.name)}</option>`)).join('');
+  const chips = [`<button type="button" class="notify-chip${cur === '' ? ' active' : ''}" data-channel="" onclick="selectNotifyChannel('')">不通知</button>`]
+    .concat(channels.map(c => `<button type="button" class="notify-chip${c.type === cur ? ' active' : ''}" data-channel="${esc(c.type)}" onclick="selectNotifyChannel('${esc(c.type)}')">${esc(c.name)}</button>`)).join('');
   const groups = channels.map(c => {
     const inner = (c.fields || []).map(f => adminNotifyFieldHtml(f, n.params || {})).join('');
-    return `<div class="notify-channel-fields" data-channel="${esc(c.type)}" style="grid-column:1/-1;display:${c.type === cur ? 'grid' : 'none'};gap:12px 16px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">${inner}</div>`;
+    return `<div class="notify-channel-fields" data-channel="${esc(c.type)}" style="display:${c.type === cur ? 'grid' : 'none'}">${inner}</div>`;
   }).join('');
   return `<section class="card admin-notify-card">
-        <div class="section-title"><div><div class="section-kicker">NOTIFY</div><h2>${stIcon('bell')}通知设置</h2><p>节点异常 / 恢复时通过所选渠道推送（当前主要用于节点异常通知）</p></div><span class="status-badge ${n.enabled ? 'ok' : 'bad'}"><i></i>${n.enabled ? '已启用' : '未启用'}</span></div>
-        <form id="notifyForm" class="grid">
-          <div><label>通知开关</label><select name="enabled"><option value="1"${n.enabled ? ' selected' : ''}>启用</option><option value="0"${n.enabled ? '' : ' selected'}>停用</option></select></div>
-          <div><label>冷却时间（分钟）</label><input name="cooldown_minutes" type="number" min="0" max="1440" value="${esc(n.cooldown_minutes ?? 30)}"><span class="muted small">同一节点重复通知的最小间隔，0 表示不限制</span></div>
-          <div style="grid-column:1/-1"><label>通知场景</label><div class="row" style="gap:18px;flex-wrap:wrap"><label class="muted"><input type="checkbox" name="on_down" value="1"${yn(n.on_down, true) ? ' checked' : ''}> 节点异常（离线）</label><label class="muted"><input type="checkbox" name="on_up" value="1"${yn(n.on_up, true) ? ' checked' : ''}> 节点恢复（上线）</label></div></div>
-          <div style="grid-column:1/-1"><label>通知方式</label><select name="notify_type" id="notifyTypeSelect">${opts}</select><span class="muted small">选择渠道后填写下方参数；节点异常/恢复时通过该渠道推送</span></div>
-          ${groups}
-          <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存通知设置</button><button type="button" class="secondary" onclick="sendNotifyTest()">发送测试通知</button></div>
-        </form>
-      </section>`;
+    <div class="settings-card-head"><span class="settings-card-icon icon-blue">${stIcon('bell')}</span><div><h2>通知设置</h2><p>配置系统通知规则和渠道，及时获取异常信息。</p></div><span class="status-badge ${n.enabled ? 'ok' : 'bad'}"><i></i>${n.enabled ? '已开启' : '已关闭'}</span></div>
+    <form id="notifyForm" class="settings-form">
+      <div class="notify-row">
+        <div class="notify-row-label"><label>通知开关</label><span class="muted small">开启后节点异常/恢复会按下方渠道推送</span></div>
+        <div class="notify-row-control"><label class="switch"><input type="checkbox" name="enabled" value="1"${n.enabled ? ' checked' : ''} onchange="syncNotifySwitch(this)"><span class="switch-track"><span class="switch-thumb"></span></span></label><span class="switch-state" id="notifySwitchState">${n.enabled ? '已开启' : '已关闭'}</span></div>
+      </div>
+      <div class="notify-row">
+        <div class="notify-row-label"><label>冷却时间</label><span class="muted small">同一节点重复通知的最小间隔</span></div>
+        <div class="notify-row-control"><input name="cooldown_minutes" type="number" min="0" max="1440" value="${esc(n.cooldown_minutes ?? 30)}"><span class="unit">分钟</span></div>
+      </div>
+      <div class="notify-row">
+        <div class="notify-row-label"><label>通知场景</label></div>
+        <div class="notify-row-control"><label class="check"><input type="checkbox" name="on_down" value="1"${yn(n.on_down, true) ? ' checked' : ''}> 节点异常（离线）</label><label class="check"><input type="checkbox" name="on_up" value="1"${yn(n.on_up, true) ? ' checked' : ''}> 节点恢复（上线）</label></div>
+      </div>
+      <div class="notify-row notify-row-block">
+        <div class="notify-row-label"><label>通知渠道</label></div>
+        <div class="notify-chips">${chips}</div>
+      </div>
+      <input type="hidden" name="notify_type" id="notifyTypeSelect" value="${esc(cur)}">
+      <div class="notify-config">${groups}</div>
+      <div class="form-actions"><button type="submit">保存设置</button><button type="button" class="secondary" onclick="sendNotifyTest()">发送测试通知</button></div>
+    </form>
+  </section>`;
 }
 
 function adminR2CardHtml(r2, r2Status, r2Source){
-  return `<section class="card"><div class="section-title"><h2>${stIcon('cloud')}Cloudflare R2 备份配置</h2><p>${r2Status} · ${esc(r2Source)}</p></div>
-      <form id="r2ConfigForm" class="grid r2-form">
-        <div><label>Account ID</label><input name="account_id" value="${esc(r2.account_id || '')}" placeholder="Cloudflare Account ID"></div>
-        <div><label>Access Key ID</label><input name="access_key_id" value="${esc(r2.access_key_id || '')}" placeholder="R2 API Token Access Key ID"></div>
-        <div><label>Secret Access Key</label><input name="secret_access_key" type="password" placeholder="${r2.secret_set ? '已设置，留空则不修改' : 'R2 Secret Access Key'}"></div>
-        <div><label>Bucket</label><input name="bucket" value="${esc(r2.bucket || '')}" placeholder="bucket-name"></div>
-        <div><label>备份目录 Prefix</label><input name="prefix" value="${esc(r2.prefix || 'frp-manager-lite/backups')}" placeholder="frp-manager-lite/backups"></div>
-        <div class="form-actions"><button>保存 R2 配置</button><button type="button" class="secondary" onclick="backupToR2()">保存后上传备份</button></div>
-      </form>
-      <p class="muted small">配置保存在本面板数据库中；Secret 不会明文回显。已有环境变量配置仍可作为兼容兜底。</p>
-    </section>`;
+  return `<section class="card admin-r2-card">
+    <div class="settings-card-head"><span class="settings-card-icon icon-orange">${stIcon('bucket')}</span><div><h2>Cloudflare R2 备份配置</h2><p>配置 R2 存储桶信息，用于备份数据。</p></div><span class="status-badge ${r2.configured ? 'ok' : 'bad'}"><i></i>${r2.configured ? '已配置' : '未配置'}</span></div>
+    <form id="r2ConfigForm" class="settings-form r2-form-grid">
+      <div class="r2-field"><label>Account ID</label><input name="account_id" value="${esc(r2.account_id || '')}" placeholder="Cloudflare Account ID"></div>
+      <div class="r2-field"><label>Access Key ID</label><input name="access_key_id" value="${esc(r2.access_key_id || '')}" placeholder="R2 API Token Access Key ID"></div>
+      <div class="r2-field"><label>Secret Access Key</label><input name="secret_access_key" type="password" placeholder="${r2.secret_set ? '已设置，留空则不修改' : 'R2 Secret Access Key'}"></div>
+      <div class="r2-field r2-field-half"><label>Bucket</label><input name="bucket" value="${esc(r2.bucket || '')}" placeholder="bucket-name"></div>
+      <div class="r2-field r2-field-half"><label>备份目录 Prefix</label><input name="prefix" value="${esc(r2.prefix || 'frp-manager-lite/backups')}" placeholder="frp-manager-lite/backups"></div>
+      <div class="form-actions r2-actions"><button type="submit">保存配置</button><button type="button" class="secondary" onclick="backupToR2()">上传备份</button></div>
+    </form>
+    <p class="settings-hint">配置保存在本面板数据库中；Secret 不会明文回显。已有环境变量配置仍可作为兼容兜底。</p>
+  </section>`;
 }
 
 function adminFrpcModalHtml(frpcUserOptions){
@@ -2367,6 +2426,20 @@ function adminFrpcModalHtml(frpcUserOptions){
         </form>` : '<p class="muted">暂无普通用户，先创建用户后再下载 frpc 配置。</p>'}
       </section>
     </div>`;
+}
+
+function selectNotifyChannel(type){
+  type = type || '';
+  const sel = document.querySelector('#notifyTypeSelect');
+  if(sel) sel.value = type;
+  const form = document.querySelector('#notifyForm');
+  if(!form) return;
+  form.querySelectorAll('.notify-chip').forEach(c => c.classList.toggle('active', (c.dataset.channel || '') === type));
+  form.querySelectorAll('.notify-channel-fields').forEach(g => { g.style.display = (g.dataset.channel === type) ? 'grid' : 'none'; });
+}
+function syncNotifySwitch(el){
+  const s = document.querySelector('#notifySwitchState');
+  if(s) s.textContent = (el && el.checked) ? '已开启' : '已关闭';
 }
 
 function wireAdminSettingsForms(){
@@ -2385,14 +2458,8 @@ function wireAdminSettingsForms(){
   }
   const notifyForm = document.querySelector('#notifyForm');
   if(notifyForm){
-    const typeSelect = notifyForm.querySelector('#notifyTypeSelect');
-    const syncGroups = () => {
-      const cur = typeSelect ? typeSelect.value : '';
-      notifyForm.querySelectorAll('.notify-channel-fields').forEach(g => {
-        g.style.display = (g.dataset.channel === cur) ? 'grid' : 'none';
-      });
-    };
-    if(typeSelect){ typeSelect.onchange = syncGroups; syncGroups(); }
+    const typeSel = document.querySelector('#notifyTypeSelect');
+    selectNotifyChannel(typeSel ? typeSel.value : '');
     notifyForm.onsubmit = async (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
@@ -2403,7 +2470,7 @@ function wireAdminSettingsForms(){
         group.querySelectorAll('input,select,textarea').forEach(el => { if(el.name) params[el.name] = el.value; });
       }
       const body = {
-        enabled: fd.get('enabled'),
+        enabled: fd.get('enabled') ? '1' : '0',
         on_down: fd.get('on_down') ? '1' : '0',
         on_up: fd.get('on_up') ? '1' : '0',
         cooldown_minutes: fd.get('cooldown_minutes'),
@@ -2435,6 +2502,7 @@ async function loadAdminSettings(){
   }
   const smtp = data.smtp || {}; adminSmtp = smtp;
   const notify = data.notify || {};
+  if(data.version) panelVersion = data.version;
   const r2 = data.r2 || {};
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
   const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
@@ -2451,7 +2519,7 @@ async function loadAdminSettings(){
       ${adminR2CardHtml(r2, r2Status, r2Source)}
     </div>
     ${adminFrpcModalHtml(frpcUserOptions)}
-  `, 'admin-settings', '设置');
+  `, 'admin-settings', '管理员设置');
   wireAdminSettingsForms();
 }
 

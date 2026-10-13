@@ -1136,3 +1136,190 @@ html[data-theme="dark"] .app-shell{background:#0f172a}
 html[data-theme="dark"] .workspace-main{background:#0f172a}
 html[data-theme="dark"] .workspace-topbar{background:#1e293b}
 html[data-theme="dark"] .topbar-greeting,html[data-theme="dark"] .topbar-breadcrumb{color:#cbd5e1}
+
+/* ============================================================
+   Admin settings redesign — scoped to .app-shell.is-settings
+   Light SaaS theme, soft blue, white rounded cards.
+   ============================================================ */
+.app-shell.is-settings{
+  --page-bg:#F4F8FE; --sidebar-bg:#FFFFFF; --card-bg:#FFFFFF;
+  --primary:#1677FF; --primary-hover:#0866E8; --primary-light:#EAF3FF; --primary-border:#D7E7FF;
+  --ink:#172B4D; --text:#172B4D; --muted:#8A9BB5; --soft:#5D7191;
+  --border:#E2EBF7; --divider:#EDF2F8;
+  --success:#16B978; --success-bg:#E8F8F0;
+  --warning:#F59E0B; --warning-bg:#FFF5E6;
+  --danger:#E5484D; --danger-bg:#FFF0F0;
+  --purple:#7952F6; --purple-bg:#F1EDFF;
+  --blue-icon-bg:#DCEBFF; --green-icon-bg:#D9F7E8; --orange-icon-bg:#FFE8CF; --purple-icon-bg:#E9DFFF;
+  --shadow-card:0 4px 18px rgba(37,91,160,.055); --shadow:var(--shadow-card);
+  background:var(--page-bg); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+}
+html[data-theme="dark"] .app-shell.is-settings{background:var(--page-bg);color:var(--ink)}
+
+/* ---- sidebar (white) ---- */
+.app-shell.is-settings .app-sidebar{background:var(--sidebar-bg);border-right:1px solid var(--border);box-shadow:none}
+.app-shell.is-settings .sidebar-brand{border-bottom:1px solid var(--divider)}
+.app-shell.is-settings .sidebar-brand .brand-mark-small{background:var(--primary);border-radius:50%;box-shadow:0 6px 14px rgba(22,119,255,.26)}
+.app-shell.is-settings .sidebar-brand strong{color:var(--ink);font-size:15px}
+.app-shell.is-settings .sidebar-brand span{color:var(--muted);font-size:10px}
+.brand-tag{display:inline-flex;align-items:center;padding:1px 7px;border-radius:999px;background:#EAF3FF;color:#1677FF;font-size:10px;font-weight:700;line-height:1.7}
+.app-shell.is-settings .sidebar-section-label{color:var(--muted);font-size:11px;letter-spacing:.06em;text-transform:none}
+.app-shell.is-settings .side-link{color:var(--soft);font-size:13px;font-weight:500;border-radius:8px;min-height:40px}
+.app-shell.is-settings .side-link .side-icon{color:var(--soft)}
+.app-shell.is-settings .side-link .side-link-arrow{color:#B7C4D6}
+.app-shell.is-settings .side-link:hover{background:var(--primary-light);color:var(--primary);transform:none}
+.app-shell.is-settings .side-link:hover .side-icon{color:var(--primary)}
+.app-shell.is-settings .side-link.active{background:var(--primary);color:#fff;border-color:var(--primary);box-shadow:0 6px 14px rgba(22,119,255,.24)}
+.app-shell.is-settings .side-link.active .side-icon,.app-shell.is-settings .side-link.active .side-link-arrow{color:#fff}
+.app-shell.is-settings .sidebar-service-status{border:1px solid var(--border);border-radius:10px;background:#F8FBFF}
+.app-shell.is-settings .sidebar-service-status strong{color:var(--ink)}
+.app-shell.is-settings .sidebar-service-status small{color:var(--muted)}
+.app-shell.is-settings .sidebar-user-card{border-top:1px solid var(--divider)}
+.app-shell.is-settings .sidebar-user-copy strong{color:var(--ink)}
+.app-shell.is-settings .sidebar-user-copy small{color:var(--muted)}
+.app-shell.is-settings .sidebar-user-avatar{background:var(--primary);box-shadow:none}
+.app-shell.is-settings .sidebar-user-card>button{width:28px;min-height:28px;padding:0;border-radius:7px;border:1px solid var(--border);background:#fff;color:var(--muted)}
+
+/* ---- top header ---- */
+.app-shell.is-settings .workspace-main{background:var(--page-bg)}
+html[data-theme="dark"] .app-shell.is-settings .workspace-main{background:var(--page-bg)}
+.app-shell.is-settings .settings-topbar{height:auto;min-height:64px;padding:16px 24px;background:var(--card-bg);border-bottom:1px solid var(--border);box-shadow:none;align-items:center}
+html[data-theme="dark"] .app-shell.is-settings .settings-topbar{background:var(--card-bg);border-color:var(--border)}
+.settings-head{display:flex;align-items:center;gap:12px;min-width:0}
+.settings-head-icon .st-icon{width:40px;height:40px;border-radius:11px;background:var(--purple-bg);color:var(--purple)}
+.settings-head-icon .st-icon svg{width:20px;height:20px}
+.settings-head-copy{min-width:0}
+.settings-head-copy h1{margin:0;font-size:23px;font-weight:700;color:var(--ink);line-height:1.2}
+.settings-head-copy p{margin:3px 0 0;font-size:12.5px;color:var(--muted)}
+.settings-head-actions{display:flex;align-items:center;gap:12px;flex:0 0 auto}
+.settings-admin{display:flex;align-items:center;gap:8px}
+.settings-admin-avatar{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--primary);color:#fff;font-size:12px;font-weight:700}
+.settings-admin-name{font-size:13px;font-weight:600;color:var(--ink)}
+.app-shell.is-settings .settings-logout{min-height:34px;padding:6px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--danger);font-weight:600}
+.app-shell.is-settings .settings-logout:hover{background:var(--danger-bg);border-color:#F6CBCB;color:var(--danger)}
+
+/* ---- grid + cards ---- */
+.app-shell.is-settings .admin-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-top:0;align-items:start}
+.app-shell.is-settings .admin-settings-grid>.card{margin:0}
+.app-shell.is-settings .admin-r2-card{grid-column:1/-1}
+.app-shell.is-settings .card{padding:22px;margin:0;background:var(--card-bg);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-card)}
+html[data-theme="dark"] .app-shell.is-settings .card{background:var(--card-bg);border-color:var(--border)}
+.app-shell.is-settings .settings-card-head{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.app-shell.is-settings .settings-card-head>div{min-width:0;flex:1}
+.app-shell.is-settings .settings-card-head h2{margin:0;font-size:16.5px;font-weight:700;color:var(--ink)}
+.app-shell.is-settings .settings-card-head p{margin:3px 0 0;font-size:12px;color:var(--muted)}
+.app-shell.is-settings .settings-card-icon .st-icon{width:40px;height:40px;border-radius:11px}
+.app-shell.is-settings .settings-card-icon .st-icon svg{width:20px;height:20px}
+.settings-card-icon.icon-blue .st-icon{background:var(--blue-icon-bg);color:var(--primary)}
+.settings-card-icon.icon-green .st-icon{background:var(--green-icon-bg);color:var(--success)}
+.settings-card-icon.icon-orange .st-icon{background:var(--orange-icon-bg);color:var(--warning)}
+.settings-card-icon.icon-purple .st-icon{background:var(--purple-icon-bg);color:var(--purple)}
+.app-shell.is-settings .settings-card-head .status-badge{margin-left:auto;flex:0 0 auto}
+.app-shell.is-settings .status-badge{padding:4px 10px;border-radius:999px;background:#F1F5F9;color:var(--muted);font-size:11.5px;font-weight:600}
+.app-shell.is-settings .status-badge i{display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:6px}
+.app-shell.is-settings .status-badge.ok{background:var(--success-bg);color:var(--success)}
+.app-shell.is-settings .status-badge.bad{background:var(--danger-bg);color:var(--danger)}
+
+/* ---- forms / controls ---- */
+.app-shell.is-settings .settings-form{display:grid;gap:16px}
+.app-shell.is-settings .settings-form.form-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 18px}
+.app-shell.is-settings .settings-form .span-2{grid-column:1/-1}
+.app-shell.is-settings label{margin:0 0 6px;color:var(--soft);font-size:12.5px;font-weight:600}
+.app-shell.is-settings input,.app-shell.is-settings select,.app-shell.is-settings textarea{min-height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--ink);font-size:13.5px}
+html[data-theme="dark"] .app-shell.is-settings input,html[data-theme="dark"] .app-shell.is-settings select,html[data-theme="dark"] .app-shell.is-settings textarea{background:#fff;border-color:var(--border);color:var(--ink)}
+.app-shell.is-settings input:focus,.app-shell.is-settings select:focus,.app-shell.is-settings textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(22,119,255,.12)}
+.app-shell.is-settings button,.app-shell.is-settings .btn{min-height:36px;border-radius:8px;font-size:13.5px;font-weight:600}
+.app-shell.is-settings button.secondary,.app-shell.is-settings .btn.secondary{background:#fff;border:1px solid var(--primary-border);color:var(--primary)}
+.app-shell.is-settings button.secondary:hover,.app-shell.is-settings .btn.secondary:hover{background:var(--primary-light);border-color:var(--primary)}
+.app-shell.is-settings .form-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:2px}
+.app-shell.is-settings .settings-hint{margin:14px 0 0;font-size:11.5px;color:var(--muted)}
+
+/* ---- notify ---- */
+.app-shell.is-settings .notify-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--divider)}
+.app-shell.is-settings .notify-row:last-of-type{border-bottom:0}
+.app-shell.is-settings .notify-row-block{grid-template-columns:1fr}
+.app-shell.is-settings .notify-row-label label{margin:0}
+.app-shell.is-settings .notify-row-label .muted{display:block;margin-top:2px;font-size:11.5px}
+.app-shell.is-settings .notify-row-control{display:flex;align-items:center;gap:10px;justify-content:flex-end}
+.app-shell.is-settings .notify-row-control input[type="number"]{width:112px}
+.app-shell.is-settings .notify-row-control .unit{color:var(--muted);font-size:12.5px}
+.app-shell.is-settings .check{display:inline-flex;align-items:center;gap:7px;margin:0;color:var(--soft);font-size:13px;font-weight:500;cursor:pointer}
+.app-shell.is-settings .check input{width:16px;height:16px;min-height:16px;padding:0;flex:0 0 16px}
+.switch{position:relative;display:inline-flex;align-items:center;margin:0;cursor:pointer}
+.switch input{position:absolute;opacity:0;width:0;height:0;min-height:0}
+.switch-track{display:inline-block;position:relative;width:44px;height:24px;border-radius:999px;background:#D7E0EC;transition:background .18s ease}
+.switch-thumb{position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.22);transition:transform .18s ease}
+.switch input:checked + .switch-track{background:var(--primary)}
+.switch input:checked + .switch-track .switch-thumb{transform:translateX(20px)}
+.switch-state{font-size:12.5px;font-weight:600;color:var(--muted)}
+.app-shell.is-settings .notify-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.app-shell.is-settings .notify-chip{min-height:32px;padding:5px 12px;border:1px solid var(--border);border-radius:999px;background:#fff;color:var(--soft);font-size:12.5px;font-weight:600}
+.app-shell.is-settings .notify-chip:hover{border-color:var(--primary);color:var(--primary);background:var(--primary-light)}
+.app-shell.is-settings .notify-chip.active{background:var(--primary);border-color:var(--primary);color:#fff}
+.app-shell.is-settings .notify-config{margin-top:14px}
+.app-shell.is-settings .notify-channel-fields{grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px 16px;padding:16px;border:1px solid var(--border);border-radius:12px;background:#F8FBFF}
+.app-shell.is-settings .notify-channel-fields .muted{display:block;margin-top:5px;font-size:11px}
+
+/* ---- backup units ---- */
+.app-shell.is-settings .backup-units{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.app-shell.is-settings .backup-unit{display:flex;flex-direction:column;gap:8px;padding:14px;border:1px solid var(--border);border-radius:9px;background:#F8FBFF}
+.app-shell.is-settings .backup-unit-icon .st-icon{width:34px;height:34px;border-radius:9px}
+.app-shell.is-settings .backup-unit-icon .st-icon svg{width:17px;height:17px}
+.app-shell.is-settings .backup-unit b{font-size:13.5px;color:var(--ink)}
+.app-shell.is-settings .backup-unit p{margin:0;font-size:11.5px;line-height:1.6;color:var(--muted);flex:1}
+.app-shell.is-settings .backup-unit .btn,.app-shell.is-settings .backup-unit button{align-self:flex-start}
+.app-shell.is-settings .backup-unit-action{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+.app-shell.is-settings .backup-unit input[type="file"]{min-height:34px;padding:6px 8px;font-size:11.5px;color:var(--muted)}
+.app-shell.is-settings .backup-summary{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:14px;padding:11px 14px;border:1px solid var(--primary-border);border-radius:9px;background:var(--primary-light);font-size:12px;color:var(--soft)}
+.app-shell.is-settings .backup-summary b.ok{color:var(--success)}
+
+/* ---- ops ---- */
+.app-shell.is-settings .ops-list{display:grid;grid-template-columns:1fr;gap:10px}
+.app-shell.is-settings .ops-row{display:flex;align-items:center;gap:12px;width:100%;min-height:64px;padding:14px;border:1px solid var(--border);border-radius:10px;background:#fff;color:inherit;text-align:left;box-shadow:none}
+.app-shell.is-settings .ops-row:hover{border-color:var(--purple);background:var(--purple-bg)}
+.app-shell.is-settings .ops-row-icon .st-icon{width:38px;height:38px;border-radius:50%;background:var(--purple-icon-bg);color:var(--purple)}
+.app-shell.is-settings .ops-row-copy{display:grid;gap:3px;flex:1;min-width:0;text-align:left}
+.app-shell.is-settings .ops-row-copy b{font-size:13.5px;color:var(--ink)}
+.app-shell.is-settings .ops-row-copy small{font-size:11.5px;color:var(--muted);white-space:normal}
+.app-shell.is-settings .ops-row-arrow{flex:0 0 auto;color:var(--primary);font-size:20px}
+
+/* ---- R2 ---- */
+.app-shell.is-settings .r2-form-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px 18px}
+.app-shell.is-settings .r2-form-grid .r2-field{grid-column:span 2}
+.app-shell.is-settings .r2-form-grid .r2-field-half{grid-column:span 3}
+.app-shell.is-settings .r2-form-grid .r2-actions{grid-column:1/-1}
+
+/* ---- responsive ---- */
+@media(min-width:761px){
+  .app-shell.is-settings .app-sidebar{width:232px;padding:0 14px 14px}
+  .app-shell.is-settings .workspace-main{margin-left:232px;padding:0 24px 40px}
+  .app-shell.is-settings .workspace-topbar.settings-topbar{margin:0 -24px 22px}
+}
+@media(max-width:1200px){
+  .app-shell.is-settings .admin-settings-grid{grid-template-columns:1fr}
+  .app-shell.is-settings .admin-r2-card{grid-column:auto}
+}
+@media(max-width:980px){
+  .app-shell.is-settings .admin-settings-grid{gap:16px}
+  .app-shell.is-settings .card{padding:18px}
+  .app-shell.is-settings .settings-form.form-grid{grid-template-columns:1fr}
+  .app-shell.is-settings .settings-form .span-2{grid-column:auto}
+  .app-shell.is-settings .r2-form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .app-shell.is-settings .r2-form-grid .r2-field,.app-shell.is-settings .r2-form-grid .r2-field-half{grid-column:span 1}
+}
+@media(max-width:760px){
+  .app-shell.is-settings .app-sidebar{background:var(--sidebar-bg);border-bottom:1px solid var(--border)}
+  .app-shell.is-settings .workspace-main{padding:0 14px 28px}
+  .app-shell.is-settings .workspace-topbar.settings-topbar{margin:0 -14px 16px;padding:14px;flex-direction:column;align-items:flex-start;gap:12px}
+  .app-shell.is-settings .settings-head-actions{width:100%;justify-content:space-between}
+  .app-shell.is-settings .card{padding:16px}
+  .app-shell.is-settings .notify-row{grid-template-columns:1fr}
+  .app-shell.is-settings .notify-row-control{justify-content:flex-start}
+  .app-shell.is-settings .backup-units{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .app-shell.is-settings .r2-form-grid{grid-template-columns:1fr}
+}
+@media(max-width:520px){
+  .app-shell.is-settings .backup-units{grid-template-columns:1fr}
+  .app-shell.is-settings .settings-head-copy h1{font-size:20px}
+}
