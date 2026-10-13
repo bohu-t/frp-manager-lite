@@ -1342,3 +1342,6 @@ html[data-theme="dark"] .app-shell.is-settings input,html[data-theme="dark"] .ap
 .app-shell.is-settings .notify-chip .chip-ico{display:inline-grid;place-items:center;width:15px;height:15px;flex:0 0 15px}
 .app-shell.is-settings .notify-chip .chip-svg{width:14px;height:14px;fill:currentColor}
 .app-shell.is-settings .notify-chip .chip-svg-link{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* fix: 外层图标容器不要继承全局 .icon-* 的方角底色（会让圆形图标看起来是方的） */
+.app-shell.is-settings .settings-card-icon,.app-shell.is-settings .backup-unit-icon{background:transparent}
