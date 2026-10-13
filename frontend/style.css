@@ -1387,3 +1387,11 @@ html[data-theme="dark"] .sidebar-user-copy strong{color:#e2e8f0}
 html[data-theme="dark"] .sidebar-user-copy small{color:#94a3b8}
 html[data-theme="dark"] .sidebar-user-avatar{background:#1677FF}
 html[data-theme="dark"] .sidebar-user-card>button{background:#1e293b;border-color:#334155;color:#cbd5e1}
+
+/* 侧栏服务卡片：上下排列 + 升级提醒 */
+.sidebar-service-copy{display:block;min-width:0}
+.sidebar-service-copy strong,.sidebar-service-copy small{display:block}
+.sidebar-service-copy small{margin-top:3px}
+.sidebar-update{display:inline-flex;align-items:center;gap:4px;margin-top:7px;padding:3px 9px;border:1px solid #FFE0B2;border-radius:999px;background:#FFF5E6;color:#B45309;font-size:10px;font-weight:600;text-decoration:none}
+.sidebar-update:hover{background:#FFEEDB;text-decoration:none}
+html[data-theme="dark"] .sidebar-update{background:#3b2a12;border-color:#5b4420;color:#fbbf24}

@@ -7,6 +7,8 @@ let currentAdminSection = 'users';
 let adminDashboardTimer = null;
 let panelVersion = '';
 let panelUptime = 0;
+let panelLatest = '';
+let panelUpdateChecked = false;
 let tunnelPreviewTimer = null;
 let csrfToken = null;
 let clientNodeProbeUrl = '';
@@ -615,11 +617,41 @@ function fmtUptime(sec){
   if(m) return `${m} 分钟`;
   return '刚刚启动';
 }
+function cmpVersion(a, b){
+  const pa = String(a || '').split('.').map(n => parseInt(n, 10) || 0);
+  const pb = String(b || '').split('.').map(n => parseInt(n, 10) || 0);
+  for(let i = 0; i < Math.max(pa.length, pb.length); i++){
+    const x = pa[i] || 0, y = pb[i] || 0;
+    if(x !== y) return x > y ? 1 : -1;
+  }
+  return 0;
+}
+function sidebarServiceCopyHtml(){
+  const out = ['<strong>服务运行中</strong>', `<small>版本 ${esc(panelVersion || '-')}</small>`, `<small>运行 ${esc(panelUptime > 0 ? fmtUptime(panelUptime) : '-')}</small>`];
+  if(panelLatest && cmpVersion(panelLatest, panelVersion) > 0){
+    out.push(`<a class="sidebar-update" href="https://github.com/bohu-t/frp-manager-lite/releases/latest" target="_blank" rel="noopener noreferrer">发现新版本 v${esc(panelLatest)}，去升级 ↗</a>`);
+  }
+  return out.join('');
+}
+function refreshSidebarMeta(){
+  const el = document.querySelector('.sidebar-service-copy');
+  if(el) el.innerHTML = sidebarServiceCopyHtml();
+}
+async function checkPanelUpdate(){
+  try{
+    const r = await fetch('https://api.github.com/repos/bohu-t/frp-manager-lite/releases/latest', {headers:{'Accept':'application/vnd.github+json'}});
+    if(!r.ok) return;
+    const d = await r.json();
+    const latest = String(d.tag_name || '').replace(/^v/i, '').trim();
+    if(latest && cmpVersion(latest, panelVersion) > 0){ panelLatest = latest; refreshSidebarMeta(); }
+  }catch(e){ /* 离线/被墙时静默忽略 */ }
+}
 function setPanelMeta(data){
   if(!data) return;
   if(data.version) panelVersion = data.version;
   if(data.panel_version) panelVersion = data.panel_version;
   if(data.uptime_seconds !== undefined) panelUptime = Number(data.uptime_seconds) || 0;
+  if(!panelUpdateChecked){ panelUpdateChecked = true; checkPanelUpdate(); }
 }
 
 function appSidebarHtml(kind='dashboard'){
@@ -636,10 +668,6 @@ function appSidebarHtml(kind='dashboard'){
   }).join('');
   const brandName = 'Frp 管理台';
   const brandSub = '内网穿透管理平台';
-  const metaBits = [];
-  if(panelVersion) metaBits.push('版本 ' + esc(panelVersion));
-  if(panelUptime > 0) metaBits.push('运行 ' + fmtUptime(panelUptime));
-  const serviceSub = metaBits.length ? metaBits.join(' · ') : '-';
   return `<aside class="app-sidebar">
     <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>${brandName}</strong><span>${brandSub}</span></div></div>
     <div class="sidebar-section-label">工作空间</div>${links}
@@ -647,7 +675,7 @@ function appSidebarHtml(kind='dashboard'){
       <button class="side-link${kind === 'dashboard-config' ? ' active' : ''}" data-nav="dashboard-config">${sideIcon('download')}<span class="side-link-label">配置下载</span><span class="side-link-arrow">›</span></button>
       <button class="side-link${kind === 'dashboard-editor' ? ' active' : ''}" data-nav="dashboard-editor">${sideIcon('edit')}<span class="side-link-label">在线配置</span><span class="side-link-arrow">›</span></button>`}
     <div class="sidebar-spacer"></div>
-    <div class="sidebar-service-status"><span class="sidebar-service-dot"></span><span><strong>服务运行中</strong><small>${serviceSub}</small></span></div>
+    <div class="sidebar-service-status"><span class="sidebar-service-dot"></span><span class="sidebar-service-copy">${sidebarServiceCopyHtml()}</span></div>
     <div class="sidebar-user-card"><span class="sidebar-user-avatar">${esc(String(username).slice(0,1).toUpperCase())}</span><span class="sidebar-user-copy"><strong>${esc(username)}</strong><small>${isAdmin ? '系统管理员' : '普通用户'}</small></span><button type="button" data-nav="logout" title="退出登录" aria-label="退出登录">↗</button></div>
   </aside>`;
 }
