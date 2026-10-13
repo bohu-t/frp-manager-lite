@@ -8,7 +8,6 @@ let adminDashboardTimer = null;
 let panelVersion = '';
 let panelUptime = 0;
 let panelLatest = '';
-let panelUpdateChecked = false;
 let tunnelPreviewTimer = null;
 let csrfToken = null;
 let clientNodeProbeUrl = '';
@@ -633,25 +632,12 @@ function sidebarServiceCopyHtml(){
   }
   return out.join('');
 }
-function refreshSidebarMeta(){
-  const el = document.querySelector('.sidebar-service-copy');
-  if(el) el.innerHTML = sidebarServiceCopyHtml();
-}
-async function checkPanelUpdate(){
-  try{
-    const r = await fetch('https://api.github.com/repos/bohu-t/frp-manager-lite/releases/latest', {headers:{'Accept':'application/vnd.github+json'}});
-    if(!r.ok) return;
-    const d = await r.json();
-    const latest = String(d.tag_name || '').replace(/^v/i, '').trim();
-    if(latest && cmpVersion(latest, panelVersion) > 0){ panelLatest = latest; refreshSidebarMeta(); }
-  }catch(e){ /* 离线/被墙时静默忽略 */ }
-}
 function setPanelMeta(data){
   if(!data) return;
   if(data.version) panelVersion = data.version;
   if(data.panel_version) panelVersion = data.panel_version;
   if(data.uptime_seconds !== undefined) panelUptime = Number(data.uptime_seconds) || 0;
-  if(!panelUpdateChecked){ panelUpdateChecked = true; checkPanelUpdate(); }
+  if(data.latest_version) panelLatest = String(data.latest_version).replace(/^v/i, '');
 }
 
 function appSidebarHtml(kind='dashboard'){

@@ -952,6 +952,71 @@ def send_notification(title: str, content: str, force: bool = False) -> dict[str
     return {"ok": ok, "results": [{"channel": ctype, "ok": ok, "message": msg}]}
 
 
+# --- 面板版本更新检测（后台定时，默认每 8 小时一次）---
+UPDATE_CHECK_HOURS = float(os.getenv("FML_UPDATE_CHECK_HOURS", "8") or "8")
+PANEL_UPDATE_REPO = os.getenv("FML_UPDATE_REPO", "bohu-t/frp-manager-lite")
+_update_check_started = False
+
+
+def _version_tuple(value: str) -> tuple:
+    out = []
+    for part in str(value or "").strip().lstrip("vV").split(".")[:5]:
+        digits = "".join(ch for ch in part if ch.isdigit())
+        out.append(int(digits) if digits else 0)
+    return tuple(out) if out else (0,)
+
+
+def fetch_latest_panel_version() -> str:
+    url = f"https://api.github.com/repos/{PANEL_UPDATE_REPO}/releases/latest"
+    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "frp-manager-lite"})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+        return str(data.get("tag_name") or "").strip().lstrip("vV")
+    except Exception:
+        return ""
+
+
+def refresh_update_check(force: bool = False) -> None:
+    with db() as conn:
+        try:
+            last = float(setting_get(conn, "panel_update_checked_at", "0") or "0")
+        except Exception:
+            last = 0.0
+        if not force and (time.time() - last) < UPDATE_CHECK_HOURS * 3600:
+            return
+        latest = fetch_latest_panel_version()
+        setting_set(conn, "panel_update_checked_at", str(int(time.time())))
+        if latest:
+            setting_set(conn, "panel_latest_version", latest)
+
+
+def panel_latest_version() -> str:
+    try:
+        with db() as conn:
+            return setting_get(conn, "panel_latest_version", "")
+    except Exception:
+        return ""
+
+
+def start_update_checker() -> None:
+    global _update_check_started
+    if _update_check_started:
+        return
+    _update_check_started = True
+
+    def _loop() -> None:
+        time.sleep(20)
+        while True:
+            try:
+                refresh_update_check()
+            except Exception:
+                pass
+            time.sleep(max(600, int(UPDATE_CHECK_HOURS * 3600 / 4)))
+
+    threading.Thread(target=_loop, name="panel-update-checker", daemon=True).start()
+
+
 def create_email_code(username: str, email: str) -> str:
     code = f"{secrets.randbelow(1000000):06d}"
     with db() as conn:
@@ -3870,7 +3935,7 @@ class Handler(BaseHTTPRequestHandler):
                 health = node_health_lookup(node_payload)
                 node_payload.update(health if health is not None else check_node_auth_port(node_payload))
                 node_payload["latency_ms"] = node_payload.get("auth_latency_ms")
-            self.send_json({"ok": True, "version": APP_VERSION, "uptime_seconds": int(time.time() - SERVER_START_TS), "user": public_user(user), "software_license": sw_license, "node": node_payload, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
+            self.send_json({"ok": True, "version": APP_VERSION, "uptime_seconds": int(time.time() - SERVER_START_TS), "latest_version": panel_latest_version(), "user": public_user(user), "software_license": sw_license, "node": node_payload, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
             return
         if path == "/api/user/traffic":
             q = urllib.parse.parse_qs(urlparse(self.path).query)
@@ -4039,6 +4104,7 @@ class Handler(BaseHTTPRequestHandler):
                 "version": APP_VERSION,
                 "panel_version": APP_VERSION,
                 "uptime_seconds": int(time.time() - SERVER_START_TS),
+                "latest_version": panel_latest_version(),
                 "refresh_seconds": NODE_DASHBOARD_REFRESH_SECONDS,
                 "node_count": node_count,
                 "active_node_count": active_node_count,
@@ -5051,6 +5117,7 @@ def main() -> None:
     start_host_sampler()
     start_proxy_sampler()
     start_node_health_sampler()
+    start_update_checker()
     print(f"{APP_NAME} separated server listening on http://{HOST}:{PORT}")
     print(f"DB: {DB_PATH}")
     if ADMIN_PASSWORD == "admin123":
