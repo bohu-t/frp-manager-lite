@@ -376,6 +376,7 @@ const UIICONS = {
   node:'<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
   nodePlus:'<rect x="3" y="4" width="18" height="7" rx="2"/><path d="M7 7.5h.01"/><path d="M12 15v6M9 18h6"/>',
   pulse:'<path d="M3 12h3.5l2-4.5 3 9 2.5-6 1.6 3.5H21"/>',
+  bell:'<path d="M6 9a6 6 0 0 1 12 0c0 4.5 1.5 6 1.5 6H4.5S6 13.5 6 9Z"/><path d="M10 18.5a2 2 0 0 0 4 0"/>',
   monitor:'<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>',
   risk:'<path d="M12 3l7 3v6c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6z"/><path d="M12 8.5v4M12 15.8h.01"/>',
   log:'<path d="M5 4h11l3 3v13H5z"/><path d="M8 9h8M8 12.5h8M8 16h5"/>',
@@ -2132,6 +2133,14 @@ function nodeStatusBadge(n){
 }
 
 
+async function sendNotifyTest(){
+  try{
+    const r = await api('/api/admin/notify-test', {method:'POST', body:{}});
+    const detail = (r.results || []).map(x => `${x.channel}：${x.ok ? '成功' : x.message}`).join('；');
+    show(detail ? `测试通知已发送（${detail}）` : (r.message || '测试通知已发送'));
+  }catch(err){ show(err.message, true); }
+}
+
 async function sendSmtpTest(){
   const to = (adminSmtp && (adminSmtp.from_addr || adminSmtp.user)) || '';
   if(!to){ show('请先填写并保存发件账号', true); return; }
@@ -2297,6 +2306,25 @@ function adminBackupCardHtml(r2, r2Status, r2Source){
       </section>`;
 }
 
+function adminNotifyCardHtml(notify){
+  const n = notify || {};
+  const yn = (v, d) => (v === undefined || v === null ? d : !!v);
+  return `<section class="card admin-notify-card">
+        <div class="section-title"><div><div class="section-kicker">NOTIFY</div><h2>${stIcon('bell')}通知设置</h2><p>节点异常 / 恢复时通过邮件或 Webhook 提醒（当前主要用于节点异常通知）</p></div><span class="status-badge ${n.enabled ? 'ok' : 'bad'}"><i></i>${n.enabled ? '已启用' : '未启用'}</span></div>
+        <form id="notifyForm" class="grid">
+          <div><label>通知开关</label><select name="enabled"><option value="1"${n.enabled ? ' selected' : ''}>启用</option><option value="0"${n.enabled ? '' : ' selected'}>停用</option></select></div>
+          <div><label>冷却时间（分钟）</label><input name="cooldown_minutes" type="number" min="0" max="1440" value="${esc(n.cooldown_minutes ?? 30)}"><span class="muted small">同一节点重复通知的最小间隔，0 表示不限制</span></div>
+          <div style="grid-column:1/-1"><label>通知场景</label><div class="row" style="gap:18px;flex-wrap:wrap"><label class="muted"><input type="checkbox" name="on_down" value="1"${yn(n.on_down, true) ? ' checked' : ''}> 节点异常（离线）</label><label class="muted"><input type="checkbox" name="on_up" value="1"${yn(n.on_up, true) ? ' checked' : ''}> 节点恢复（上线）</label></div></div>
+          <div><label>邮件通知</label><select name="email_enabled"><option value="1"${n.email_enabled ? ' selected' : ''}>启用</option><option value="0"${n.email_enabled ? '' : ' selected'}>停用</option></select><span class="muted small">使用「邮件设置」里的 SMTP 账号</span></div>
+          <div><label>收件人邮箱</label><input name="email_to" value="${esc(n.email_to || '')}" placeholder="多个用逗号分隔"></div>
+          <div><label>Webhook 通知</label><select name="webhook_enabled"><option value="1"${n.webhook_enabled ? ' selected' : ''}>启用</option><option value="0"${n.webhook_enabled ? '' : ' selected'}>停用</option></select></div>
+          <div><label>Webhook 地址</label><input name="webhook_url" value="${esc(n.webhook_url || '')}" placeholder="https://..."></div>
+          <div style="grid-column:1/-1"><label>Webhook 请求体模板（JSON）</label><textarea name="webhook_template" rows="3" spellcheck="false">${esc(n.webhook_template || '')}</textarea><span class="muted small">支持占位符 <code>{{title}}</code>、<code>{{content}}</code>；留空则发送默认 JSON</span></div>
+          <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存通知设置</button><button type="button" class="secondary" onclick="sendNotifyTest()">发送测试通知</button></div>
+        </form>
+      </section>`;
+}
+
 function adminR2CardHtml(r2, r2Status, r2Source){
   return `<section class="card"><div class="section-title"><h2>${stIcon('cloud')}Cloudflare R2 备份配置</h2><p>${r2Status} · ${esc(r2Source)}</p></div>
       <form id="r2ConfigForm" class="grid r2-form">
@@ -2339,6 +2367,29 @@ function wireAdminSettingsForms(){
       }catch(err){ show(err.message, true); }
     };
   }
+  const notifyForm = document.querySelector('#notifyForm');
+  if(notifyForm){
+    notifyForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const body = {
+        enabled: fd.get('enabled'),
+        on_down: fd.get('on_down') ? '1' : '0',
+        on_up: fd.get('on_up') ? '1' : '0',
+        email_enabled: fd.get('email_enabled'),
+        email_to: fd.get('email_to'),
+        webhook_enabled: fd.get('webhook_enabled'),
+        webhook_url: fd.get('webhook_url'),
+        webhook_template: fd.get('webhook_template'),
+        cooldown_minutes: fd.get('cooldown_minutes'),
+      };
+      try{
+        const r = await api('/api/admin/notify-config', {method:'POST', body});
+        show(r.message || '通知设置已保存');
+        await reloadAdminCurrentPage();
+      }catch(err){ show(err.message, true); }
+    };
+  }
   const adminFrpcForm = document.querySelector('#adminFrpcForm');
   if(adminFrpcForm){ adminFrpcForm.onsubmit = submitAdminFrpc; renderAdminDeployScriptAddress(); renderAdminFrpcRows(); }
 }
@@ -2356,6 +2407,7 @@ async function loadAdminSettings(){
     return;
   }
   const smtp = data.smtp || {}; adminSmtp = smtp;
+  const notify = data.notify || {};
   const r2 = data.r2 || {};
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
   const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
@@ -2367,6 +2419,7 @@ async function loadAdminSettings(){
     <div class="admin-settings-grid">
       ${adminOpsCardHtml()}
       ${adminSmtpCardHtml(smtp)}
+      ${adminNotifyCardHtml(notify)}
       ${adminBackupCardHtml(r2, r2Status, r2Source)}
     </div>
     ${adminR2CardHtml(r2, r2Status, r2Source)}

@@ -292,6 +292,105 @@ def send_email(to_addr: str, subject: str, body: str) -> tuple[bool, str]:
         return False, f"发送失败：{e.__class__.__name__}: {e}"
 
 
+# --- 通知（节点异常等）：邮件 / Webhook ---
+NOTIFY_DEFAULT_TEMPLATE = '{"title":"{{title}}","content":"{{content}}"}'
+
+
+def notify_config(conn: sqlite3.Connection) -> dict[str, Any]:
+    return {
+        "enabled": setting_get(conn, "notify_enabled", "0") == "1",
+        "on_down": setting_get(conn, "notify_on_down", "1") == "1",
+        "on_up": setting_get(conn, "notify_on_up", "1") == "1",
+        "email_enabled": setting_get(conn, "notify_email_enabled", "1") == "1",
+        "email_to": setting_get(conn, "notify_email_to", ""),
+        "webhook_enabled": setting_get(conn, "notify_webhook_enabled", "0") == "1",
+        "webhook_url": setting_get(conn, "notify_webhook_url", ""),
+        "webhook_template": setting_get(conn, "notify_webhook_template", NOTIFY_DEFAULT_TEMPLATE),
+        "cooldown_minutes": max(0, int(setting_get(conn, "notify_cooldown_minutes", "30") or "30")),
+    }
+
+
+def notify_public(cfg: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "enabled": bool(cfg.get("enabled")),
+        "on_down": bool(cfg.get("on_down")),
+        "on_up": bool(cfg.get("on_up")),
+        "email_enabled": bool(cfg.get("email_enabled")),
+        "email_to": cfg.get("email_to", ""),
+        "webhook_enabled": bool(cfg.get("webhook_enabled")),
+        "webhook_url": cfg.get("webhook_url", ""),
+        "webhook_template": cfg.get("webhook_template", NOTIFY_DEFAULT_TEMPLATE),
+        "cooldown_minutes": int(cfg.get("cooldown_minutes", 30)),
+    }
+
+
+def _split_recipients(raw: str) -> list[str]:
+    out: list[str] = []
+    for chunk in str(raw or "").replace(";", ",").replace("\n", ",").split(","):
+        chunk = chunk.strip()
+        if chunk:
+            out.append(chunk)
+    return out
+
+
+def _json_escape(value: Any) -> str:
+    return json.dumps(str(value), ensure_ascii=False)[1:-1]
+
+
+def _beijing_now_text(epoch: float | None = None) -> str:
+    """通知里的时间统一用北京时间（UTC+8），避免容器时区不同造成歧义。"""
+    ts = time.time() if epoch is None else epoch
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(ts + 8 * 3600)) + "（北京时间）"
+
+
+def _render_webhook_body(title: str, content: str, template: str) -> str:
+    tpl = str(template or "").strip()
+    if not tpl:
+        return json.dumps({"title": title, "content": content}, ensure_ascii=False)
+    if "{{title}}" in tpl or "{{content}}" in tpl:
+        return tpl.replace("{{title}}", _json_escape(title)).replace("{{content}}", _json_escape(content))
+    return tpl
+
+
+def send_webhook_notification(url: str, title: str, content: str, template: str) -> tuple[bool, str]:
+    if not url:
+        return False, "未配置 Webhook 地址"
+    body = _render_webhook_body(title, content, template).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST", headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return True, f"HTTP {getattr(resp, 'status', 200)}"
+    except urllib.error.HTTPError as e:
+        return False, f"HTTP {e.code}"
+    except Exception as e:
+        return False, f"{e.__class__.__name__}: {e}"
+
+
+def send_notification(title: str, content: str, force: bool = False) -> dict[str, Any]:
+    """按配置通过邮件/Webhook 发送通知；返回各渠道结果。"""
+    try:
+        with db() as conn:
+            cfg = notify_config(conn)
+    except Exception as e:
+        return {"ok": False, "error": f"读取通知配置失败：{e}", "results": []}
+    if not cfg["enabled"] and not force:
+        return {"ok": False, "error": "通知未启用", "results": []}
+    results: list[dict[str, Any]] = []
+    if cfg["email_enabled"]:
+        recipients = _split_recipients(cfg["email_to"])
+        if not recipients:
+            results.append({"channel": "email", "ok": False, "message": "未配置收件人邮箱"})
+        for addr in recipients:
+            ok, msg = send_email(addr, title, content)
+            results.append({"channel": f"email:{addr}", "ok": ok, "message": msg})
+    if cfg["webhook_enabled"]:
+        ok, msg = send_webhook_notification(cfg["webhook_url"], title, content, cfg["webhook_template"])
+        results.append({"channel": "webhook", "ok": ok, "message": msg})
+    if not results:
+        return {"ok": False, "error": "未启用任何通知方式（邮件/Webhook）", "results": []}
+    return {"ok": any(r["ok"] for r in results), "results": results}
+
+
 def create_email_code(username: str, email: str) -> str:
     code = f"{secrets.randbelow(1000000):06d}"
     with db() as conn:
@@ -879,6 +978,8 @@ _node_health_lock = threading.Lock()
 _node_health_cache: dict[str, dict[str, Any]] = {}
 _node_health_ts = 0.0
 _node_health_sampler_started = False
+_node_prev_status: dict[str, str] = {}
+_node_notify_last: dict[str, float] = {}
 
 
 def _node_health_key(node: dict[str, Any]) -> str:
@@ -920,6 +1021,65 @@ def refresh_node_health_snapshot() -> None:
         _node_health_cache.clear()
         _node_health_cache.update(cache)
         _node_health_ts = time.time()
+    try:
+        _notify_node_status_changes(rows)
+    except Exception:
+        pass
+
+
+def _notify_node_status_changes(rows: list[dict[str, Any]]) -> None:
+    """对比上次快照：节点在线↔离线时按配置发送通知（带冷却）。"""
+    try:
+        with db() as conn:
+            cfg = notify_config(conn)
+    except Exception:
+        return
+    now_ts = time.time()
+    cooldown = max(0, int(cfg.get("cooldown_minutes", 30))) * 60
+    ts_text = _beijing_now_text(now_ts)
+    pending: list[tuple[str, str]] = []
+    for n in rows:
+        key = _node_health_key(n)
+        if not n.get("active"):
+            _node_prev_status.pop(key, None)
+            continue
+        current = "online" if n.get("auth_status") == "online" else "offline"
+        prev = _node_prev_status.get(key)
+        _node_prev_status[key] = current
+        if prev is None or prev == current:
+            continue
+        if not cfg.get("enabled"):
+            continue
+        label = f"{n.get('region', '')} / {n.get('name', '')}".strip(" /")
+        addr = f"{n.get('server_addr', '')}:{n.get('server_port', '')}"
+        if prev == "online" and current == "offline":
+            if not cfg.get("on_down"):
+                continue
+            title = f"【节点异常】{label} 离线"
+            content = (
+                f"节点 {label} 认证端口不可达，判定为离线。\n"
+                f"地址：{addr}\n"
+                f"原因：{n.get('auth_message', '')}\n"
+                f"检测时间：{ts_text}"
+            )
+        elif prev == "offline" and current == "online":
+            if not cfg.get("on_up"):
+                continue
+            title = f"【节点恢复】{label} 已恢复"
+            content = (
+                f"节点 {label} 已恢复在线。\n"
+                f"地址：{addr}\n"
+                f"延迟：{n.get('auth_latency_ms', '-')} ms\n"
+                f"检测时间：{ts_text}"
+            )
+        else:
+            continue
+        if cooldown and (now_ts - _node_notify_last.get(key, 0.0)) < cooldown:
+            continue
+        _node_notify_last[key] = now_ts
+        pending.append((title, content))
+    for title, content in pending:
+        threading.Thread(target=send_notification, args=(title, content), daemon=True).start()
 
 
 def start_node_health_sampler() -> None:
@@ -3332,6 +3492,7 @@ class Handler(BaseHTTPRequestHandler):
                 "has_setup_key": bool(effective_setup_key()),
                 "setup_key_source": setup_key_source(),
                 "smtp": smtp_public(smtp_config(conn)),
+                "notify": notify_public(notify_config(conn)),
                 "r2": r2_public,
                 "r2_configured": r2_public["configured"],
                 "frpc_users": frpc_users,
@@ -3572,6 +3733,10 @@ class Handler(BaseHTTPRequestHandler):
             self.admin_smtp_config_save(user, data)
         elif path == "/api/admin/smtp-test":
             self.admin_smtp_test(user, data)
+        elif path == "/api/admin/notify-config":
+            self.admin_notify_config_save(user, data)
+        elif path == "/api/admin/notify-test":
+            self.admin_notify_test(user, data)
         elif path == "/api/admin/users/email":
             self.admin_set_user_email(data)
         elif path == "/api/admin/backup/r2":
@@ -3951,6 +4116,46 @@ class Handler(BaseHTTPRequestHandler):
             return
         ok, msg = send_email(to_addr, "【Frp 管理台】测试邮件", "这是一封测试邮件，说明邮件服务配置成功。")
         self.send_json({"ok": ok, "message": "测试邮件已发送" if ok else None, "error": None if ok else msg}, 200 if ok else 400)
+
+    def admin_notify_config_save(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        def _flag(value: Any, default: str = "0") -> str:
+            raw = value if value is not None else default
+            return "1" if str(raw) in ("1", "true", "True", "on", "yes") else "0"
+        email_to = str(data.get("email_to", "")).strip()[:500]
+        webhook_url = str(data.get("webhook_url", "")).strip()[:500]
+        webhook_template = str(data.get("webhook_template", "")).strip() or NOTIFY_DEFAULT_TEMPLATE
+        webhook_template = webhook_template[:2000]
+        try:
+            cooldown = int(data.get("cooldown_minutes", 30) or 0)
+        except (TypeError, ValueError):
+            cooldown = 30
+        cooldown = max(0, min(cooldown, 1440))
+        with db() as conn:
+            setting_set(conn, "notify_enabled", _flag(data.get("enabled")))
+            setting_set(conn, "notify_on_down", _flag(data.get("on_down"), "1"))
+            setting_set(conn, "notify_on_up", _flag(data.get("on_up"), "1"))
+            setting_set(conn, "notify_email_enabled", _flag(data.get("email_enabled"), "1"))
+            setting_set(conn, "notify_email_to", email_to)
+            setting_set(conn, "notify_webhook_enabled", _flag(data.get("webhook_enabled")))
+            setting_set(conn, "notify_webhook_url", webhook_url)
+            setting_set(conn, "notify_webhook_template", webhook_template)
+            setting_set(conn, "notify_cooldown_minutes", str(cooldown))
+            cfg = notify_config(conn)
+        audit("notify_config_update", admin, None, None, "", f"更新通知设置：enabled={cfg['enabled']} email={cfg['email_enabled']} webhook={cfg['webhook_enabled']}")
+        self.send_json({"ok": True, "message": "通知设置已保存", "notify": notify_public(cfg)})
+
+    def admin_notify_test(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        ts_text = _beijing_now_text()
+        result = send_notification("【Frp 管理台】测试通知", f"这是一条测试通知，用于验证通知配置是否可用。\n时间：{ts_text}", force=True)
+        if result.get("ok"):
+            self.send_json({"ok": True, "message": "测试通知已发送", "results": result.get("results", [])})
+        else:
+            detail = result.get("error") or "；".join(f"{r['channel']}: {r['message']}" for r in result.get("results", []))
+            self.send_json({"ok": False, "error": detail or "发送失败"}, 400)
 
     def admin_set_user_email(self, data: dict[str, Any]) -> None:
         if not self.require_admin():
