@@ -2549,11 +2549,8 @@ async function loadAdminSettings(){
   const frpcUserOptions = frpcUsers.map(u => `<option value="${u.id}">${esc(u.username)} · ${esc(u.node_region || '-')} / ${esc(u.node_name || '-')} · 端口 ${u.port_count || 0} · 可用 ${(u.available_ports || []).length} · 隧道 ${u.tunnel_count || 0}</option>`).join('');
   app.innerHTML = appLayoutHtml(`
     <div class="admin-settings-grid">
-      ${adminNotifyCardHtml(notify)}
-      ${adminSmtpCardHtml(smtp)}
-      ${adminOpsCardHtml()}
-      ${adminBackupCardHtml(r2, r2Status, r2Source)}
-      ${adminR2CardHtml(r2, r2Status, r2Source)}
+      <div class="admin-settings-col">${adminNotifyCardHtml(notify)}${adminBackupCardHtml(r2, r2Status, r2Source)}</div>
+      <div class="admin-settings-col">${adminSmtpCardHtml(smtp)}${adminOpsCardHtml()}${adminR2CardHtml(r2, r2Status, r2Source)}</div>
     </div>
     ${adminFrpcModalHtml(frpcUserOptions)}
   `, 'admin-settings', '管理员设置');
