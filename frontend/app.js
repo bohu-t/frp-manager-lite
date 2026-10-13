@@ -854,7 +854,7 @@ async function renderForgotPassword(){
         <div class="input-group"><label class="input-label" for="forgotPassword2">确认新密码</label><input id="forgotPassword2" class="input-ios" name="password2" type="password" autocomplete="new-password" minlength="6" placeholder="再次输入新密码" required></div>
         <p class="row"><button>重置密码</button><button type="button" class="secondary" onclick="renderLogin()">返回登录</button></p>
       </form>`,
-      '<div class="auth-switch"><span>收不到邮件？</span><span>请联系管理员绑定邮箱</span></div>');
+      '<div class="auth-switch"><span>收不到邮件？</span><span>请联系管理员修改密码</span></div>');
   document.querySelector('#forgotForm').onsubmit = async (e) => {
     e.preventDefault();
     const form = e.target;
