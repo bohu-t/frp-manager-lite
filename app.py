@@ -17,6 +17,7 @@ import urllib.error
 import urllib.request
 import mimetypes
 import os
+import re
 import secrets
 import socket
 import sqlite3
@@ -292,23 +293,132 @@ def send_email(to_addr: str, subject: str, body: str) -> tuple[bool, str]:
         return False, f"发送失败：{e.__class__.__name__}: {e}"
 
 
-# --- 通知（节点异常等）：邮件 / Webhook ---
-NOTIFY_DEFAULT_TEMPLATE = '{"title":"{{title}}","content":"{{content}}"}'
+# --- 通知（节点异常等）：渠道实现参考青龙面板（bark/telegram/钉钉/企业微信/Server酱 等）---
+NOTIFY_CHANNELS: list[dict[str, Any]] = [
+    {"type": "bark", "name": "Bark", "fields": [
+        {"key": "barkPush", "label": "barkPush", "hint": "Bark 的信息 IP/设备码，例如 https://api.day.app/XXXXXXXX", "required": True},
+        {"key": "barkIcon", "label": "barkIcon", "hint": "推送图标（iOS15+ 才显示）", "placeholder": "https://qn.whyour.cn/logo.png"},
+        {"key": "barkSound", "label": "barkSound", "hint": "推送铃声，铃声列表见 App"},
+        {"key": "barkGroup", "label": "barkGroup", "hint": "消息分组", "placeholder": "frp"},
+        {"key": "barkLevel", "label": "barkLevel", "hint": "时效性：active/timeSensitive/critical/passive", "placeholder": "active"},
+        {"key": "barkUrl", "label": "barkUrl", "hint": "点击消息跳转的 URL"},
+        {"key": "barkArchive", "label": "barkArchive", "hint": "是否保存推送消息（1/0）"},
+    ]},
+    {"type": "telegramBot", "name": "Telegram 机器人", "fields": [
+        {"key": "telegramBotToken", "label": "telegramBotToken", "hint": "机器人 token，例如 1077xxx4424:AAFjv0Fcq...", "required": True},
+        {"key": "telegramBotUserId", "label": "telegramBotUserId", "hint": "接收者 chat id，例如 129xxx206", "required": True},
+        {"key": "telegramBotApiHost", "label": "telegramBotApiHost", "hint": "自建反代地址，默认 https://api.telegram.org"},
+        {"key": "telegramBotProxyHost", "label": "telegramBotProxyHost", "hint": "代理 IP（可选）"},
+        {"key": "telegramBotProxyPort", "label": "telegramBotProxyPort", "hint": "代理端口（可选）"},
+        {"key": "telegramBotProxyAuth", "label": "telegramBotProxyAuth", "hint": "代理认证 user:password（可选）"},
+    ]},
+    {"type": "dingtalkBot", "name": "钉钉机器人", "fields": [
+        {"key": "dingtalkBotToken", "label": "dingtalkBotToken", "hint": "webhook 的 access_token", "required": True},
+        {"key": "dingtalkBotSecret", "label": "dingtalkBotSecret", "hint": "加签密钥（SEC 开头，可选）"},
+    ]},
+    {"type": "weWorkBot", "name": "企业微信机器人", "fields": [
+        {"key": "weWorkBotKey", "label": "weWorkBotKey", "hint": "群机器人 webhook 的 key", "required": True},
+        {"key": "weWorkOrigin", "label": "weWorkOrigin", "hint": "企业微信代理地址（可选）", "placeholder": "https://qyapi.weixin.qq.com"},
+    ]},
+    {"type": "weWorkApp", "name": "企业微信应用", "fields": [
+        {"key": "weWorkAppKey", "label": "weWorkAppKey", "hint": "corpid,corpsecret,touser,agentid[,消息类型] 用英文逗号分隔", "required": True},
+        {"key": "weWorkOrigin", "label": "weWorkOrigin", "hint": "企业微信代理地址（可选）", "placeholder": "https://qyapi.weixin.qq.com"},
+    ]},
+    {"type": "serverChan", "name": "Server 酱", "fields": [
+        {"key": "serverChanKey", "label": "serverChanKey", "hint": "Server 酱 SENDKEY（sctp 开头自动走新版接口）", "required": True},
+    ]},
+    {"type": "pushPlus", "name": "PushPlus", "fields": [
+        {"key": "pushPlusToken", "label": "pushPlusToken", "hint": "PushPlus token", "required": True},
+        {"key": "pushPlusUser", "label": "pushPlusUser", "hint": "群组编码（一对多推送，可选）"},
+        {"key": "pushPlusTemplate", "label": "pushPlusTemplate", "hint": "模板，默认 html"},
+        {"key": "pushplusChannel", "label": "pushplusChannel", "hint": "渠道，默认 wechat"},
+        {"key": "pushplusWebhook", "label": "pushplusWebhook", "hint": "webhook 编码（可选）"},
+        {"key": "pushplusCallbackUrl", "label": "pushplusCallbackUrl", "hint": "回调地址（可选）"},
+        {"key": "pushplusTo", "label": "pushplusTo", "hint": "好友令牌（可选）"},
+    ]},
+    {"type": "pushDeer", "name": "PushDeer", "fields": [
+        {"key": "pushDeerKey", "label": "pushDeerKey", "hint": "PushDeer 的 Key", "required": True},
+        {"key": "pushDeerUrl", "label": "pushDeerUrl", "hint": "自架 API 地址（可选）", "placeholder": "https://api2.pushdeer.com/message/push"},
+    ]},
+    {"type": "gotify", "name": "Gotify", "fields": [
+        {"key": "gotifyUrl", "label": "gotifyUrl", "hint": "Gotify 地址，例如 https://push.example.de:8080", "required": True},
+        {"key": "gotifyToken", "label": "gotifyToken", "hint": "应用 token", "required": True},
+        {"key": "gotifyPriority", "label": "gotifyPriority", "hint": "优先级（数字）", "placeholder": "0"},
+    ]},
+    {"type": "ntfy", "name": "Ntfy", "fields": [
+        {"key": "ntfyUrl", "label": "ntfyUrl", "hint": "ntfy 地址，默认 https://ntfy.sh"},
+        {"key": "ntfyTopic", "label": "ntfyTopic", "hint": "topic", "required": True},
+        {"key": "ntfyPriority", "label": "ntfyPriority", "hint": "优先级，默认 3"},
+        {"key": "ntfyToken", "label": "ntfyToken", "hint": "token（可选）"},
+        {"key": "ntfyUsername", "label": "ntfyUsername", "hint": "用户名（可选）"},
+        {"key": "ntfyPassword", "label": "ntfyPassword", "hint": "密码（可选）"},
+        {"key": "ntfyActions", "label": "ntfyActions", "hint": "Actions（可选）"},
+    ]},
+    {"type": "lark", "name": "飞书机器人", "fields": [
+        {"key": "larkKey", "label": "larkKey", "hint": "飞书群机器人 webhook 地址或 key", "required": True},
+        {"key": "larkSecret", "label": "larkSecret", "hint": "加签密钥（可选）"},
+    ]},
+    {"type": "iGot", "name": "IGot", "fields": [
+        {"key": "iGotPushKey", "label": "iGotPushKey", "hint": "iGot 推送 key", "required": True},
+    ]},
+    {"type": "pushMe", "name": "PushMe", "fields": [
+        {"key": "pushMeKey", "label": "pushMeKey", "hint": "PushMe key", "required": True},
+        {"key": "pushMeUrl", "label": "pushMeUrl", "hint": "自架地址（可选）", "placeholder": "https://push.i-i.me/"},
+    ]},
+    {"type": "chat", "name": "群晖 Chat", "fields": [
+        {"key": "synologyChatUrl", "label": "synologyChatUrl", "hint": "Synology Chat 的 incoming webhook 地址", "required": True},
+    ]},
+    {"type": "wePlusBot", "name": "微加机器人", "fields": [
+        {"key": "wePlusBotToken", "label": "wePlusBotToken", "hint": "用户令牌", "required": True},
+        {"key": "wePlusBotReceiver", "label": "wePlusBotReceiver", "hint": "消息接收人（可选）"},
+        {"key": "wePlusBotVersion", "label": "wePlusBotVersion", "hint": "版本：pro / personal，默认 pro"},
+    ]},
+    {"type": "wxPusherBot", "name": "WxPusher", "fields": [
+        {"key": "wxPusherBotAppToken", "label": "wxPusherBotAppToken", "hint": "appToken", "required": True},
+        {"key": "wxPusherBotTopicIds", "label": "wxPusherBotTopicIds", "hint": "topicIds（分号分隔）"},
+        {"key": "wxPusherBotUids", "label": "wxPusherBotUids", "hint": "uids（分号分隔）"},
+    ]},
+    {"type": "wxPusherSpt", "name": "WxPusher（SPT 极简推送）", "fields": [
+        {"key": "wxPusherSptList", "label": "wxPusherSptList", "hint": "SPT（逗号分隔，最多 10 个）", "required": True},
+    ]},
+    {"type": "goCqHttpBot", "name": "GoCqHttpBot", "fields": [
+        {"key": "goCqHttpBotUrl", "label": "goCqHttpBotUrl", "hint": "私聊 http://127.0.0.1/send_private_msg，群 http://127.0.0.1/send_group_msg", "required": True},
+        {"key": "goCqHttpBotToken", "label": "goCqHttpBotToken", "hint": "访问密钥", "required": True},
+        {"key": "goCqHttpBotQq", "label": "goCqHttpBotQq", "hint": "私聊填 user_id=QQ，群填 group_id=群号", "required": True},
+    ]},
+    {"type": "aibotk", "name": "智能微秘书", "fields": [
+        {"key": "aibotkKey", "label": "aibotkKey", "hint": "apikey", "required": True},
+        {"key": "aibotkType", "label": "aibotkType", "hint": "发送目标", "type": "select", "default": "room", "options": [{"value": "room", "label": "群聊"}, {"value": "contact", "label": "好友"}]},
+        {"key": "aibotkName", "label": "aibotkName", "hint": "群名或好友昵称", "required": True},
+    ]},
+    {"type": "chronocat", "name": "Chronocat", "fields": [
+        {"key": "chronocatURL", "label": "chronocatURL", "hint": "Chronocat 地址", "required": True},
+        {"key": "chronocatQQ", "label": "chronocatQQ", "hint": "user_id=xxx 或 group_id=xxx，可多个", "required": True},
+        {"key": "chronocatToken", "label": "chronocatToken", "hint": "token", "required": True},
+    ]},
+    {"type": "openiLink", "name": "OpeniLink", "fields": [
+        {"key": "openiLinkAppToken", "label": "openiLinkAppToken", "hint": "app_token", "required": True},
+        {"key": "openiLinkHubUrl", "label": "openiLinkHubUrl", "hint": "Hub 地址，默认 https://hub.openilink.com"},
+        {"key": "openiLinkContextToken", "label": "openiLinkContextToken", "hint": "context_token（可选）"},
+    ]},
+]
+NOTIFY_CHANNEL_MAP = {c["type"]: c for c in NOTIFY_CHANNELS}
 
 
 def notify_config(conn: sqlite3.Connection) -> dict[str, Any]:
+    raw = setting_get(conn, "notify_params", "")
+    try:
+        params = json.loads(raw) if raw else {}
+    except Exception:
+        params = {}
+    if not isinstance(params, dict):
+        params = {}
     return {
         "enabled": setting_get(conn, "notify_enabled", "0") == "1",
         "on_down": setting_get(conn, "notify_on_down", "1") == "1",
         "on_up": setting_get(conn, "notify_on_up", "1") == "1",
-        "email_enabled": setting_get(conn, "notify_email_enabled", "1") == "1",
-        "email_to": setting_get(conn, "notify_email_to", ""),
-        "webhook_enabled": setting_get(conn, "notify_webhook_enabled", "0") == "1",
-        "webhook_url": setting_get(conn, "notify_webhook_url", ""),
-        "webhook_template": setting_get(conn, "notify_webhook_template", NOTIFY_DEFAULT_TEMPLATE),
-        "ql_enabled": setting_get(conn, "notify_ql_enabled", "0") == "1",
-        "ql_url": setting_get(conn, "notify_ql_url", ""),
-        "ql_token": setting_get(conn, "notify_ql_token", ""),
+        "type": setting_get(conn, "notify_type", ""),
+        "params": params,
         "cooldown_minutes": max(0, int(setting_get(conn, "notify_cooldown_minutes", "30") or "30")),
     }
 
@@ -318,29 +428,11 @@ def notify_public(cfg: dict[str, Any]) -> dict[str, Any]:
         "enabled": bool(cfg.get("enabled")),
         "on_down": bool(cfg.get("on_down")),
         "on_up": bool(cfg.get("on_up")),
-        "email_enabled": bool(cfg.get("email_enabled")),
-        "email_to": cfg.get("email_to", ""),
-        "webhook_enabled": bool(cfg.get("webhook_enabled")),
-        "webhook_url": cfg.get("webhook_url", ""),
-        "webhook_template": cfg.get("webhook_template", NOTIFY_DEFAULT_TEMPLATE),
-        "ql_enabled": bool(cfg.get("ql_enabled")),
-        "ql_url": cfg.get("ql_url", ""),
-        "ql_token": cfg.get("ql_token", ""),
+        "type": cfg.get("type", ""),
+        "params": cfg.get("params", {}),
         "cooldown_minutes": int(cfg.get("cooldown_minutes", 30)),
+        "channels": NOTIFY_CHANNELS,
     }
-
-
-def _split_recipients(raw: str) -> list[str]:
-    out: list[str] = []
-    for chunk in str(raw or "").replace(";", ",").replace("\n", ",").split(","):
-        chunk = chunk.strip()
-        if chunk:
-            out.append(chunk)
-    return out
-
-
-def _json_escape(value: Any) -> str:
-    return json.dumps(str(value), ensure_ascii=False)[1:-1]
 
 
 def _beijing_now_text(epoch: float | None = None) -> str:
@@ -349,66 +441,500 @@ def _beijing_now_text(epoch: float | None = None) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(ts + 8 * 3600)) + "（北京时间）"
 
 
-def _render_webhook_body(title: str, content: str, template: str) -> str:
-    tpl = str(template or "").strip()
-    if not tpl:
-        return json.dumps({"title": title, "content": content}, ensure_ascii=False)
-    if "{{title}}" in tpl or "{{content}}" in tpl:
-        return tpl.replace("{{title}}", _json_escape(title)).replace("{{content}}", _json_escape(content))
-    return tpl
-
-
-def send_webhook_notification(url: str, title: str, content: str, template: str) -> tuple[bool, str]:
-    if not url:
-        return False, "未配置 Webhook 地址"
-    body = _render_webhook_body(title, content, template).encode("utf-8")
-    req = urllib.request.Request(url, data=body, method="POST", headers={"Content-Type": "application/json"})
+def _notify_request(url: str, method: str = "POST", data: bytes | None = None,
+                    headers: dict[str, str] | None = None, timeout: int = 10,
+                    proxy: str | None = None) -> tuple[int, str, Exception | None]:
+    req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy, "https": proxy})) if proxy else urllib.request.build_opener()
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return True, f"HTTP {getattr(resp, 'status', 200)}"
-    except urllib.error.HTTPError as e:
-        return False, f"HTTP {e.code}"
-    except Exception as e:
-        return False, f"{e.__class__.__name__}: {e}"
-
-
-def send_qinglong_notification(url: str, token: str, title: str, content: str) -> tuple[bool, str]:
-    """通过青龙面板 OpenAPI 发送通知（复用青龙已配置的通知渠道）。"""
-    if not url or not token:
-        return False, "未配置青龙地址或应用 Token"
-    endpoint = str(url).rstrip("/") + "/open/system/notify"
-    payload = json.dumps({"title": title, "content": content}, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(
-        endpoint, data=payload, method="PUT",
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            raw = resp.read().decode("utf-8", "replace")
+        with opener.open(req, timeout=timeout) as resp:
+            return int(getattr(resp, "status", 200)), resp.read().decode("utf-8", "replace"), None
     except urllib.error.HTTPError as e:
         raw = ""
         try:
             raw = e.read().decode("utf-8", "replace")
         except Exception:
             pass
-        try:
-            msg = json.loads(raw).get("message")
-        except Exception:
-            msg = None
-        return False, msg or f"HTTP {e.code}"
+        return int(e.code), raw, e
     except Exception as e:
-        return False, f"{e.__class__.__name__}: {e}"
+        return 0, "", e
+
+
+def _err_text(err: Exception) -> str:
+    return f"{err.__class__.__name__}: {err}"
+
+
+def _json_or_empty(raw: str) -> Any:
     try:
-        data = json.loads(raw) if raw else {}
+        return json.loads(raw) if raw else {}
     except Exception:
-        data = {}
+        return {}
+
+
+def _post_json(url: str, payload: Any, headers: dict[str, str] | None = None, proxy: str | None = None):
+    h = {"Content-Type": "application/json", **(headers or {})}
+    return _notify_request(url, "POST", json.dumps(payload, ensure_ascii=False).encode("utf-8"), h, proxy=proxy)
+
+
+def _post_form(url: str, payload: dict[str, Any], headers: dict[str, str] | None = None, proxy: str | None = None):
+    h = {"Content-Type": "application/x-www-form-urlencoded", **(headers or {})}
+    return _notify_request(url, "POST", urllib.parse.urlencode(payload).encode("utf-8"), h, proxy=proxy)
+
+
+def _send_bark(p, title, content):
+    push = str(p.get("barkPush", "")).strip()
+    if not push:
+        return False, "缺少 barkPush"
+    if not push.startswith("http"):
+        push = f"https://api.day.app/{push}"
+    body = {
+        "title": title, "body": content,
+        "icon": p.get("barkIcon", "") or "", "sound": p.get("barkSound", "") or "",
+        "group": p.get("barkGroup", "") or "", "isArchive": p.get("barkArchive", "") or "",
+        "level": p.get("barkLevel", "") or "", "url": p.get("barkUrl", "") or "",
+    }
+    status, raw, err = _post_json(push, body)
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
     if data.get("code") == 200:
         return True, "已发送"
-    return False, data.get("message") or (raw[:200] or "未知错误")
+    return False, (raw[:200] or f"HTTP {status}")
+
+
+def _send_telegram(p, title, content):
+    token = str(p.get("telegramBotToken", "")).strip()
+    chat_id = str(p.get("telegramBotUserId", "")).strip()
+    if not token or not chat_id:
+        return False, "缺少 telegramBotToken 或 telegramBotUserId"
+    host = str(p.get("telegramBotApiHost", "")).strip() or "https://api.telegram.org"
+    url = f"{host.rstrip('/')}/bot{token}/sendMessage"
+    proxy = None
+    ph = str(p.get("telegramBotProxyHost", "")).strip()
+    pp = str(p.get("telegramBotProxyPort", "")).strip()
+    if ph and pp:
+        auth = str(p.get("telegramBotProxyAuth", "")).strip()
+        proxy = f"http://{auth + '@' if auth else ''}{ph}:{pp}"
+    status, raw, err = _post_form(url, {"chat_id": chat_id, "text": f"{title}\n\n{content}", "disable_web_page_preview": "true"}, proxy=proxy)
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    if data.get("ok"):
+        return True, "已发送"
+    return False, (data.get("description") or raw[:200] or f"HTTP {status}")
+
+
+def _send_dingtalk(p, title, content):
+    token = str(p.get("dingtalkBotToken", "")).strip()
+    if not token:
+        return False, "缺少 dingtalkBotToken"
+    secret = str(p.get("dingtalkBotSecret", "")).strip()
+    qs = f"access_token={token}"
+    if secret:
+        ts = str(int(time.time() * 1000))
+        digest = hmac.new(secret.encode("utf-8"), f"{ts}\n{secret}".encode("utf-8"), hashlib.sha256).digest()
+        sign = urllib.parse.quote(base64.b64encode(digest).decode("utf-8"), safe="")
+        qs += f"&timestamp={ts}&sign={sign}"
+    url = f"https://oapi.dingtalk.com/robot/send?{qs}"
+    status, raw, err = _post_json(url, {"msgtype": "text", "text": {"content": f" {title}\n\n{content}"}})
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    if data.get("errcode") == 0:
+        return True, "已发送"
+    return False, (data.get("errmsg") or raw[:200] or f"HTTP {status}")
+
+
+def _send_weWorkBot(p, title, content):
+    key = str(p.get("weWorkBotKey", "")).strip()
+    if not key:
+        return False, "缺少 weWorkBotKey"
+    origin = str(p.get("weWorkOrigin", "")).strip() or "https://qyapi.weixin.qq.com"
+    url = f"{origin.rstrip('/')}/cgi-bin/webhook/send?key={key}"
+    status, raw, err = _post_json(url, {"msgtype": "text", "text": {"content": f" {title}\n\n{content}"}})
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    if data.get("errcode") == 0:
+        return True, "已发送"
+    return False, (data.get("errmsg") or raw[:200] or f"HTTP {status}")
+
+
+def _send_weWorkApp(p, title, content):
+    raw_key = str(p.get("weWorkAppKey", "")).strip()
+    if not raw_key:
+        return False, "缺少 weWorkAppKey"
+    origin = str(p.get("weWorkOrigin", "")).strip() or "https://qyapi.weixin.qq.com"
+    parts = [x.strip() for x in raw_key.split(",")]
+    if len(parts) < 4:
+        return False, "weWorkAppKey 至少需要 corpid,corpsecret,touser,agentid"
+    corpid, corpsecret, touser, agentid = parts[0], parts[1], parts[2], parts[3]
+    thumb = parts[4] if len(parts) > 4 and parts[4] else "1"
+    status, raw, err = _post_json(f"{origin.rstrip('/')}/cgi-bin/gettoken", {"corpid": corpid, "corpsecret": corpsecret})
+    if err and status == 0:
+        return False, _err_text(err)
+    tok = _json_or_empty(raw).get("access_token")
+    if not tok:
+        return False, f"获取 access_token 失败：{raw[:200]}"
+    if thumb == "0":
+        msg = {"msgtype": "textcard", "textcard": {"title": title, "description": content, "url": "https://github.com/whyour/qinglong", "btntxt": "更多"}}
+    elif thumb == "1":
+        msg = {"msgtype": "text", "text": {"content": f"{title}\n\n{content}"}}
+    else:
+        msg = {"msgtype": "mpnews", "mpnews": {"articles": [{"title": title, "thumb_media_id": thumb, "author": "智能助手", "content_source_url": "", "content": content.replace("\n", "<br/>"), "digest": content}]}}
+    payload = {"touser": touser, "agentid": agentid, "safe": "0", **msg}
+    status, raw, err = _post_json(f"{origin.rstrip('/')}/cgi-bin/message/send?access_token={tok}", payload)
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    if data.get("errcode") == 0:
+        return True, "已发送"
+    return False, (data.get("errmsg") or raw[:200] or f"HTTP {status}")
+
+
+def _send_serverChan(p, title, content):
+    key = str(p.get("serverChanKey", "")).strip()
+    if not key:
+        return False, "缺少 serverChanKey"
+    m = re.match(r"^sctp(\d+)t", key, re.I)
+    if m and m.group(1):
+        url = f"https://{m.group(1)}.push.ft07.com/send/{key}.send"
+    else:
+        url = f"https://sctapi.ftqq.com/{key}.send"
+    status, raw, err = _post_form(url, {"title": title, "desp": content})
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    if data.get("errno") == 0 or (isinstance(data.get("data"), dict) and data["data"].get("errno") == 0):
+        return True, "已发送"
+    return False, (data.get("message") or data.get("errmsg") or raw[:200] or f"HTTP {status}")
+
+
+def _send_pushDeer(p, title, content):
+    key = str(p.get("pushDeerKey", "")).strip()
+    if not key:
+        return False, "缺少 pushDeerKey"
+    url = str(p.get("pushDeerUrl", "")).strip() or "https://api2.pushdeer.com/message/push"
+    status, raw, err = _post_form(url, {"pushkey": key, "text": title, "desp": content, "type": "markdown"})
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    result = ((data.get("content") or {}).get("result")) if isinstance(data.get("content"), dict) else None
+    if isinstance(result, list) and len(result) > 0:
+        return True, "已发送"
+    return False, (raw[:200] or f"HTTP {status}")
+
+
+def _send_gotify(p, title, content):
+    url_base = str(p.get("gotifyUrl", "")).strip().rstrip("/")
+    token = str(p.get("gotifyToken", "")).strip()
+    if not url_base or not token:
+        return False, "缺少 gotifyUrl 或 gotifyToken"
+    url = f"{url_base}/message?token={token}"
+    priority = str(p.get("gotifyPriority", "") or "0")
+    status, raw, err = _post_form(url, {"title": title, "message": content, "priority": priority})
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    if isinstance(data.get("id"), int):
+        return True, "已发送"
+    return False, (raw[:200] or f"HTTP {status}")
+
+
+def _send_ntfy(p, title, content):
+    base = str(p.get("ntfyUrl", "")).strip() or "https://ntfy.sh"
+    topic = str(p.get("ntfyTopic", "")).strip()
+    if not topic:
+        return False, "缺少 ntfyTopic"
+    url = f"{base.rstrip('/')}/{topic}"
+    headers = {
+        "Title": "=?UTF-8?B?" + base64.b64encode(title.encode("utf-8")).decode("ascii") + "?=",
+        "Priority": str(p.get("ntfyPriority", "") or "3"),
+        "Icon": "https://qn.whyour.cn/logo.png",
+    }
+    tok = str(p.get("ntfyToken", "")).strip()
+    uname = str(p.get("ntfyUsername", "")).strip()
+    pwd = str(p.get("ntfyPassword", "")).strip()
+    if tok:
+        headers["Authorization"] = f"Bearer {tok}"
+    elif uname and pwd:
+        headers["Authorization"] = "Basic " + base64.b64encode(f"{uname}:{pwd}".encode("utf-8")).decode("ascii")
+    actions = str(p.get("ntfyActions", "")).strip()
+    if actions:
+        headers["Actions"] = "=?UTF-8?B?" + base64.b64encode(actions.encode("utf-8")).decode("ascii") + "?="
+    status, raw, err = _notify_request(url, "POST", content.encode("utf-8"), headers)
+    if err and status == 0:
+        return False, _err_text(err)
+    if status == 200:
+        return True, "已发送"
+    return False, (raw[:200] or f"HTTP {status}")
+
+
+def _send_lark(p, title, content):
+    key = str(p.get("larkKey", "")).strip()
+    if not key:
+        return False, "缺少 larkKey"
+    if not key.startswith("http"):
+        key = f"https://open.feishu.cn/open-apis/bot/v2/hook/{key}"
+    body: dict[str, Any] = {"msg_type": "text", "content": {"text": f"{title}\n\n{content}"}}
+    secret = str(p.get("larkSecret", "")).strip()
+    if secret:
+        ts = str(int(time.time()))
+        string_to_sign = f"{ts}\n{secret}"
+        sign = base64.b64encode(hmac.new(string_to_sign.encode("utf-8"), b"", hashlib.sha256).digest()).decode("utf-8")
+        body["timestamp"] = ts
+        body["sign"] = sign
+    status, raw, err = _post_json(key, body)
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    if data.get("StatusCode") == 0 or data.get("code") == 0:
+        return True, "已发送"
+    return False, (data.get("msg") or data.get("StatusMessage") or raw[:200] or f"HTTP {status}")
+
+
+def _send_iGot(p, title, content):
+    key = str(p.get("iGotPushKey", "")).strip()
+    if not key:
+        return False, "缺少 iGotPushKey"
+    url = f"https://push.hellyw.com/{key.lower()}"
+    status, raw, err = _post_form(url, {"title": title, "content": content})
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    if data.get("ret") == 0:
+        return True, "已发送"
+    return False, (data.get("message") or raw[:200] or f"HTTP {status}")
+
+
+def _send_pushPlus(p, title, content):
+    token = str(p.get("pushPlusToken", "")).strip()
+    if not token:
+        return False, "缺少 pushPlusToken"
+    payload = {
+        "token": token, "title": title,
+        "content": re.sub(r"[\n\r]", "<br>", content),
+        "topic": str(p.get("pushPlusUser", "") or ""),
+        "template": str(p.get("pushPlusTemplate", "") or "html"),
+        "channel": str(p.get("pushplusChannel", "") or "wechat"),
+        "webhook": str(p.get("pushplusWebhook", "") or ""),
+        "callbackUrl": str(p.get("pushplusCallbackUrl", "") or ""),
+        "to": str(p.get("pushplusTo", "") or ""),
+    }
+    status, raw, err = _post_json("https://www.pushplus.plus/send", payload)
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    if data.get("code") == 200:
+        return True, "已发送"
+    return False, (data.get("msg") or raw[:200] or f"HTTP {status}")
+
+
+def _send_wePlusBot(p, title, content):
+    token = str(p.get("wePlusBotToken", "")).strip()
+    if not token:
+        return False, "缺少 wePlusBotToken"
+    template = "txt"
+    body_content = content
+    if len(content) > 800:
+        template = "html"
+        body_content = re.sub(r"[\n\r]", "<br>", content)
+    payload = {
+        "token": token, "title": title, "template": template, "content": body_content,
+        "receiver": str(p.get("wePlusBotReceiver", "") or ""),
+        "version": str(p.get("wePlusBotVersion", "") or "pro"),
+    }
+    status, raw, err = _post_json("https://www.weplusbot.com/send", payload)
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    if data.get("code") == 200:
+        return True, "已发送"
+    return False, (data.get("msg") or raw[:200] or f"HTTP {status}")
+
+
+def _send_wxPusherBot(p, title, content):
+    token = str(p.get("wxPusherBotAppToken", "")).strip()
+    if not token:
+        return False, "缺少 wxPusherBotAppToken"
+    topic_ids = [int(x) for x in [t.strip() for t in str(p.get("wxPusherBotTopicIds", "") or "").split(";")] if x.isdigit()]
+    uids = [u.strip() for u in str(p.get("wxPusherBotUids", "") or "").split(";") if u.strip()]
+    if not topic_ids and not uids:
+        return False, "topicIds 与 uids 至少配置一个"
+    payload = {
+        "appToken": token,
+        "content": f"<h1>{title}</h1><br/><div style='white-space: pre-wrap;'>{content}</div>",
+        "summary": title, "contentType": 2, "topicIds": topic_ids, "uids": uids, "verifyPayType": 0,
+    }
+    status, raw, err = _post_json("https://wxpusher.zjiecode.com/api/send/message", payload)
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    if data.get("code") == 1000:
+        return True, "已发送"
+    return False, (data.get("msg") or raw[:200] or f"HTTP {status}")
+
+
+def _send_wxPusherSpt(p, title, content):
+    spts = [s.strip() for s in str(p.get("wxPusherSptList", "") or "").split(",") if s.strip()]
+    if not spts:
+        return False, "SPT 不能为空"
+    if len(spts) > 10:
+        return False, "SPT 最多支持 10 个"
+    payload: dict[str, Any] = {
+        "content": f"<h1>{title}</h1><br/><div style='white-space: pre-wrap;'>{content}</div>",
+        "summary": title, "contentType": 2,
+    }
+    if len(spts) == 1:
+        payload["spt"] = spts[0]
+    else:
+        payload["sptList"] = spts
+    status, raw, err = _post_json("https://wxpusher.zjiecode.com/api/send/message/simple-push", payload)
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    if data.get("code") == 1000:
+        return True, "已发送"
+    return False, (data.get("msg") or raw[:200] or f"HTTP {status}")
+
+
+def _send_goCqHttpBot(p, title, content):
+    url = str(p.get("goCqHttpBotUrl", "")).strip()
+    token = str(p.get("goCqHttpBotToken", "")).strip()
+    qq = str(p.get("goCqHttpBotQq", "")).strip()
+    if not url or not token or not qq:
+        return False, "缺少 goCqHttpBotUrl / goCqHttpBotToken / goCqHttpBotQq"
+    full = f"{url}?{qq}"
+    status, raw, err = _post_json(full, {"message": f"{title}\n{content}"}, {"Authorization": f"Bearer {token}"})
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    if data.get("retcode") == 0:
+        return True, "已发送"
+    return False, (raw[:200] or f"HTTP {status}")
+
+
+def _send_chat(p, title, content):
+    url = str(p.get("synologyChatUrl", "")).strip()
+    if not url:
+        return False, "缺少 synologyChatUrl"
+    payload = {"payload": json.dumps({"text": f"{title}\n{content}"}, ensure_ascii=False)}
+    status, raw, err = _post_form(url, payload)
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    if data.get("success"):
+        return True, "已发送"
+    return False, (raw[:200] or f"HTTP {status}")
+
+
+def _send_aibotk(p, title, content):
+    key = str(p.get("aibotkKey", "")).strip()
+    name = str(p.get("aibotkName", "")).strip()
+    atype = str(p.get("aibotkType", "") or "room")
+    if not key or not name:
+        return False, "缺少 aibotkKey / aibotkName"
+    if atype == "contact":
+        url = "https://api-bot.aibotk.com/openapi/v1/chat/contact"
+        payload = {"apiKey": key, "name": name, "message": {"type": 1, "content": f"【Frp 管理台】\n\n{title}\n{content}"}}
+    else:
+        url = "https://api-bot.aibotk.com/openapi/v1/chat/room"
+        payload = {"apiKey": key, "roomName": name, "message": {"type": 1, "content": f"【Frp 管理台】\n\n{title}\n{content}"}}
+    status, raw, err = _post_json(url, payload)
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    if data.get("code") == 0:
+        return True, "已发送"
+    return False, (data.get("message") or raw[:200] or f"HTTP {status}")
+
+
+def _send_pushMe(p, title, content):
+    key = str(p.get("pushMeKey", "")).strip()
+    if not key:
+        return False, "缺少 pushMeKey"
+    url = str(p.get("pushMeUrl", "")).strip() or "https://push.i-i.me/"
+    status, raw, err = _post_json(url, {"push_key": key, "title": title, "content": content})
+    if err and status == 0:
+        return False, _err_text(err)
+    if raw.strip() == "success":
+        return True, "已发送"
+    return False, (raw[:200] or f"HTTP {status}")
+
+
+def _send_chronocat(p, title, content):
+    base = str(p.get("chronocatURL", "")).strip()
+    token = str(p.get("chronocatToken", "")).strip()
+    qq = str(p.get("chronocatQQ", "") or "")
+    if not base or not token:
+        return False, "缺少 chronocatURL / chronocatToken"
+    user_ids = re.findall(r"user_id=(\d+)", qq)
+    group_ids = re.findall(r"group_id=(\d+)", qq)
+    if not user_ids and not group_ids:
+        return False, "chronocatQQ 需包含 user_id= 或 group_id="
+    url = f"{base.rstrip('/')}/api/message/send"
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+    sent = False
+    for chat_type, ids in ((1, user_ids), (2, group_ids)):
+        for chat_id in ids:
+            data = {"peer": {"chatType": chat_type, "peerUin": chat_id},
+                    "elements": [{"elementType": 1, "textElement": {"content": f"{title}\n\n{content}"}}]}
+            status, raw, err = _post_json(url, data, headers)
+            if err and status == 0:
+                return False, _err_text(err)
+            if status == 200:
+                sent = True
+            else:
+                return False, (raw[:200] or f"HTTP {status}")
+    return (True, "已发送") if sent else (False, "未发送任何消息")
+
+
+def _send_openiLink(p, title, content):
+    token = str(p.get("openiLinkAppToken", "")).strip()
+    if not token:
+        return False, "缺少 openiLinkAppToken"
+    base = str(p.get("openiLinkHubUrl", "")).strip().rstrip("/") or "https://hub.openilink.com"
+    url = f"{base}/bot/v1/message/send"
+    body: dict[str, Any] = {"type": "text", "content": f"{title}\n\n{content}"}
+    ctx = str(p.get("openiLinkContextToken", "")).strip()
+    if ctx:
+        body["context_token"] = ctx
+    status, raw, err = _post_json(url, body, {"Authorization": f"Bearer {token}"})
+    if err and status == 0:
+        return False, _err_text(err)
+    data = _json_or_empty(raw)
+    if data.get("ok"):
+        return True, "已发送"
+    return False, (data.get("message") or raw[:200] or f"HTTP {status}")
+
+
+_NOTIFY_SENDERS = {
+    "bark": _send_bark,
+    "telegramBot": _send_telegram,
+    "dingtalkBot": _send_dingtalk,
+    "weWorkBot": _send_weWorkBot,
+    "weWorkApp": _send_weWorkApp,
+    "serverChan": _send_serverChan,
+    "pushPlus": _send_pushPlus,
+    "pushDeer": _send_pushDeer,
+    "gotify": _send_gotify,
+    "ntfy": _send_ntfy,
+    "lark": _send_lark,
+    "iGot": _send_iGot,
+    "pushMe": _send_pushMe,
+    "chat": _send_chat,
+    "wePlusBot": _send_wePlusBot,
+    "wxPusherBot": _send_wxPusherBot,
+    "wxPusherSpt": _send_wxPusherSpt,
+    "goCqHttpBot": _send_goCqHttpBot,
+    "aibotk": _send_aibotk,
+    "chronocat": _send_chronocat,
+    "openiLink": _send_openiLink,
+}
 
 
 def send_notification(title: str, content: str, force: bool = False) -> dict[str, Any]:
-    """按配置通过邮件/Webhook 发送通知；返回各渠道结果。"""
+    """按配置的通知渠道发送通知；返回结果。"""
     try:
         with db() as conn:
             cfg = notify_config(conn)
@@ -416,23 +942,13 @@ def send_notification(title: str, content: str, force: bool = False) -> dict[str
         return {"ok": False, "error": f"读取通知配置失败：{e}", "results": []}
     if not cfg["enabled"] and not force:
         return {"ok": False, "error": "通知未启用", "results": []}
-    results: list[dict[str, Any]] = []
-    if cfg["email_enabled"]:
-        recipients = _split_recipients(cfg["email_to"])
-        if not recipients:
-            results.append({"channel": "email", "ok": False, "message": "未配置收件人邮箱"})
-        for addr in recipients:
-            ok, msg = send_email(addr, title, content)
-            results.append({"channel": f"email:{addr}", "ok": ok, "message": msg})
-    if cfg["webhook_enabled"]:
-        ok, msg = send_webhook_notification(cfg["webhook_url"], title, content, cfg["webhook_template"])
-        results.append({"channel": "webhook", "ok": ok, "message": msg})
-    if cfg["ql_enabled"]:
-        ok, msg = send_qinglong_notification(cfg["ql_url"], cfg["ql_token"], title, content)
-        results.append({"channel": "qinglong", "ok": ok, "message": msg})
-    if not results:
-        return {"ok": False, "error": "未启用任何通知方式（邮件/Webhook）", "results": []}
-    return {"ok": any(r["ok"] for r in results), "results": results}
+    ctype = str(cfg.get("type") or "").strip()
+    if not ctype:
+        return {"ok": False, "error": "未选择通知方式", "results": []}
+    if ctype not in _NOTIFY_SENDERS:
+        return {"ok": False, "error": f"不支持的通知方式：{ctype}", "results": []}
+    ok, msg = _NOTIFY_SENDERS[ctype](cfg.get("params") or {}, title, content)
+    return {"ok": ok, "results": [{"channel": ctype, "ok": ok, "message": msg}]}
 
 
 def create_email_code(username: str, email: str) -> str:
@@ -4167,12 +4683,20 @@ class Handler(BaseHTTPRequestHandler):
         def _flag(value: Any, default: str = "0") -> str:
             raw = value if value is not None else default
             return "1" if str(raw) in ("1", "true", "True", "on", "yes") else "0"
-        email_to = str(data.get("email_to", "")).strip()[:500]
-        webhook_url = str(data.get("webhook_url", "")).strip()[:500]
-        webhook_template = str(data.get("webhook_template", "")).strip() or NOTIFY_DEFAULT_TEMPLATE
-        webhook_template = webhook_template[:2000]
-        ql_url = str(data.get("ql_url", "")).strip()[:500]
-        ql_token = str(data.get("ql_token", "")).strip()[:500]
+        ctype = str(data.get("type", "")).strip()
+        if ctype and ctype not in NOTIFY_CHANNEL_MAP:
+            self.send_json({"ok": False, "error": "不支持的通知方式"}, 400)
+            return
+        raw_params = data.get("params")
+        if not isinstance(raw_params, dict):
+            raw_params = {}
+        clean: dict[str, str] = {}
+        if ctype:
+            for f in NOTIFY_CHANNEL_MAP[ctype]["fields"]:
+                val = raw_params.get(f["key"], "")
+                if val is None:
+                    val = ""
+                clean[f["key"]] = str(val).strip()[:2000]
         try:
             cooldown = int(data.get("cooldown_minutes", 30) or 0)
         except (TypeError, ValueError):
@@ -4182,17 +4706,11 @@ class Handler(BaseHTTPRequestHandler):
             setting_set(conn, "notify_enabled", _flag(data.get("enabled")))
             setting_set(conn, "notify_on_down", _flag(data.get("on_down"), "1"))
             setting_set(conn, "notify_on_up", _flag(data.get("on_up"), "1"))
-            setting_set(conn, "notify_email_enabled", _flag(data.get("email_enabled"), "1"))
-            setting_set(conn, "notify_email_to", email_to)
-            setting_set(conn, "notify_webhook_enabled", _flag(data.get("webhook_enabled")))
-            setting_set(conn, "notify_webhook_url", webhook_url)
-            setting_set(conn, "notify_webhook_template", webhook_template)
-            setting_set(conn, "notify_ql_enabled", _flag(data.get("ql_enabled")))
-            setting_set(conn, "notify_ql_url", ql_url)
-            setting_set(conn, "notify_ql_token", ql_token)
+            setting_set(conn, "notify_type", ctype)
+            setting_set(conn, "notify_params", json.dumps(clean, ensure_ascii=False))
             setting_set(conn, "notify_cooldown_minutes", str(cooldown))
             cfg = notify_config(conn)
-        audit("notify_config_update", admin, None, None, "", f"更新通知设置：enabled={cfg['enabled']} email={cfg['email_enabled']} webhook={cfg['webhook_enabled']} qinglong={cfg['ql_enabled']}")
+        audit("notify_config_update", admin, None, None, "", f"更新通知设置：enabled={cfg['enabled']} type={cfg['type'] or '无'}")
         self.send_json({"ok": True, "message": "通知设置已保存", "notify": notify_public(cfg)})
 
     def admin_notify_test(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:

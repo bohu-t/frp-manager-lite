@@ -2306,23 +2306,36 @@ function adminBackupCardHtml(r2, r2Status, r2Source){
       </section>`;
 }
 
+function adminNotifyFieldHtml(f, params){
+  const val = (params && params[f.key] !== undefined && params[f.key] !== null) ? String(params[f.key]) : String(f.default || '');
+  const hint = f.hint ? `<span class="muted small">${esc(f.hint)}</span>` : '';
+  const req = f.required ? ' *' : '';
+  if(f.type === 'select'){
+    const opts = (f.options || []).map(o => `<option value="${esc(o.value)}"${String(o.value) === val ? ' selected' : ''}>${esc(o.label)}</option>`).join('');
+    return `<div><label>${esc(f.label)}${req}</label><select name="${esc(f.key)}">${opts}</select>${hint}</div>`;
+  }
+  return `<div><label>${esc(f.label)}${req}</label><input name="${esc(f.key)}" value="${esc(val)}" placeholder="${esc(f.placeholder || '')}" autocomplete="off">${hint}</div>`;
+}
+
 function adminNotifyCardHtml(notify){
   const n = notify || {};
   const yn = (v, d) => (v === undefined || v === null ? d : !!v);
+  const channels = n.channels || [];
+  const cur = n.type || '';
+  const opts = ['<option value="">不通知（已关闭）</option>']
+    .concat(channels.map(c => `<option value="${esc(c.type)}"${c.type === cur ? ' selected' : ''}>${esc(c.name)}</option>`)).join('');
+  const groups = channels.map(c => {
+    const inner = (c.fields || []).map(f => adminNotifyFieldHtml(f, n.params || {})).join('');
+    return `<div class="notify-channel-fields" data-channel="${esc(c.type)}" style="grid-column:1/-1;display:${c.type === cur ? 'grid' : 'none'};gap:12px 16px;grid-template-columns:repeat(2,minmax(0,1fr))">${inner}</div>`;
+  }).join('');
   return `<section class="card admin-notify-card">
-        <div class="section-title"><div><div class="section-kicker">NOTIFY</div><h2>${stIcon('bell')}通知设置</h2><p>节点异常 / 恢复时通过邮件、Webhook 或青龙通知提醒（当前主要用于节点异常通知）</p></div><span class="status-badge ${n.enabled ? 'ok' : 'bad'}"><i></i>${n.enabled ? '已启用' : '未启用'}</span></div>
+        <div class="section-title"><div><div class="section-kicker">NOTIFY</div><h2>${stIcon('bell')}通知设置</h2><p>节点异常 / 恢复时通过所选渠道推送（当前主要用于节点异常通知）</p></div><span class="status-badge ${n.enabled ? 'ok' : 'bad'}"><i></i>${n.enabled ? '已启用' : '未启用'}</span></div>
         <form id="notifyForm" class="grid">
           <div><label>通知开关</label><select name="enabled"><option value="1"${n.enabled ? ' selected' : ''}>启用</option><option value="0"${n.enabled ? '' : ' selected'}>停用</option></select></div>
           <div><label>冷却时间（分钟）</label><input name="cooldown_minutes" type="number" min="0" max="1440" value="${esc(n.cooldown_minutes ?? 30)}"><span class="muted small">同一节点重复通知的最小间隔，0 表示不限制</span></div>
           <div style="grid-column:1/-1"><label>通知场景</label><div class="row" style="gap:18px;flex-wrap:wrap"><label class="muted"><input type="checkbox" name="on_down" value="1"${yn(n.on_down, true) ? ' checked' : ''}> 节点异常（离线）</label><label class="muted"><input type="checkbox" name="on_up" value="1"${yn(n.on_up, true) ? ' checked' : ''}> 节点恢复（上线）</label></div></div>
-          <div><label>邮件通知</label><select name="email_enabled"><option value="1"${n.email_enabled ? ' selected' : ''}>启用</option><option value="0"${n.email_enabled ? '' : ' selected'}>停用</option></select><span class="muted small">使用「邮件设置」里的 SMTP 账号</span></div>
-          <div><label>收件人邮箱</label><input name="email_to" value="${esc(n.email_to || '')}" placeholder="多个用逗号分隔"></div>
-          <div><label>Webhook 通知</label><select name="webhook_enabled"><option value="1"${n.webhook_enabled ? ' selected' : ''}>启用</option><option value="0"${n.webhook_enabled ? '' : ' selected'}>停用</option></select></div>
-          <div><label>Webhook 地址</label><input name="webhook_url" value="${esc(n.webhook_url || '')}" placeholder="https://..."></div>
-          <div><label>青龙通知</label><select name="ql_enabled"><option value="1"${n.ql_enabled ? ' selected' : ''}>启用</option><option value="0"${n.ql_enabled ? '' : ' selected'}>停用</option></select><span class="muted small">复用青龙面板的通知渠道</span></div>
-          <div><label>青龙地址</label><input name="ql_url" value="${esc(n.ql_url || '')}" placeholder="http://192.168.124.168:5700"></div>
-          <div><label>青龙应用 Token</label><input name="ql_token" value="${esc(n.ql_token || '')}" placeholder="应用授权 Token（需 system 权限）"></div>
-          <div style="grid-column:1/-1"><label>Webhook 请求体模板（JSON）</label><textarea name="webhook_template" rows="3" spellcheck="false">${esc(n.webhook_template || '')}</textarea><span class="muted small">支持占位符 <code>{{title}}</code>、<code>{{content}}</code>；留空则发送默认 JSON</span></div>
+          <div style="grid-column:1/-1"><label>通知方式</label><select name="notify_type" id="notifyTypeSelect">${opts}</select><span class="muted small">选择渠道后填写下方参数；节点异常/恢复时通过该渠道推送</span></div>
+          ${groups}
           <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存通知设置</button><button type="button" class="secondary" onclick="sendNotifyTest()">发送测试通知</button></div>
         </form>
       </section>`;
@@ -2372,22 +2385,30 @@ function wireAdminSettingsForms(){
   }
   const notifyForm = document.querySelector('#notifyForm');
   if(notifyForm){
+    const typeSelect = notifyForm.querySelector('#notifyTypeSelect');
+    const syncGroups = () => {
+      const cur = typeSelect ? typeSelect.value : '';
+      notifyForm.querySelectorAll('.notify-channel-fields').forEach(g => {
+        g.style.display = (g.dataset.channel === cur) ? 'grid' : 'none';
+      });
+    };
+    if(typeSelect){ typeSelect.onchange = syncGroups; syncGroups(); }
     notifyForm.onsubmit = async (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
+      const type = fd.get('notify_type') || '';
+      const params = {};
+      const group = notifyForm.querySelector(`.notify-channel-fields[data-channel="${type}"]`);
+      if(group){
+        group.querySelectorAll('input,select,textarea').forEach(el => { if(el.name) params[el.name] = el.value; });
+      }
       const body = {
         enabled: fd.get('enabled'),
         on_down: fd.get('on_down') ? '1' : '0',
         on_up: fd.get('on_up') ? '1' : '0',
-        email_enabled: fd.get('email_enabled'),
-        email_to: fd.get('email_to'),
-        webhook_enabled: fd.get('webhook_enabled'),
-        webhook_url: fd.get('webhook_url'),
-        webhook_template: fd.get('webhook_template'),
-        ql_enabled: fd.get('ql_enabled'),
-        ql_url: fd.get('ql_url'),
-        ql_token: fd.get('ql_token'),
         cooldown_minutes: fd.get('cooldown_minutes'),
+        type,
+        params,
       };
       try{
         const r = await api('/api/admin/notify-config', {method:'POST', body});
