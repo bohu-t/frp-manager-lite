@@ -401,7 +401,7 @@ const UIICONS = {
   download:'<path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14"/>',
   mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M4 7.2 12 13l8-5.8"/>',
   upload:'<path d="M12 16V5m0 0-4 4m4-4 4 4M5 19h14"/>',
-  bucket:'<path d="M5.5 7h13l-1.2 12.1a2 2 0 0 1-2 1.9H8.7a2 2 0 0 1-2-1.9Z"/><path d="M4.5 7h15"/><path d="M9.5 4h5l1 3h-7z"/>',
+  bucket:'<path d="M5.6 8.2h12.8l-1.3 11a2 2 0 0 1-2 1.75H8.9a2 2 0 0 1-2-1.75Z"/><path d="M9.1 8.2a2.9 2.9 0 0 1 5.8 0"/>',
   database:'<ellipse cx="12" cy="6" rx="7" ry="2.8"/><path d="M5 6v12c0 1.6 3.1 2.8 7 2.8s7-1.2 7-2.8V6"/><path d="M5 12c0 1.6 3.1 2.8 7 2.8s7-1.2 7-2.8"/>',
   cloudUpload:'<path d="M7.5 18h9a4 4 0 0 0 .4-8A5.5 5.5 0 0 0 6.6 9.1 4.2 4.2 0 0 0 7.5 18Z"/><path d="M12 15v-4m0 0-1.8 1.8M12 11l1.8 1.8"/>'
 };
