@@ -1264,7 +1264,7 @@ html[data-theme="dark"] .app-shell.is-settings input,html[data-theme="dark"] .ap
 
 /* ---- backup units ---- */
 .app-shell.is-settings .backup-units{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
-.app-shell.is-settings .backup-unit{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:14px;border:1px solid var(--border);border-radius:9px;background:#fff}
+.app-shell.is-settings .backup-unit{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:14px;border:1px solid var(--border);border-radius:9px;background:transparent}
 .app-shell.is-settings .backup-unit-icon .st-icon{width:58px;height:58px;border-radius:50%;background:transparent}
 .app-shell.is-settings .backup-unit-icon .st-icon svg{width:30px;height:30px}
 .app-shell.is-settings .backup-unit-icon.icon-blue .st-icon{background:var(--blue-icon-bg);color:var(--primary)}
