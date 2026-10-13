@@ -1327,8 +1327,9 @@ html[data-theme="dark"] .app-shell.is-settings input,html[data-theme="dark"] .ap
 
 /* notify: pair with smtp card; toggle+cooldown on one row; all channels shown; config in modal */
 .app-shell.is-settings .admin-notify-card{grid-column:auto}
-.app-shell.is-settings .notify-row.notify-row-duo{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 20px;align-items:center}
-.app-shell.is-settings .notify-cell{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0}
+.app-shell.is-settings .notify-row.notify-row-duo{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 28px;align-items:center}
+.app-shell.is-settings .notify-cell{display:flex;align-items:center;justify-content:space-between;gap:16px;min-width:0}
+.app-shell.is-settings .notify-cell+.notify-cell{padding-left:28px;border-left:1px solid var(--divider)}
 .app-shell.is-settings .notify-config-modal{width:min(720px,100%)}
 .app-shell.is-settings .notify-config-modal .notify-config{margin-top:0}
 .app-shell.is-settings .notify-config-modal .form-actions{margin-top:18px}
