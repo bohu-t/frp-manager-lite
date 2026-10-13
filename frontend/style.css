@@ -1350,3 +1350,32 @@ html[data-theme="dark"] .app-shell.is-settings input,html[data-theme="dark"] .ap
 
 /* fix: 外层图标容器不要继承全局 .icon-* 的方角底色（会让圆形图标看起来是方的） */
 .app-shell.is-settings .settings-card-icon,.app-shell.is-settings .backup-unit-icon{background:transparent}
+
+/* === 统一：侧栏与页面底色采用设置页的浅色风格（全局，所有页面） === */
+.app-shell{background:#F4F8FE}
+.workspace-main{background:#F4F8FE}
+.app-sidebar{background:#FFFFFF;border-right:1px solid #E2EBF7;box-shadow:none}
+.sidebar-brand{border-bottom:1px solid #EDF2F8}
+.sidebar-brand .brand-mark-small{background:#1677FF;border-radius:50%;box-shadow:0 6px 14px rgba(22,119,255,.26)}
+.sidebar-brand strong{color:#172B4D}
+.sidebar-brand span{color:#8A9BB5}
+.sidebar-section-label{color:#8A9BB5}
+.side-link{color:#5D7191}
+.side-link .side-icon{color:#5D7191}
+.side-link .side-link-arrow{color:#B7C4D6}
+.side-link:hover{background:#EAF3FF;color:#1677FF;transform:none}
+.side-link:hover .side-icon{color:#1677FF}
+.side-link.active{background:#1677FF;color:#fff;border-color:#1677FF;box-shadow:0 6px 14px rgba(22,119,255,.24)}
+.side-link.active .side-icon,.side-link.active .side-link-arrow{color:#fff}
+.sidebar-service-status{border:1px solid #E2EBF7;border-radius:10px;background:#F8FBFF}
+.sidebar-service-status strong{color:#172B4D}
+.sidebar-service-status small{color:#8A9BB5}
+.sidebar-user-card{border-top:1px solid #EDF2F8}
+.sidebar-user-copy strong{color:#172B4D}
+.sidebar-user-copy small{color:#8A9BB5}
+.sidebar-user-avatar{background:#1677FF;box-shadow:none}
+.sidebar-user-card>button{border:1px solid #E2EBF7;background:#fff;color:#8A9BB5}
+@media(min-width:761px){
+  .app-sidebar{width:232px;padding:0 14px 14px}
+  .workspace-main{margin-left:232px;padding:0 24px 40px}
+}
