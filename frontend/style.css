@@ -1315,6 +1315,7 @@ html[data-theme="dark"] .app-shell.is-settings input,html[data-theme="dark"] .ap
   .app-shell.is-settings .settings-head-actions{width:100%;justify-content:space-between}
   .app-shell.is-settings .card{padding:16px}
   .app-shell.is-settings .notify-row{grid-template-columns:1fr}
+  .app-shell.is-settings .notify-row.notify-row-duo{grid-template-columns:1fr}
   .app-shell.is-settings .notify-row-control{justify-content:flex-start}
   .app-shell.is-settings .backup-units{grid-template-columns:repeat(2,minmax(0,1fr))}
   .app-shell.is-settings .r2-form-grid{grid-template-columns:1fr}
@@ -1324,11 +1325,10 @@ html[data-theme="dark"] .app-shell.is-settings input,html[data-theme="dark"] .ap
   .app-shell.is-settings .settings-head-copy h1{font-size:20px}
 }
 
-/* notify: pair with smtp card; primary chips + "其他" collapse; config in modal */
+/* notify: pair with smtp card; toggle+cooldown on one row; all channels shown; config in modal */
 .app-shell.is-settings .admin-notify-card{grid-column:auto}
-.app-shell.is-settings .notify-chips-more{margin-top:8px;padding-top:10px;border-top:1px dashed var(--border)}
-.app-shell.is-settings .notify-chip-more{border-style:dashed;border-color:var(--primary-border);background:var(--primary-light);color:var(--primary)}
-.app-shell.is-settings .notify-chip-more:hover{border-color:var(--primary);background:var(--primary-light)}
+.app-shell.is-settings .notify-row.notify-row-duo{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 20px;align-items:center}
+.app-shell.is-settings .notify-cell{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0}
 .app-shell.is-settings .notify-config-modal{width:min(720px,100%)}
 .app-shell.is-settings .notify-config-modal .notify-config{margin-top:0}
 .app-shell.is-settings .notify-config-modal .form-actions{margin-top:18px}

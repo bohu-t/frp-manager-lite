@@ -2371,10 +2371,8 @@ function adminNotifyCardHtml(notify){
   const byType = {};
   channels.forEach(c => { byType[c.type] = c; });
   const chipHtml = c => `<button type="button" class="notify-chip${c.type === cur ? ' active' : ''}" data-channel="${esc(c.type)}" data-name="${esc(c.name)}" onclick="openNotifyConfig('${esc(c.type)}')">${esc(c.name)}</button>`;
-  const primaryChips = primaryOrder.filter(t => byType[t]).map(t => chipHtml(byType[t])).join('');
-  const otherChannels = channels.filter(c => !primaryOrder.includes(c.type));
-  const otherChips = otherChannels.map(chipHtml).join('');
-  const curInOther = otherChannels.some(c => c.type === cur);
+  const chips = primaryOrder.filter(t => byType[t]).map(t => chipHtml(byType[t]))
+    .concat(channels.filter(c => !primaryOrder.includes(c.type)).map(chipHtml)).join('');
   const groups = channels.map(c => {
     const inner = (c.fields || []).map(f => adminNotifyFieldHtml(f, n.params || {})).join('');
     return `<div class="notify-channel-fields" data-channel="${esc(c.type)}" style="display:${c.type === cur ? 'grid' : 'none'}">${inner}</div>`;
@@ -2382,13 +2380,9 @@ function adminNotifyCardHtml(notify){
   return `<section class="card admin-notify-card">
     <div class="settings-card-head"><span class="settings-card-icon icon-blue">${stIcon('bell')}</span><div><h2>通知设置</h2><p>配置系统通知规则和渠道，及时获取异常信息。</p></div><span class="status-badge ${n.enabled ? 'ok' : 'bad'}"><i></i>${n.enabled ? '已开启' : '已关闭'}</span></div>
     <form id="notifyForm" class="settings-form">
-      <div class="notify-row">
-        <div class="notify-row-label"><label>通知开关</label></div>
-        <div class="notify-row-control"><label class="switch"><input type="checkbox" name="enabled" value="1"${n.enabled ? ' checked' : ''} onchange="syncNotifySwitch(this)"><span class="switch-track"><span class="switch-thumb"></span></span></label><span class="switch-state" id="notifySwitchState">${n.enabled ? '已开启' : '已关闭'}</span></div>
-      </div>
-      <div class="notify-row">
-        <div class="notify-row-label"><label>冷却时间</label></div>
-        <div class="notify-row-control"><input name="cooldown_minutes" type="number" min="0" max="1440" value="${esc(n.cooldown_minutes ?? 30)}"><span class="unit">分钟</span></div>
+      <div class="notify-row notify-row-duo">
+        <div class="notify-cell"><div class="notify-row-label"><label>通知开关</label></div><div class="notify-row-control"><label class="switch"><input type="checkbox" name="enabled" value="1"${n.enabled ? ' checked' : ''} onchange="syncNotifySwitch(this)"><span class="switch-track"><span class="switch-thumb"></span></span></label><span class="switch-state" id="notifySwitchState">${n.enabled ? '已开启' : '已关闭'}</span></div></div>
+        <div class="notify-cell"><div class="notify-row-label"><label>冷却时间</label></div><div class="notify-row-control"><input name="cooldown_minutes" type="number" min="0" max="1440" value="${esc(n.cooldown_minutes ?? 30)}"><span class="unit">分钟</span></div></div>
       </div>
       <div class="notify-row">
         <div class="notify-row-label"><label>通知场景</label></div>
@@ -2396,8 +2390,7 @@ function adminNotifyCardHtml(notify){
       </div>
       <div class="notify-row notify-row-block">
         <div class="notify-row-label"><label>通知渠道</label></div>
-        <div class="notify-chips" id="notifyChipsPrimary">${primaryChips}<button type="button" class="notify-chip notify-chip-more" id="notifyMoreBtn" onclick="toggleNotifyMore()">其他 ▾</button></div>
-        <div class="notify-chips notify-chips-more${curInOther ? '' : ' hidden'}" id="notifyChipsMore">${otherChips}</div>
+        <div class="notify-chips">${chips}</div>
       </div>
       <input type="hidden" name="notify_type" id="notifyTypeSelect" value="${esc(cur)}">
       <div class="form-actions"><button type="submit">保存设置</button><button type="button" class="secondary" onclick="sendNotifyTest()">发送测试通知</button></div>
@@ -2456,11 +2449,6 @@ function selectNotifyChannel(type){
   form.querySelectorAll('.notify-channel-fields').forEach(g => { g.style.display = (g.dataset.channel === type) ? 'grid' : 'none'; });
   const title = document.querySelector('#notifyConfigTitle');
   if(title) title.textContent = activeName ? (activeName + ' 配置') : '渠道配置';
-  const more = document.querySelector('#notifyChipsMore');
-  if(more && type){
-    const inMore = !!more.querySelector(`.notify-chip[data-channel="${type}"]`);
-    more.classList.toggle('hidden', !inMore);
-  }
 }
 function openNotifyConfig(type){
   selectNotifyChannel(type);
@@ -2470,14 +2458,6 @@ function openNotifyConfig(type){
 function closeNotifyConfig(){
   const modal = document.querySelector('#notifyConfigModal');
   if(modal) modal.classList.add('hidden');
-}
-function toggleNotifyMore(){
-  const more = document.querySelector('#notifyChipsMore');
-  const btn = document.querySelector('#notifyMoreBtn');
-  if(!more) return;
-  const show = more.classList.contains('hidden');
-  more.classList.toggle('hidden', !show);
-  if(btn) btn.textContent = show ? '其他 ▴' : '其他 ▾';
 }
 function syncNotifySwitch(el){
   const s = document.querySelector('#notifySwitchState');
