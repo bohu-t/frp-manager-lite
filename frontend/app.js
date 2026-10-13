@@ -6,6 +6,7 @@ let softwareLicense = null;
 let currentAdminSection = 'users';
 let adminDashboardTimer = null;
 let panelVersion = '';
+let panelUptime = 0;
 let tunnelPreviewTimer = null;
 let csrfToken = null;
 let clientNodeProbeUrl = '';
@@ -606,6 +607,21 @@ function downloadFrpcDraft(){
   frpcEditorStatus('已下载 frpc.toml');
 }
 
+function fmtUptime(sec){
+  sec = Math.max(0, Math.floor(Number(sec) || 0));
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+  if(d) return `${d} 天 ${h} 小时`;
+  if(h) return `${h} 小时 ${m} 分`;
+  if(m) return `${m} 分钟`;
+  return '刚刚启动';
+}
+function setPanelMeta(data){
+  if(!data) return;
+  if(data.version) panelVersion = data.version;
+  if(data.panel_version) panelVersion = data.panel_version;
+  if(data.uptime_seconds !== undefined) panelUptime = Number(data.uptime_seconds) || 0;
+}
+
 function appSidebarHtml(kind='dashboard'){
   const isAdmin = currentUser?.role === 'admin';
   const username = currentUser?.username || '用户';
@@ -620,7 +636,10 @@ function appSidebarHtml(kind='dashboard'){
   }).join('');
   const brandName = 'Frp 管理台';
   const brandSub = '内网穿透管理平台';
-  const serviceSub = 'FRP 管理服务';
+  const metaBits = [];
+  if(panelVersion) metaBits.push('版本 ' + esc(panelVersion));
+  if(panelUptime > 0) metaBits.push('运行 ' + fmtUptime(panelUptime));
+  const serviceSub = metaBits.length ? metaBits.join(' · ') : '-';
   return `<aside class="app-sidebar">
     <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>${brandName}</strong><span>${brandSub}</span></div></div>
     <div class="sidebar-section-label">工作空间</div>${links}
@@ -1058,7 +1077,7 @@ async function loadDashboard(view='overview'){
     }
     show(err.message, true); return;
   }
-  currentUser = data.user; softwareLicense = data.software_license || softwareLicense; setNav();
+  currentUser = data.user; softwareLicense = data.software_license || softwareLicense; setPanelMeta(data); setNav();
   const isAdmin = data.user.role === 'admin';
   if(isAdmin){ loadAdminDashboard(); return; }
   const used = new Set(data.tunnels.map(t => t.remote_port));
@@ -1513,6 +1532,7 @@ async function loadAdmin(section=currentAdminSection){
   let data;
   try{ data = await api('/api/admin/overview'); }
   catch(err){ show(err.message, true); return; }
+  setPanelMeta(data);
   softwareLicense = data.software_license || softwareLicense;
   adminSetupKey = data.setup_key || adminSetupKey;
   setNav();
@@ -2180,6 +2200,7 @@ async function loadAdminHealth(){
     show(err.message, true);
     return;
   }
+  setPanelMeta(data);
   const allNodes = data.nodes || [];
   const onlineNodes = allNodes.filter(n => n.active && n.auth_status === 'online').length;
   const badNodes = allNodes.filter(n => n.active && n.auth_status !== 'online').length;
@@ -2539,7 +2560,7 @@ async function loadAdminSettings(){
   }
   const smtp = data.smtp || {}; adminSmtp = smtp;
   const notify = data.notify || {};
-  if(data.version) panelVersion = data.version;
+  setPanelMeta(data);
   const r2 = data.r2 || {};
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
   const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
@@ -2569,6 +2590,7 @@ async function loadAdminDashboard(auto=false){
     return;
   }
   setNav();
+  setPanelMeta(data);
   const refreshSeconds = Math.max(10, Number(data.refresh_seconds || 30));
   const portStats = data.port_stats || {};
   const userStats = data.user_stats || {};

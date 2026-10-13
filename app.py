@@ -35,6 +35,7 @@ import threading
 
 APP_NAME = "frp-manager-lite"
 APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.0.0")  # 面板版本，不是 frp 版本
+SERVER_START_TS = time.time()  # 进程启动时间，用于计算面板运行时间
 FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0.66.0"))
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -3869,7 +3870,7 @@ class Handler(BaseHTTPRequestHandler):
                 health = node_health_lookup(node_payload)
                 node_payload.update(health if health is not None else check_node_auth_port(node_payload))
                 node_payload["latency_ms"] = node_payload.get("auth_latency_ms")
-            self.send_json({"ok": True, "user": public_user(user), "software_license": sw_license, "node": node_payload, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
+            self.send_json({"ok": True, "version": APP_VERSION, "uptime_seconds": int(time.time() - SERVER_START_TS), "user": public_user(user), "software_license": sw_license, "node": node_payload, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
             return
         if path == "/api/user/traffic":
             q = urllib.parse.parse_qs(urlparse(self.path).query)
@@ -4037,6 +4038,7 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": True,
                 "version": APP_VERSION,
                 "panel_version": APP_VERSION,
+                "uptime_seconds": int(time.time() - SERVER_START_TS),
                 "refresh_seconds": NODE_DASHBOARD_REFRESH_SECONDS,
                 "node_count": node_count,
                 "active_node_count": active_node_count,
