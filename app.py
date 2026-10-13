@@ -304,7 +304,7 @@ NOTIFY_CHANNELS: list[dict[str, Any]] = [
         {"key": "barkUrl", "label": "barkUrl", "hint": "点击消息跳转的 URL"},
         {"key": "barkArchive", "label": "barkArchive", "hint": "是否保存推送消息（1/0）"},
     ]},
-    {"type": "telegramBot", "name": "Telegram 机器人", "fields": [
+    {"type": "telegramBot", "name": "Telegram", "fields": [
         {"key": "telegramBotToken", "label": "telegramBotToken", "hint": "机器人 token，例如 1077xxx4424:AAFjv0Fcq...", "required": True},
         {"key": "telegramBotUserId", "label": "telegramBotUserId", "hint": "接收者 chat id，例如 129xxx206", "required": True},
         {"key": "telegramBotApiHost", "label": "telegramBotApiHost", "hint": "自建反代地址，默认 https://api.telegram.org"},
@@ -312,11 +312,11 @@ NOTIFY_CHANNELS: list[dict[str, Any]] = [
         {"key": "telegramBotProxyPort", "label": "telegramBotProxyPort", "hint": "代理端口（可选）"},
         {"key": "telegramBotProxyAuth", "label": "telegramBotProxyAuth", "hint": "代理认证 user:password（可选）"},
     ]},
-    {"type": "dingtalkBot", "name": "钉钉机器人", "fields": [
+    {"type": "dingtalkBot", "name": "钉钉", "fields": [
         {"key": "dingtalkBotToken", "label": "dingtalkBotToken", "hint": "webhook 的 access_token", "required": True},
         {"key": "dingtalkBotSecret", "label": "dingtalkBotSecret", "hint": "加签密钥（SEC 开头，可选）"},
     ]},
-    {"type": "weWorkBot", "name": "企业微信机器人", "fields": [
+    {"type": "weWorkBot", "name": "企业微信", "fields": [
         {"key": "weWorkBotKey", "label": "weWorkBotKey", "hint": "群机器人 webhook 的 key", "required": True},
         {"key": "weWorkOrigin", "label": "weWorkOrigin", "hint": "企业微信代理地址（可选）", "placeholder": "https://qyapi.weixin.qq.com"},
     ]},
@@ -354,7 +354,7 @@ NOTIFY_CHANNELS: list[dict[str, Any]] = [
         {"key": "ntfyPassword", "label": "ntfyPassword", "hint": "密码（可选）"},
         {"key": "ntfyActions", "label": "ntfyActions", "hint": "Actions（可选）"},
     ]},
-    {"type": "lark", "name": "飞书机器人", "fields": [
+    {"type": "lark", "name": "飞书", "fields": [
         {"key": "larkKey", "label": "larkKey", "hint": "飞书群机器人 webhook 地址或 key", "required": True},
         {"key": "larkSecret", "label": "larkSecret", "hint": "加签密钥（可选）"},
     ]},
@@ -368,7 +368,7 @@ NOTIFY_CHANNELS: list[dict[str, Any]] = [
     {"type": "chat", "name": "群晖 Chat", "fields": [
         {"key": "synologyChatUrl", "label": "synologyChatUrl", "hint": "Synology Chat 的 incoming webhook 地址", "required": True},
     ]},
-    {"type": "wePlusBot", "name": "微加机器人", "fields": [
+    {"type": "wePlusBot", "name": "微加", "fields": [
         {"key": "wePlusBotToken", "label": "wePlusBotToken", "hint": "用户令牌", "required": True},
         {"key": "wePlusBotReceiver", "label": "wePlusBotReceiver", "hint": "消息接收人（可选）"},
         {"key": "wePlusBotVersion", "label": "wePlusBotVersion", "hint": "版本：pro / personal，默认 pro"},

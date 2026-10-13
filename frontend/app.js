@@ -2362,6 +2362,12 @@ function adminNotifyFieldHtml(f, params){
   return `<div><label>${esc(f.label)}${req}</label><input name="${esc(f.key)}" value="${esc(val)}" placeholder="${esc(f.placeholder || '')}" autocomplete="off">${hint}</div>`;
 }
 
+const NOTIFY_CHANNEL_ICON = {
+  telegramBot:'✈️', dingtalkBot:'📌', lark:'🕊️', bark:'🐶', weWorkBot:'🏢', weWorkApp:'🏢',
+  serverChan:'📮', pushPlus:'📤', pushDeer:'🦌', gotify:'🔔', ntfy:'🔔', iGot:'📥',
+  pushMe:'📩', chat:'💬', wePlusBot:'➕', wxPusherBot:'📲', wxPusherSpt:'📲',
+  goCqHttpBot:'🤖', aibotk:'🤖', chronocat:'🐱', openiLink:'🔗'
+};
 function adminNotifyCardHtml(notify){
   const n = notify || {};
   const yn = (v, d) => (v === undefined || v === null ? d : !!v);
@@ -2370,7 +2376,10 @@ function adminNotifyCardHtml(notify){
   const primaryOrder = ['telegramBot','dingtalkBot','lark','bark','weWorkApp'];
   const byType = {};
   channels.forEach(c => { byType[c.type] = c; });
-  const chipHtml = c => `<button type="button" class="notify-chip${c.type === cur ? ' active' : ''}" data-channel="${esc(c.type)}" data-name="${esc(c.name)}" onclick="openNotifyConfig('${esc(c.type)}')">${esc(c.name)}</button>`;
+  const chipHtml = c => {
+    const ico = NOTIFY_CHANNEL_ICON[c.type] || '🔗';
+    return `<button type="button" class="notify-chip${c.type === cur ? ' active' : ''}" data-channel="${esc(c.type)}" data-name="${esc(c.name)}" onclick="openNotifyConfig('${esc(c.type)}')"><span class="chip-ico">${ico}</span>${esc(c.name)}</button>`;
+  };
   const chips = primaryOrder.filter(t => byType[t]).map(t => chipHtml(byType[t]))
     .concat(channels.filter(c => !primaryOrder.includes(c.type)).map(chipHtml)).join('');
   const groups = channels.map(c => {

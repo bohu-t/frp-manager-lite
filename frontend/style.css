@@ -1335,3 +1335,4 @@ html[data-theme="dark"] .app-shell.is-settings input,html[data-theme="dark"] .ap
 .app-shell.is-settings .notify-config-modal{width:min(720px,100%)}
 .app-shell.is-settings .notify-config-modal .notify-config{margin-top:0}
 .app-shell.is-settings .notify-config-modal .form-actions{margin-top:18px}
+.app-shell.is-settings .notify-chip .chip-ico{font-size:13px;line-height:1;font-style:normal;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}
