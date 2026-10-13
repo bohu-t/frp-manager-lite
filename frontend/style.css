@@ -1335,4 +1335,6 @@ html[data-theme="dark"] .app-shell.is-settings input,html[data-theme="dark"] .ap
 .app-shell.is-settings .notify-config-modal{width:min(720px,100%)}
 .app-shell.is-settings .notify-config-modal .notify-config{margin-top:0}
 .app-shell.is-settings .notify-config-modal .form-actions{margin-top:18px}
-.app-shell.is-settings .notify-chip .chip-ico{font-size:13px;line-height:1;font-style:normal;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}
+.app-shell.is-settings .notify-chip .chip-ico{display:inline-grid;place-items:center;width:15px;height:15px;flex:0 0 15px}
+.app-shell.is-settings .notify-chip .chip-svg{width:14px;height:14px;fill:currentColor}
+.app-shell.is-settings .notify-chip .chip-svg-link{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
