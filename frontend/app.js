@@ -2383,11 +2383,11 @@ function adminNotifyCardHtml(notify){
     <div class="settings-card-head"><span class="settings-card-icon icon-blue">${stIcon('bell')}</span><div><h2>通知设置</h2><p>配置系统通知规则和渠道，及时获取异常信息。</p></div><span class="status-badge ${n.enabled ? 'ok' : 'bad'}"><i></i>${n.enabled ? '已开启' : '已关闭'}</span></div>
     <form id="notifyForm" class="settings-form">
       <div class="notify-row">
-        <div class="notify-row-label"><label>通知开关</label><span class="muted small">开启后节点异常/恢复会按所选渠道推送</span></div>
+        <div class="notify-row-label"><label>通知开关</label></div>
         <div class="notify-row-control"><label class="switch"><input type="checkbox" name="enabled" value="1"${n.enabled ? ' checked' : ''} onchange="syncNotifySwitch(this)"><span class="switch-track"><span class="switch-thumb"></span></span></label><span class="switch-state" id="notifySwitchState">${n.enabled ? '已开启' : '已关闭'}</span></div>
       </div>
       <div class="notify-row">
-        <div class="notify-row-label"><label>冷却时间</label><span class="muted small">同一节点重复通知的最小间隔</span></div>
+        <div class="notify-row-label"><label>冷却时间</label></div>
         <div class="notify-row-control"><input name="cooldown_minutes" type="number" min="0" max="1440" value="${esc(n.cooldown_minutes ?? 30)}"><span class="unit">分钟</span></div>
       </div>
       <div class="notify-row">
@@ -2395,7 +2395,7 @@ function adminNotifyCardHtml(notify){
         <div class="notify-row-control"><label class="check"><input type="checkbox" name="on_down" value="1"${yn(n.on_down, true) ? ' checked' : ''}> 节点异常（离线）</label><label class="check"><input type="checkbox" name="on_up" value="1"${yn(n.on_up, true) ? ' checked' : ''}> 节点恢复（上线）</label></div>
       </div>
       <div class="notify-row notify-row-block">
-        <div class="notify-row-label"><label>通知渠道</label><span class="muted small">选择渠道后在弹窗中配置参数</span></div>
+        <div class="notify-row-label"><label>通知渠道</label></div>
         <div class="notify-chips" id="notifyChipsPrimary">${primaryChips}<button type="button" class="notify-chip notify-chip-more" id="notifyMoreBtn" onclick="toggleNotifyMore()">其他 ▾</button></div>
         <div class="notify-chips notify-chips-more${curInOther ? '' : ' hidden'}" id="notifyChipsMore">${otherChips}</div>
       </div>
