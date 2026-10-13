@@ -2332,7 +2332,7 @@ function adminBackupCardHtml(r2, r2Status, r2Source){
         <span class="backup-unit-icon icon-green">${stIcon('upload')}</span>
         <b>上传备份恢复</b>
         <p>选择备份文件恢复数据。</p>
-        <div class="backup-unit-action"><input id="restoreBackupFile" type="file" accept=".zip,application/zip"><button type="button" class="danger" onclick="restoreFullBackup()">恢复备份</button></div>
+        <div class="backup-unit-action"><input id="restoreBackupFile" type="file" accept=".zip,application/zip"><button type="button" class="secondary" onclick="restoreFullBackup()">恢复备份</button></div>
       </div>
       <div class="backup-unit">
         <span class="backup-unit-icon icon-orange">${stIcon('cloudUpload')}</span>
