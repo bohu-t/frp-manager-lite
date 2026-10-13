@@ -2390,6 +2390,10 @@ function adminNotifyCardHtml(notify){
         <div class="notify-row-label"><label>冷却时间</label></div>
         <div class="notify-row-control"><input name="cooldown_minutes" type="number" min="0" max="1440" value="${esc(n.cooldown_minutes ?? 30)}"><span class="unit">分钟</span></div>
       </div>
+      <div class="notify-row">
+        <div class="notify-row-label"><label>通知场景</label></div>
+        <div class="notify-row-control"><label class="check"><input type="checkbox" name="on_down" value="1"${yn(n.on_down, true) ? ' checked' : ''}> 节点异常</label><label class="check"><input type="checkbox" name="on_up" value="1"${yn(n.on_up, true) ? ' checked' : ''}> 节点恢复</label></div>
+      </div>
       <div class="notify-row notify-row-block">
         <div class="notify-row-label"><label>通知渠道</label></div>
         <div class="notify-chips" id="notifyChipsPrimary">${primaryChips}<button type="button" class="notify-chip notify-chip-more" id="notifyMoreBtn" onclick="toggleNotifyMore()">其他 ▾</button></div>
@@ -2509,8 +2513,8 @@ function wireAdminSettingsForms(){
       }
       const body = {
         enabled: fd.get('enabled') ? '1' : '0',
-        on_down: '1',
-        on_up: '1',
+        on_down: fd.get('on_down') ? '1' : '0',
+        on_up: fd.get('on_up') ? '1' : '0',
         cooldown_minutes: fd.get('cooldown_minutes'),
         type,
         params,
