@@ -618,9 +618,9 @@ function appSidebarHtml(kind='dashboard'){
     const active = kind === action || (section && kind === section) ? ' active' : '';
     return `<button class="side-link${active}" data-nav="${action}"${section ? ` data-section="${section}"` : ''}>${sideIcon(icon)}<span class="side-link-label">${label}</span><span class="side-link-arrow">›</span></button>`;
   }).join('');
-  const brandName = kind === 'admin-settings' ? 'FRP 管理器' : 'Frp 管理台';
-  const brandSub = kind === 'admin-settings' ? '<span class="brand-tag">Lite</span>' : '内网穿透管理平台';
-  const serviceSub = (kind === 'admin-settings' && panelVersion) ? ('版本 ' + esc(panelVersion)) : 'FRP 管理服务';
+  const brandName = 'Frp 管理台';
+  const brandSub = '内网穿透管理平台';
+  const serviceSub = 'FRP 管理服务';
   return `<aside class="app-sidebar">
     <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>${brandName}</strong><span>${brandSub}</span></div></div>
     <div class="sidebar-section-label">工作空间</div>${links}
