@@ -1157,30 +1157,6 @@ html[data-theme="dark"] .topbar-greeting,html[data-theme="dark"] .topbar-breadcr
 }
 html[data-theme="dark"] .app-shell.is-settings{background:var(--page-bg);color:var(--ink)}
 
-/* ---- sidebar (white) ---- */
-.app-shell.is-settings .app-sidebar{background:var(--sidebar-bg);border-right:1px solid var(--border);box-shadow:none}
-.app-shell.is-settings .sidebar-brand{border-bottom:1px solid var(--divider)}
-.app-shell.is-settings .sidebar-brand .brand-mark-small{background:var(--primary);border-radius:50%;box-shadow:0 6px 14px rgba(22,119,255,.26)}
-.app-shell.is-settings .sidebar-brand strong{color:var(--ink);font-size:15px}
-.app-shell.is-settings .sidebar-brand span{color:var(--muted);font-size:10px}
-.brand-tag{display:inline-flex;align-items:center;padding:1px 7px;border-radius:999px;background:#EAF3FF;color:#1677FF;font-size:10px;font-weight:700;line-height:1.7}
-.app-shell.is-settings .sidebar-section-label{color:var(--muted);font-size:11px;letter-spacing:.06em;text-transform:none}
-.app-shell.is-settings .side-link{color:var(--soft);font-size:13px;font-weight:500;border-radius:8px;min-height:40px}
-.app-shell.is-settings .side-link .side-icon{color:var(--soft)}
-.app-shell.is-settings .side-link .side-link-arrow{color:#B7C4D6}
-.app-shell.is-settings .side-link:hover{background:var(--primary-light);color:var(--primary);transform:none}
-.app-shell.is-settings .side-link:hover .side-icon{color:var(--primary)}
-.app-shell.is-settings .side-link.active{background:var(--primary);color:#fff;border-color:var(--primary);box-shadow:0 6px 14px rgba(22,119,255,.24)}
-.app-shell.is-settings .side-link.active .side-icon,.app-shell.is-settings .side-link.active .side-link-arrow{color:#fff}
-.app-shell.is-settings .sidebar-service-status{border:1px solid var(--border);border-radius:10px;background:#F8FBFF}
-.app-shell.is-settings .sidebar-service-status strong{color:var(--ink)}
-.app-shell.is-settings .sidebar-service-status small{color:var(--muted)}
-.app-shell.is-settings .sidebar-user-card{border-top:1px solid var(--divider)}
-.app-shell.is-settings .sidebar-user-copy strong{color:var(--ink)}
-.app-shell.is-settings .sidebar-user-copy small{color:var(--muted)}
-.app-shell.is-settings .sidebar-user-avatar{background:var(--primary);box-shadow:none}
-.app-shell.is-settings .sidebar-user-card>button{width:28px;min-height:28px;padding:0;border-radius:7px;border:1px solid var(--border);background:#fff;color:var(--muted)}
-
 /* ---- top header ---- */
 .app-shell.is-settings .workspace-main{background:var(--page-bg)}
 html[data-theme="dark"] .app-shell.is-settings .workspace-main{background:var(--page-bg)}
@@ -1385,3 +1361,29 @@ body,.app-shell{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFan
 
 /* 侧栏导航字号/字重统一（与设置页一致；按钮字体保持原样） */
 .side-link{font-size:13px;font-weight:500}
+
+/* 修复：暗色下 .wrap 内边距导致内容区变窄 */
+body.is-app .wrap{max-width:none;margin:0;padding:0}
+
+/* 暗色主题：侧栏跟随暗色（全局，含设置页） */
+html[data-theme="dark"] .app-sidebar{background:#0f172a;border-right:1px solid #1e293b;box-shadow:none}
+html[data-theme="dark"] .sidebar-brand{border-bottom-color:#1e293b}
+html[data-theme="dark"] .sidebar-brand .brand-mark-small{background:#1677FF;box-shadow:none}
+html[data-theme="dark"] .sidebar-brand strong{color:#f1f5f9}
+html[data-theme="dark"] .sidebar-brand span{color:#94a3b8}
+html[data-theme="dark"] .sidebar-section-label{color:#94a3b8}
+html[data-theme="dark"] .side-link{color:#cbd5e1}
+html[data-theme="dark"] .side-link .side-icon{color:#cbd5e1}
+html[data-theme="dark"] .side-link .side-link-arrow{color:#64748b}
+html[data-theme="dark"] .side-link:hover{background:#1e293b;color:#fff}
+html[data-theme="dark"] .side-link:hover .side-icon{color:#fff}
+html[data-theme="dark"] .side-link.active{background:#1677FF;color:#fff;border-color:#1677FF;box-shadow:none}
+html[data-theme="dark"] .side-link.active .side-icon,html[data-theme="dark"] .side-link.active .side-link-arrow{color:#fff}
+html[data-theme="dark"] .sidebar-service-status{background:#0b1220;border-color:#1e293b}
+html[data-theme="dark"] .sidebar-service-status strong{color:#e2e8f0}
+html[data-theme="dark"] .sidebar-service-status small{color:#94a3b8}
+html[data-theme="dark"] .sidebar-user-card{border-top-color:#1e293b}
+html[data-theme="dark"] .sidebar-user-copy strong{color:#e2e8f0}
+html[data-theme="dark"] .sidebar-user-copy small{color:#94a3b8}
+html[data-theme="dark"] .sidebar-user-avatar{background:#1677FF}
+html[data-theme="dark"] .sidebar-user-card>button{background:#1e293b;border-color:#334155;color:#cbd5e1}
