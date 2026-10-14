@@ -1087,6 +1087,90 @@ def start_update_checker() -> None:
     threading.Thread(target=_loop, name="panel-update-checker", daemon=True).start()
 
 
+# --- 软件授权静默心跳（定期向鉴权服务器校验，支持停用/解绑/过期下发）---
+LICENSE_CHECK_HOURS = float(os.getenv("FML_LICENSE_CHECK_HOURS", "12") or "12")
+LICENSE_GRACE_DAYS = float(os.getenv("FML_LICENSE_GRACE_DAYS", "7") or "7")
+_license_heartbeat_started = False
+
+
+def verify_license_remote(license_key: str, machine_id: str) -> dict[str, Any]:
+    url = SOFTWARE_LICENSE_SERVER_URL.rstrip("/") + "/api/license/verify"
+    body = json.dumps({"license_key": license_key, "machine_id": machine_id, "app": APP_NAME}, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST", headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode("utf-8", "replace"))
+
+
+def refresh_license_check(force: bool = False) -> None:
+    if not SOFTWARE_LICENSE_REQUIRED:
+        return
+    payload = load_software_license_file()
+    if not payload:
+        return
+    license_key = str(payload.get("license_key") or "")
+    machine_id = str(payload.get("machine_id") or "")
+    if not license_key or not machine_id or not SOFTWARE_LICENSE_SERVER_URL:
+        return
+    with db() as conn:
+        try:
+            last = float(setting_get(conn, "license_last_check_at", "0") or "0")
+        except Exception:
+            last = 0.0
+    if not force and (time.time() - last) < LICENSE_CHECK_HOURS * 3600:
+        return
+    ok: bool | None = None
+    msg = ""
+    lic = None
+    try:
+        data = verify_license_remote(license_key, machine_id)
+        ok = bool(data.get("ok"))
+        msg = str(data.get("error") or "")
+        lic = data.get("license")
+    except urllib.error.HTTPError as e:
+        ok = False
+        try:
+            msg = str(json.loads(e.read().decode("utf-8", "replace")).get("error") or "")
+        except Exception:
+            msg = f"HTTP {e.code}"
+    except Exception as e:
+        ok = None
+        msg = f"无法连接授权服务器：{e.__class__.__name__}"
+    with db() as conn:
+        setting_set(conn, "license_last_check_at", str(int(time.time())))
+        if ok is True:
+            setting_set(conn, "license_revoked", "0")
+            setting_set(conn, "license_revoked_reason", "")
+            setting_set(conn, "license_last_ok_at", str(int(time.time())))
+            if isinstance(lic, dict) and lic.get("signature"):
+                save_software_license_file({**payload, **lic, "last_check_at": int(time.time())})
+        elif ok is False:
+            setting_set(conn, "license_revoked", "1")
+            setting_set(conn, "license_revoked_reason", msg or "软件授权已失效，请联系卖家")
+        else:
+            last_ok = float(setting_get(conn, "license_last_ok_at", "0") or "0")
+            if last_ok and (time.time() - last_ok) > LICENSE_GRACE_DAYS * 86400:
+                setting_set(conn, "license_revoked", "1")
+                setting_set(conn, "license_revoked_reason", f"已超过 {LICENSE_GRACE_DAYS:g} 天无法连接授权服务器，请检查网络或联系卖家")
+
+
+def start_license_heartbeat() -> None:
+    global _license_heartbeat_started
+    if _license_heartbeat_started:
+        return
+    _license_heartbeat_started = True
+
+    def _loop() -> None:
+        time.sleep(30)
+        while True:
+            try:
+                refresh_license_check()
+            except Exception:
+                pass
+            time.sleep(max(600, int(LICENSE_CHECK_HOURS * 3600 / 4)))
+
+    threading.Thread(target=_loop, name="license-heartbeat", daemon=True).start()
+
+
 def create_email_code(username: str, email: str) -> str:
     code = f"{secrets.randbelow(1000000):06d}"
     with db() as conn:
@@ -1282,23 +1366,31 @@ def save_software_license_file(payload: dict[str, Any]) -> None:
 def current_software_license(conn: sqlite3.Connection) -> dict[str, Any]:
     file_payload = load_software_license_file()
     if file_payload:
-        return public_software_license(file_payload)
-    row = conn.execute("SELECT * FROM software_license ORDER BY id DESC LIMIT 1").fetchone()
-    status = public_software_license(row)
-    if row and status.get("licensed"):
-        save_software_license_file({
-            "app": APP_NAME,
-            "license_key": row["license_key"],
-            "machine_id": row["machine_id"],
-            "server_url": row["server_url"] if "server_url" in row.keys() else "",
-            "plan": row["plan"],
-            "expires_at": int(row["expires_at"] or 0),
-            "active": int(row["active"]),
-            "signature": row["signature"],
-            "activated_at": int(row["activated_at"] or now()),
-            "last_check_at": int(row["last_check_at"] or now()),
-            "created_at": int(row["created_at"] or now()),
-        })
+        status = public_software_license(file_payload)
+    else:
+        row = conn.execute("SELECT * FROM software_license ORDER BY id DESC LIMIT 1").fetchone()
+        status = public_software_license(row)
+        if row and status.get("licensed"):
+            save_software_license_file({
+                "app": APP_NAME,
+                "license_key": row["license_key"],
+                "machine_id": row["machine_id"],
+                "server_url": row["server_url"] if "server_url" in row.keys() else "",
+                "plan": row["plan"],
+                "expires_at": int(row["expires_at"] or 0),
+                "active": int(row["active"]),
+                "signature": row["signature"],
+                "activated_at": int(row["activated_at"] or now()),
+                "last_check_at": int(row["last_check_at"] or now()),
+                "created_at": int(row["created_at"] or now()),
+            })
+    # 卖家后台停用/解绑/过期 → 静默心跳置位，面板立即失效
+    if setting_get(conn, "license_revoked", "0") == "1":
+        status = dict(status)
+        status["active"] = False
+        status["licensed"] = False
+        status["revoked"] = True
+        status["message"] = setting_get(conn, "license_revoked_reason", "") or "软件授权已失效，请联系卖家"
     return status
 
 
@@ -5215,6 +5307,7 @@ def main() -> None:
     start_proxy_sampler()
     start_node_health_sampler()
     start_update_checker()
+    start_license_heartbeat()
     print(f"{APP_NAME} separated server listening on http://{HOST}:{PORT}")
     print(f"DB: {DB_PATH}")
     if ADMIN_PASSWORD == "admin123":
