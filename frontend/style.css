@@ -1395,3 +1395,14 @@ html[data-theme="dark"] .sidebar-user-card>button{background:#1e293b;border-colo
 .sidebar-update{display:inline-flex;align-items:center;gap:4px;margin-top:7px;padding:3px 9px;border:1px solid #FFE0B2;border-radius:999px;background:#FFF5E6;color:#B45309;font-size:10px;font-weight:600;text-decoration:none}
 .sidebar-update:hover{background:#FFEEDB;text-decoration:none}
 html[data-theme="dark"] .sidebar-update{background:#3b2a12;border-color:#5b4420;color:#fbbf24}
+
+/* 普通用户概览：当前节点 / 我的隧道 的暗色适配 */
+html[data-theme="dark"] .node-map-panel{background:linear-gradient(110deg,#1e293b 0%,#0f172a 62%,#122033 100%)!important;border-color:#334155!important}
+html[data-theme="dark"] .node-map-panel .node-map-backdrop{opacity:.22!important}
+html[data-theme="dark"] .node-map-panel .node-compact-title>strong{color:#e2e8f0}
+html[data-theme="dark"] .node-map-panel .node-compact-location,html[data-theme="dark"] .node-map-panel .node-compact-meta{color:#94a3b8}
+html[data-theme="dark"] .node-server-art{background:#0b1220;border-color:#334155}
+html[data-theme="dark"] .tunnel-preview-item{background:linear-gradient(120deg,#1e293b,#0f172a);border-color:#334155}
+html[data-theme="dark"] .tunnel-preview-name>strong{color:#e2e8f0}
+html[data-theme="dark"] .tunnel-preview-local,html[data-theme="dark"] .tunnel-preview-endpoint>span,html[data-theme="dark"] .tunnel-preview-traffic span{color:#94a3b8}
+html[data-theme="dark"] .tunnel-preview-endpoint>b,html[data-theme="dark"] .tunnel-preview-traffic b{color:#cbd5e1}
