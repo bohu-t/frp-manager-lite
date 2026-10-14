@@ -2412,6 +2412,9 @@ function adminNotifyCardHtml(notify){
   const yn = (v, d) => (v === undefined || v === null ? d : !!v);
   const channels = n.channels || [];
   const cur = n.type || '';
+  const params = n.params || {};
+  const curCh = channels.find(c => c.type === cur);
+  const ready = !!(curCh && (curCh.fields || []).filter(f => f.required).every(f => String(params[f.key] || '').trim() !== ''));
   const primaryOrder = ['telegramBot','dingtalkBot','lark','bark','weWorkApp'];
   const byType = {};
   channels.forEach(c => { byType[c.type] = c; });
@@ -2428,7 +2431,7 @@ function adminNotifyCardHtml(notify){
     return `<div class="notify-channel-fields" data-channel="${esc(c.type)}" style="display:${c.type === cur ? 'grid' : 'none'}">${inner}</div>`;
   }).join('');
   return `<section class="card admin-notify-card">
-    <div class="settings-card-head"><span class="settings-card-icon icon-blue">${stIcon('bell')}</span><div><h2>通知设置</h2><p>配置系统通知规则和渠道，及时获取异常信息。</p></div><span class="status-badge ${cur ? 'ok' : 'bad'}"><i></i>${cur ? '已配置' : '未配置'}</span></div>
+    <div class="settings-card-head"><span class="settings-card-icon icon-blue">${stIcon('bell')}</span><div><h2>通知设置</h2><p>配置系统通知规则和渠道，及时获取异常信息。</p></div><span class="status-badge ${ready ? 'ok' : 'bad'}"><i></i>${ready ? '已配置' : '未配置'}</span></div>
     <form id="notifyForm" class="settings-form">
       <div class="notify-row notify-row-duo">
         <div class="notify-cell"><div class="notify-row-label"><label>通知开关</label></div><div class="notify-row-control"><label class="switch"><input type="checkbox" name="enabled" value="1"${n.enabled ? ' checked' : ''} onchange="syncNotifySwitch(this)"><span class="switch-track"><span class="switch-thumb"></span></span></label><span class="switch-state" id="notifySwitchState">${n.enabled ? '已开启' : '已关闭'}</span></div></div>
