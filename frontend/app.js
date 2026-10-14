@@ -640,6 +640,19 @@ function setPanelMeta(data){
   if(data.latest_version) panelLatest = String(data.latest_version).replace(/^v/i, '');
 }
 
+let _avatarSeq = 0;
+function avatarSvg(username, role, size){
+  const isAdmin = role === 'admin';
+  const initial = esc(String(username || '?').trim().slice(0, 1).toUpperCase() || '?');
+  const id = 'av' + (++_avatarSeq);
+  const c1 = isAdmin ? '#5b8cff' : '#2dd4bf';
+  const c2 = isAdmin ? '#8b5cf6' : '#38bdf8';
+  const s = Number(size) || 32;
+  const badge = isAdmin
+    ? `<g transform="translate(29.5,29.5)"><circle r="9" fill="#fff"/><path d="M-5 3.6h10L3.4-3.4.6-.7-.6-4.8-1.8-.7-4.6-3.4Z" fill="#7952F6"/></g>`
+    : `<g transform="translate(29.5,29.5)"><circle r="9" fill="#fff"/><circle cx="0" cy="-2.3" r="3" fill="#0ea5e9"/><path d="M-4.7 5.4a4.7 4.7 0 0 1 9.4 0Z" fill="#0ea5e9"/></g>`;
+  return `<svg class="avatar-svg" viewBox="0 0 40 40" width="${s}" height="${s}" role="img" aria-label="${isAdmin ? '管理员' : '用户'}头像"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="${c1}"/><stop offset="100%" stop-color="${c2}"/></linearGradient></defs><circle cx="20" cy="20" r="20" fill="url(#${id})"/><text x="19" y="27" text-anchor="middle" font-size="18" font-weight="700" fill="#fff" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif">${initial}</text>${badge}</svg>`;
+}
 function appSidebarHtml(kind='dashboard'){
   const isAdmin = currentUser?.role === 'admin';
   const username = currentUser?.username || '用户';
@@ -662,7 +675,7 @@ function appSidebarHtml(kind='dashboard'){
       <button class="side-link${kind === 'dashboard-editor' ? ' active' : ''}" data-nav="dashboard-editor">${sideIcon('edit')}<span class="side-link-label">在线配置</span><span class="side-link-arrow">›</span></button>`}
     <div class="sidebar-spacer"></div>
     <div class="sidebar-service-status"><span class="sidebar-service-dot"></span><span class="sidebar-service-copy">${sidebarServiceCopyHtml()}</span></div>
-    <div class="sidebar-user-card"><span class="sidebar-user-avatar">${esc(String(username).slice(0,1).toUpperCase())}</span><span class="sidebar-user-copy"><strong>${esc(username)}</strong><small>${isAdmin ? '系统管理员' : '普通用户'}</small></span><button type="button" data-nav="logout" title="退出登录" aria-label="退出登录">↗</button></div>
+    <div class="sidebar-user-card"><span class="sidebar-user-avatar">${avatarSvg(username, currentUser?.role, 32)}</span><span class="sidebar-user-copy"><strong>${esc(username)}</strong><small>${isAdmin ? '系统管理员' : '普通用户'}</small></span><button type="button" data-nav="logout" title="退出登录" aria-label="退出登录">↗</button></div>
   </aside>`;
 }
 
@@ -671,7 +684,7 @@ function settingsTopbarHtml(title){
   const initial = esc(String(username).slice(0, 1).toUpperCase());
   return `<div class="workspace-topbar settings-topbar">
     <div class="settings-head"><span class="settings-head-icon">${stIcon('gear')}</span><div class="settings-head-copy"><h1>${esc(title || '管理员设置')}</h1><p>配置系统通知、邮件、备份、运维和存储等相关设置</p></div></div>
-    <div class="topbar-actions settings-head-actions"><span class="settings-admin"><span class="settings-admin-avatar">${initial}</span><span class="settings-admin-name">${esc(username)}</span></span><button type="button" class="secondary settings-logout" data-nav="logout">退出登录</button></div>
+    <div class="topbar-actions settings-head-actions"><span class="settings-admin"><span class="settings-admin-avatar">${avatarSvg(username, currentUser?.role, 30)}</span><span class="settings-admin-name">${esc(username)}</span></span><button type="button" class="secondary settings-logout" data-nav="logout">退出登录</button></div>
   </div>`;
 }
 
@@ -1315,7 +1328,7 @@ async function loadDashboard(view='overview'){
     app.innerHTML = appLayoutHtml(`
       <div class="profile-grid">
         <section class="card profile-card">
-          <div class="profile-head"><span class="profile-avatar">${esc(String(data.user.username||'U').slice(0,1).toUpperCase())}</span><div class="profile-id"><strong>${esc(data.user.username||'-')}</strong><small>${data.user.role === 'admin' ? '系统管理员' : '普通用户'}</small></div></div>
+          <div class="profile-head"><span class="profile-avatar">${avatarSvg(data.user.username||'U', data.user.role, 56)}</span><div class="profile-id"><strong>${esc(data.user.username||'-')}</strong><small>${data.user.role === 'admin' ? '系统管理员' : '普通用户'}</small></div></div>
           <div class="profile-rows">
             <div class="info-line"><span>账号有效期</span><strong>${esc(data.user.expires_text || '-')}</strong></div>
             <div class="info-line"><span>今日流量</span><strong>${fmtBytes(todayTraffic)}${trafficLimit ? ' / ' + fmtBytes(trafficLimit) : ' / 不限'}</strong></div>

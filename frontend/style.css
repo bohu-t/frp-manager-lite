@@ -1406,3 +1406,8 @@ html[data-theme="dark"] .tunnel-preview-item{background:linear-gradient(120deg,#
 html[data-theme="dark"] .tunnel-preview-name>strong{color:#e2e8f0}
 html[data-theme="dark"] .tunnel-preview-local,html[data-theme="dark"] .tunnel-preview-endpoint>span,html[data-theme="dark"] .tunnel-preview-traffic span{color:#94a3b8}
 html[data-theme="dark"] .tunnel-preview-endpoint>b,html[data-theme="dark"] .tunnel-preview-traffic b{color:#cbd5e1}
+
+/* 角色头像（SVG） */
+.avatar-svg{display:block;border-radius:50%;overflow:hidden}
+.sidebar-user-avatar,.settings-admin-avatar,.profile-avatar{background:none;box-shadow:none;overflow:visible}
+.sidebar-user-avatar svg,.settings-admin-avatar svg,.profile-avatar svg{display:block}
