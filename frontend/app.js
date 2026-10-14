@@ -8,6 +8,7 @@ let adminDashboardTimer = null;
 let panelVersion = '';
 let panelUptime = 0;
 let panelLatest = '';
+let panelUpdateLink = 'https://github.com/bohu-t/lite-install#readme';
 let tunnelPreviewTimer = null;
 let csrfToken = null;
 let clientNodeProbeUrl = '';
@@ -628,7 +629,7 @@ function cmpVersion(a, b){
 function sidebarServiceCopyHtml(){
   const out = ['<strong>服务运行中</strong>', `<small>版本 ${esc(panelVersion || '-')}</small>`, `<small>运行 ${esc(panelUptime > 0 ? fmtUptime(panelUptime) : '-')}</small>`];
   if(panelLatest && cmpVersion(panelLatest, panelVersion) > 0){
-    out.push(`<a class="sidebar-update" href="https://github.com/bohu-t/frp-manager-lite/releases/latest" target="_blank" rel="noopener noreferrer">发现新版本 v${esc(panelLatest)}，去升级 ↗</a>`);
+    out.push(`<a class="sidebar-update" href="${esc(panelUpdateLink)}" target="_blank" rel="noopener noreferrer">发现新版本 v${esc(panelLatest)}，去升级 ↗</a>`);
   }
   return out.join('');
 }
@@ -638,6 +639,7 @@ function setPanelMeta(data){
   if(data.panel_version) panelVersion = data.panel_version;
   if(data.uptime_seconds !== undefined) panelUptime = Number(data.uptime_seconds) || 0;
   if(data.latest_version) panelLatest = String(data.latest_version).replace(/^v/i, '');
+  if(data.update_link) panelUpdateLink = String(data.update_link);
 }
 
 let _avatarSeq = 0;

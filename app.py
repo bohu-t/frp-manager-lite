@@ -956,6 +956,9 @@ def send_notification(title: str, content: str, force: bool = False) -> dict[str
 UPDATE_CHECK_HOURS = float(os.getenv("FML_UPDATE_CHECK_HOURS", "8") or "8")
 PANEL_UPDATE_REPO = os.getenv("FML_UPDATE_REPO", "bohu-t/frp-manager-lite")
 PANEL_UPDATE_TOKEN = os.getenv("FML_UPDATE_TOKEN", "")  # 私有仓库时需要（GitHub PAT）
+PANEL_UPDATE_URL = os.getenv("FML_UPDATE_URL", "")  # 自定义纯文本版本地址（优先）
+PANEL_VERSION_REPO = os.getenv("FML_UPDATE_VERSION_REPO", "bohu-t/lite-install")  # 公开仓库的 VERSION 文件
+PANEL_UPDATE_LINK = os.getenv("FML_UPDATE_LINK", "https://github.com/bohu-t/lite-install#readme")
 _update_check_started = False
 
 
@@ -967,31 +970,80 @@ def _version_tuple(value: str) -> tuple:
     return tuple(out) if out else (0,)
 
 
-def fetch_latest_panel_version() -> str:
-    """优先读 GitHub 最新 Release，否则回退到最新的 tag（兼容 release-vX.Y.Z 习惯）。"""
+def _normalize_version(raw: str) -> str:
+    txt = str(raw or "").strip()
+    if not txt:
+        return ""
+    txt = txt.splitlines()[0].strip()
+    if txt.startswith("{"):
+        try:
+            txt = str(json.loads(txt).get("version") or "")
+        except Exception:
+            return ""
+    if not txt:
+        return ""
+    return ".".join(str(x) for x in _version_tuple(txt))
+
+
+def _github_headers() -> dict[str, str]:
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "frp-manager-lite"}
     if PANEL_UPDATE_TOKEN:
         headers["Authorization"] = f"Bearer {PANEL_UPDATE_TOKEN}"
-    base = f"https://api.github.com/repos/{PANEL_UPDATE_REPO}"
-    for url in (f"{base}/releases/latest", f"{base}/tags"):
+    return headers
+
+
+def _fetch_text(url: str) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": "frp-manager-lite"})
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        return resp.read().decode("utf-8", "replace")
+
+
+def _fetch_json(url: str) -> Any:
+    req = urllib.request.Request(url, headers=_github_headers())
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        return json.loads(resp.read().decode("utf-8", "replace"))
+
+
+def fetch_latest_panel_version() -> str:
+    """依次尝试：自定义地址 → GitHub Release → GitHub tag → 公开仓库 VERSION 文件。"""
+    if PANEL_UPDATE_URL:
         try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                data = json.loads(resp.read().decode("utf-8", "replace"))
+            v = _normalize_version(_fetch_text(PANEL_UPDATE_URL))
+            if v:
+                return v
         except Exception:
-            continue
-        tag = ""
-        if isinstance(data, dict):
-            tag = str(data.get("tag_name") or "").strip()
-        elif isinstance(data, list):
-            best_key: tuple = ()
-            for item in data:
+            pass
+    base = f"https://api.github.com/repos/{PANEL_UPDATE_REPO}"
+    try:
+        v = _normalize_version(str((_fetch_json(f"{base}/releases/latest") or {}).get("tag_name") or ""))
+        if v:
+            return v
+    except Exception:
+        pass
+    try:
+        tags = _fetch_json(f"{base}/tags")
+        best_key: tuple = ()
+        best = ""
+        if isinstance(tags, list):
+            for item in tags:
                 name = str((item or {}).get("name") or "").strip()
                 key = _version_tuple(name)
                 if key > best_key:
-                    best_key, tag = key, name
-        if tag:
-            return ".".join(str(x) for x in _version_tuple(tag))
+                    best_key, best = key, name
+        v = _normalize_version(best)
+        if v:
+            return v
+    except Exception:
+        pass
+    try:
+        data = _fetch_json(f"https://api.github.com/repos/{PANEL_VERSION_REPO}/contents/VERSION")
+        raw = str((data or {}).get("content") or "").replace("\n", "")
+        if raw:
+            v = _normalize_version(base64.b64decode(raw).decode("utf-8", "replace"))
+            if v:
+                return v
+    except Exception:
+        pass
     return ""
 
 
@@ -3953,7 +4005,7 @@ class Handler(BaseHTTPRequestHandler):
                 health = node_health_lookup(node_payload)
                 node_payload.update(health if health is not None else check_node_auth_port(node_payload))
                 node_payload["latency_ms"] = node_payload.get("auth_latency_ms")
-            self.send_json({"ok": True, "version": APP_VERSION, "uptime_seconds": int(time.time() - SERVER_START_TS), "latest_version": panel_latest_version(), "user": public_user(user), "software_license": sw_license, "node": node_payload, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
+            self.send_json({"ok": True, "version": APP_VERSION, "uptime_seconds": int(time.time() - SERVER_START_TS), "latest_version": panel_latest_version(), "update_link": PANEL_UPDATE_LINK, "user": public_user(user), "software_license": sw_license, "node": node_payload, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
             return
         if path == "/api/user/traffic":
             q = urllib.parse.parse_qs(urlparse(self.path).query)
@@ -4123,6 +4175,7 @@ class Handler(BaseHTTPRequestHandler):
                 "panel_version": APP_VERSION,
                 "uptime_seconds": int(time.time() - SERVER_START_TS),
                 "latest_version": panel_latest_version(),
+                "update_link": PANEL_UPDATE_LINK,
                 "refresh_seconds": NODE_DASHBOARD_REFRESH_SECONDS,
                 "node_count": node_count,
                 "active_node_count": active_node_count,
