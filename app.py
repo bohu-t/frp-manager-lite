@@ -4315,6 +4315,9 @@ class Handler(BaseHTTPRequestHandler):
             audit("user_node_switch", user, target_node_id, None, "", str(target["name"]))
             self.send_json({"ok": True, "message": f"已切换到节点 {target['name']}"})
             return
+        if path == "/api/account/password":
+            self.account_change_password(user, data)
+            return
         if path == "/api/tunnels/create":
             self.tunnel_create(user, data)
         elif path == "/api/tunnels/update":
@@ -4791,6 +4794,23 @@ class Handler(BaseHTTPRequestHandler):
         else:
             detail = result.get("error") or "；".join(f"{r['channel']}: {r['message']}" for r in result.get("results", []))
             self.send_json({"ok": False, "error": detail or "发送失败"}, 400)
+
+    def account_change_password(self, user: sqlite3.Row, data: dict[str, Any]) -> None:
+        old_pwd = str(data.get("old_password", ""))
+        new_pwd = str(data.get("new_password", ""))
+        if len(new_pwd) < 6:
+            self.send_json({"ok": False, "error": "新密码至少 6 位"}, 400)
+            return
+        if not verify_password(old_pwd, user["password_hash"]):
+            self.send_json({"ok": False, "error": "原密码不正确"}, 400)
+            return
+        if verify_password(new_pwd, user["password_hash"]):
+            self.send_json({"ok": False, "error": "新密码不能与原密码相同"}, 400)
+            return
+        with db() as conn:
+            conn.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash(new_pwd), user["id"]))
+        audit("account_password_change", user, None, None, "", "自助修改登录密码")
+        self.send_json({"ok": True, "message": "密码已修改"})
 
     def admin_set_user_email(self, data: dict[str, Any]) -> None:
         if not self.require_admin():

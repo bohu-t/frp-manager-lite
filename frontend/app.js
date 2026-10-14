@@ -653,6 +653,39 @@ function avatarSvg(username, role, size){
     : `<g transform="translate(29.5,29.5)"><circle r="9" fill="#fff"/><circle cx="0" cy="-2.3" r="3" fill="#0ea5e9"/><path d="M-4.7 5.4a4.7 4.7 0 0 1 9.4 0Z" fill="#0ea5e9"/></g>`;
   return `<svg class="avatar-svg" viewBox="0 0 40 40" width="${s}" height="${s}" role="img" aria-label="${isAdmin ? '管理员' : '用户'}头像"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="${c1}"/><stop offset="100%" stop-color="${c2}"/></linearGradient></defs><circle cx="20" cy="20" r="20" fill="url(#${id})"/><text x="19" y="27" text-anchor="middle" font-size="18" font-weight="700" fill="#fff" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif">${initial}</text>${badge}</svg>`;
 }
+function passwordFieldsHtml(){
+  return `<div><label>原密码</label><input name="old_password" type="password" autocomplete="current-password" required></div>
+      <div><label>新密码</label><input name="new_password" type="password" autocomplete="new-password" minlength="6" placeholder="至少 6 位" required></div>
+      <div><label>确认新密码</label><input name="new_password2" type="password" autocomplete="new-password" minlength="6" required></div>`;
+}
+async function submitPasswordChange(form, onDone){
+  const fd = new FormData(form);
+  const np = String(fd.get('new_password') || '');
+  if(np.length < 6){ show('新密码至少 6 位', true); return; }
+  if(np !== String(fd.get('new_password2') || '')){ show('两次输入的新密码不一致', true); return; }
+  try{
+    const r = await api('/api/account/password', {method:'POST', body:{old_password: String(fd.get('old_password') || ''), new_password: np}});
+    form.reset();
+    if(onDone) onDone();
+    show(r.message || '密码已修改');
+  }catch(err){ show(err.message, true); }
+}
+function adminPwdModalHtml(){
+  return `<div id="pwdModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="pwdModalTitle" onclick="if(event.target===this)closePwdModal()">
+      <section class="modal-page card admin-frpc-modal">
+        <div class="section-title modal-title"><div><h2 id="pwdModalTitle">修改登录密码</h2><p>修改当前管理员账号的登录密码，下次登录请使用新密码。</p></div><button type="button" class="secondary modal-close" onclick="closePwdModal()" aria-label="关闭">关闭 ×</button></div>
+        <form id="pwdForm" class="grid">${passwordFieldsHtml()}<div class="form-actions" style="grid-column:1/-1"><button type="submit">保存新密码</button><button type="button" class="secondary" onclick="closePwdModal()">取消</button></div></form>
+      </section>
+    </div>`;
+}
+function openPwdModal(){ const m = document.querySelector('#pwdModal'); if(m) m.classList.remove('hidden'); }
+function closePwdModal(){ const m = document.querySelector('#pwdModal'); if(m) m.classList.add('hidden'); }
+function initPasswordForm(){
+  const form = document.querySelector('#profilePwdForm');
+  if(!form) return;
+  form.onsubmit = (e) => { e.preventDefault(); submitPasswordChange(form); };
+}
+
 function appSidebarHtml(kind='dashboard'){
   const isAdmin = currentUser?.role === 'admin';
   const username = currentUser?.username || '用户';
@@ -1352,9 +1385,14 @@ async function loadDashboard(view='overview'){
           <div id="renewResult" class="renew-result hidden"></div>
           <div class="profile-rows"><div class="info-line"><span>当前到期</span><strong>${esc(data.user.expires_text || '-')}</strong></div></div>
         </section>
+        <section class="card profile-pwd">
+          <div class="section-title"><div><div class="section-kicker">SECURITY</div><h2>${stIcon('key')}修改登录密码</h2><p>修改当前账号的登录密码，下次登录请使用新密码。</p></div></div>
+          <form id="profilePwdForm" class="grid">${passwordFieldsHtml()}<div class="form-actions" style="grid-column:1/-1"><button type="submit">保存新密码</button></div></form>
+        </section>
       </div>`, 'dashboard-profile', '个人中心');
     initRenewForm();
     initUserEmailForm();
+    initPasswordForm();
     return;
   }
   const sideNav = `<aside class="app-sidebar">
@@ -2347,6 +2385,11 @@ function adminOpsCardHtml(){
         <span class="ops-row-copy"><b>为用户生成 frpc 配置</b><small>选择用户、添加隧道，生成并下载 frpc.toml 与部署脚本。</small></span>
         <span class="ops-row-arrow">›</span>
       </button>
+      <button type="button" class="ops-row" onclick="openPwdModal()">
+        <span class="ops-row-icon">${stIcon('key')}</span>
+        <span class="ops-row-copy"><b>修改登录密码</b><small>修改当前管理员账号的登录密码。</small></span>
+        <span class="ops-row-arrow">›</span>
+      </button>
     </div>
   </section>`;
 }
@@ -2574,6 +2617,8 @@ function wireAdminSettingsForms(){
   }
   const adminFrpcForm = document.querySelector('#adminFrpcForm');
   if(adminFrpcForm){ adminFrpcForm.onsubmit = submitAdminFrpc; renderAdminDeployScriptAddress(); renderAdminFrpcRows(); }
+  const pwdForm = document.querySelector('#pwdForm');
+  if(pwdForm){ pwdForm.onsubmit = (e) => { e.preventDefault(); submitPasswordChange(pwdForm, () => closePwdModal()); }; }
 }
 
 async function loadAdminSettings(){
@@ -2604,6 +2649,7 @@ async function loadAdminSettings(){
       <div class="admin-settings-col">${adminSmtpCardHtml(smtp)}${adminOpsCardHtml()}${adminR2CardHtml(r2, r2Status, r2Source)}</div>
     </div>
     ${adminFrpcModalHtml(frpcUserOptions)}
+    ${adminPwdModalHtml()}
   `, 'admin-settings', '管理员设置');
   wireAdminSettingsForms();
 }
