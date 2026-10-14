@@ -955,6 +955,7 @@ def send_notification(title: str, content: str, force: bool = False) -> dict[str
 # --- 面板版本更新检测（后台定时，默认每 8 小时一次）---
 UPDATE_CHECK_HOURS = float(os.getenv("FML_UPDATE_CHECK_HOURS", "8") or "8")
 PANEL_UPDATE_REPO = os.getenv("FML_UPDATE_REPO", "bohu-t/frp-manager-lite")
+PANEL_UPDATE_TOKEN = os.getenv("FML_UPDATE_TOKEN", "")  # 私有仓库时需要（GitHub PAT）
 _update_check_started = False
 
 
@@ -969,6 +970,8 @@ def _version_tuple(value: str) -> tuple:
 def fetch_latest_panel_version() -> str:
     """优先读 GitHub 最新 Release，否则回退到最新的 tag（兼容 release-vX.Y.Z 习惯）。"""
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "frp-manager-lite"}
+    if PANEL_UPDATE_TOKEN:
+        headers["Authorization"] = f"Bearer {PANEL_UPDATE_TOKEN}"
     base = f"https://api.github.com/repos/{PANEL_UPDATE_REPO}"
     for url in (f"{base}/releases/latest", f"{base}/tags"):
         try:
