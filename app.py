@@ -34,7 +34,7 @@ import urllib.parse
 import threading
 
 APP_NAME = "frp-manager-lite"
-APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.0.0")  # 面板版本，不是 frp 版本
+APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.0.1")  # 面板版本，不是 frp 版本
 SERVER_START_TS = time.time()  # 进程启动时间，用于计算面板运行时间
 FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0.66.0"))
 BASE_DIR = Path(__file__).resolve().parent
