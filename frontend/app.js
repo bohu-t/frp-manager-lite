@@ -1769,7 +1769,7 @@ async function loadAdmin(section=currentAdminSection){
       </section>
     </div>
     <div id="adminCredModal" class="modal-backdrop modal-center hidden" role="dialog" aria-modal="true" aria-labelledby="adminCredTitle" onclick="if(event.target===this)closeAdminCred()">
-      <section class="modal-page card">
+      <section class="modal-page card admin-cred-modal">
         <div class="section-title modal-title"><div><h2 id="adminCredTitle">重置密码</h2><p id="adminCredHint">默认已随机生成，可直接使用，也可自行修改。</p></div><button type="button" class="secondary modal-close" onclick="closeAdminCred()">关闭 ×</button></div>
         <form id="adminCredForm" class="grid">
           <input type="hidden" name="id">

@@ -1412,3 +1412,8 @@ html[data-theme="dark"] .tunnel-preview-endpoint>b,html[data-theme="dark"] .tunn
 .sidebar-user-avatar,.settings-admin-avatar,.profile-avatar{background:none;box-shadow:none;overflow:visible}
 .sidebar-user-avatar svg,.settings-admin-avatar svg,.profile-avatar svg{display:block}
 @media(max-width:560px){.app-shell.is-settings .ops-list{grid-template-columns:1fr}}
+
+/* 重置密码/令牌弹窗：收窄 */
+.admin-cred-modal{width:min(460px,100%)}
+.admin-cred-modal .section-title{margin-bottom:12px}
+.admin-cred-modal .grid{gap:12px}
