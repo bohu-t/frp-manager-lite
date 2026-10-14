@@ -4579,7 +4579,10 @@ class Handler(BaseHTTPRequestHandler):
         if not self.require_admin():
             return
         user_id = int(data.get("id", 0))
-        new_password = secrets.token_urlsafe(8)
+        new_password = str(data.get("password") or "").strip() or secrets.token_urlsafe(8)
+        if len(new_password) < 6:
+            self.send_json({"ok": False, "error": "密码至少 6 位"}, 400)
+            return
         with db() as conn:
             row = conn.execute("SELECT username FROM users WHERE id=? AND role!='admin'", (user_id,)).fetchone()
             if not row:
@@ -4593,7 +4596,10 @@ class Handler(BaseHTTPRequestHandler):
         if not self.require_admin():
             return
         user_id = int(data.get("id", 0))
-        new_token = secrets.token_urlsafe(24)
+        new_token = str(data.get("token") or "").strip() or secrets.token_urlsafe(24)
+        if len(new_token) < 8:
+            self.send_json({"ok": False, "error": "令牌至少 8 位"}, 400)
+            return
         with db() as conn:
             row = conn.execute("SELECT username FROM users WHERE id=? AND role!='admin'", (user_id,)).fetchone()
             if not row:
@@ -4601,7 +4607,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             conn.execute("UPDATE users SET token=? WHERE id=?", (new_token, user_id))
         audit("user_token_reset", admin, None, None, "", f"重置用户 {row['username']} 的面板令牌")
-        self.send_json({"ok": True, "message": f"已重置 {row['username']} 的面板令牌，请让该用户重新下载 frpc 配置"})
+        self.send_json({"ok": True, "message": f"已重置 {row['username']} 的面板令牌：{new_token}（请让该用户重新下载 frpc 配置）", "token": new_token})
 
     def admin_delete_user(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
         if not self.require_admin():

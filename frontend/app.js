@@ -1633,8 +1633,8 @@ async function loadAdmin(section=currentAdminSection){
         <button class="node-action" onclick="adminToggle(${u.id})">${u.active ? '停用' : '启用'}</button>
         <button class="node-action" onclick="adminExtend(${u.id})">续30天</button>
         <button class="node-action" onclick="openAdminLimits(${u.id}, ${Number(u.traffic_limit_bytes || 0)}, ${Number(u.bandwidth_limit_kbps || 0)}, '${esc(u.username)}')">流量限制</button>
-        <button class="node-action" onclick="adminReset(${u.id})">重置密码</button>
-        <button class="node-action" onclick="adminResetToken(${u.id})">重置令牌</button>
+        <button class="node-action" onclick="openAdminCred('password', ${u.id}, '${esc(u.username)}')">重置密码</button>
+        <button class="node-action" onclick="openAdminCred('token', ${u.id}, '${esc(u.username)}')">重置令牌</button>
         <button class="node-action" onclick="openAdminEmail(${u.id}, '${esc(u.email || '')}', '${esc(u.username)}')">设邮箱</button>
         <button class="node-action node-action-danger" onclick="adminDelete(${u.id})">删除</button>
       </td>
@@ -1765,6 +1765,17 @@ async function loadAdmin(section=currentAdminSection){
           <div><label>今日流量上限 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
           <div><label>速率策略 MB/s</label><input name="bandwidth_limit_mbs" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限；仅后台可见</span></div>
           <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存</button><button type="button" class="secondary" onclick="closeAdminLimits()">取消</button></div>
+        </form>
+      </section>
+    </div>
+    <div id="adminCredModal" class="modal-backdrop modal-center hidden" role="dialog" aria-modal="true" aria-labelledby="adminCredTitle" onclick="if(event.target===this)closeAdminCred()">
+      <section class="modal-page card">
+        <div class="section-title modal-title"><div><h2 id="adminCredTitle">重置密码</h2><p id="adminCredHint">默认已随机生成，可直接使用，也可自行修改。</p></div><button type="button" class="secondary modal-close" onclick="closeAdminCred()">关闭 ×</button></div>
+        <form id="adminCredForm" class="grid">
+          <input type="hidden" name="id">
+          <input type="hidden" name="kind" value="password">
+          <div style="grid-column:1/-1"><label id="adminCredLabel">新密码</label><input name="value" id="adminCredValue" required autocomplete="off" spellcheck="false"><span class="muted small">默认已生成随机值；<button type="button" class="link-btn" onclick="regenAdminCred()">重新生成</button></span></div>
+          <div class="form-actions" style="grid-column:1/-1"><button type="submit">确认重置</button><button type="button" class="secondary" onclick="closeAdminCred()">取消</button></div>
         </form>
       </section>
     </div>
@@ -1923,6 +1934,8 @@ async function loadAdmin(section=currentAdminSection){
       }catch(err){ show(err.message, true); }
     };
   }
+  const adminCredForm = document.querySelector('#adminCredForm');
+  if(adminCredForm){ adminCredForm.onsubmit = submitAdminCred; }
   const lookupPortForm = document.querySelector('#lookupPortForm');
   if(lookupPortForm){
     lookupPortForm.onsubmit = async (e) => {
@@ -2136,8 +2149,53 @@ function openAdminEmail(id, email, username){
   modal.classList.remove('hidden');
 }
 function closeAdminEmail(){ document.querySelector('#adminEmailModal')?.classList.add('hidden'); }
-async function adminReset(id){ if(confirm('重置该用户密码？')) await api('/api/admin/users/reset-password', {method:'POST', body:{id}}).then(r=>{loadAdmin().then(()=>show(r.message||'密码已重置'));}).catch(e=>show(e.message,true)); }
-async function adminResetToken(id){ if(confirm('重置该用户的面板令牌？重置后该用户需重新下载 frpc 配置。')) await api('/api/admin/users/reset-token', {method:'POST', body:{id}}).then(r=>{loadAdmin().then(()=>show(r.message||'已重置令牌'));}).catch(e=>show(e.message,true)); }
+let adminCredKind = 'password';
+function regenAdminCred(){
+  const el = document.querySelector('#adminCredValue');
+  if(!el) return;
+  el.value = adminCredKind === 'token' ? genRandomToken(32) : genRandomToken(12);
+}
+function openAdminCred(kind, id, username){
+  adminCredKind = kind === 'token' ? 'token' : 'password';
+  const modal = document.querySelector('#adminCredModal');
+  if(!modal) return;
+  const form = modal.querySelector('#adminCredForm');
+  form.elements.id.value = id;
+  form.elements.kind.value = adminCredKind;
+  const title = modal.querySelector('#adminCredTitle');
+  const label = modal.querySelector('#adminCredLabel');
+  const hint = modal.querySelector('#adminCredHint');
+  if(adminCredKind === 'token'){
+    if(title) title.textContent = '重置面板令牌';
+    if(label) label.textContent = '新令牌';
+    if(hint) hint.textContent = `用户 ${username}：默认已随机生成，可自行修改；重置后该用户需重新下载 frpc 配置。`;
+  }else{
+    if(title) title.textContent = '重置登录密码';
+    if(label) label.textContent = '新密码';
+    if(hint) hint.textContent = `用户 ${username}：默认已随机生成，可自行修改；重置后该用户需用新密码登录。`;
+  }
+  regenAdminCred();
+  modal.classList.remove('hidden');
+}
+function closeAdminCred(){ document.querySelector('#adminCredModal')?.classList.add('hidden'); }
+async function submitAdminCred(e){
+  e.preventDefault();
+  const form = e.target;
+  const kind = form.elements.kind.value === 'token' ? 'token' : 'password';
+  const id = Number(form.elements.id.value || 0);
+  const value = String(form.elements.value.value || '').trim();
+  if(!value){ show('请填写内容', true); return; }
+  if(kind === 'password' && value.length < 6){ show('密码至少 6 位', true); return; }
+  if(kind === 'token' && value.length < 8){ show('令牌至少 8 位', true); return; }
+  try{
+    const body = kind === 'token' ? {id, token: value} : {id, password: value};
+    const path = kind === 'token' ? '/api/admin/users/reset-token' : '/api/admin/users/reset-password';
+    const r = await api(path, {method:'POST', body});
+    closeAdminCred();
+    await loadAdmin();
+    show(r.message || (kind === 'token' ? '令牌已重置' : '密码已重置'));
+  }catch(err){ show(err.message, true); }
+}
 async function adminDelete(id){ if(confirm('删除用户会释放端口并删除隧道，确定？')) await api('/api/admin/users/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('用户已删除'))).catch(e=>show(e.message,true)); }
 async function inviteToggle(id){ await api('/api/admin/invite-keys/toggle', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥状态已更新'))).catch(e=>show(e.message,true)); }
 async function inviteDelete(id){ if(confirm('删除这个注册密钥？')) await api('/api/admin/invite-keys/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥已删除'))).catch(e=>show(e.message,true)); }
