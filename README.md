@@ -49,7 +49,6 @@ sudo bash scripts/deploy-production.sh
 ## 文档
 
 - 📖 [完整部署文档](DEPLOY.md) — 面板部署、添加 frps 节点、卖家日常操作、最终用户使用
-- 🔑 `license-authority/` — 独立的软件授权服务（可选）
 
 ## 项目结构
 
@@ -64,7 +63,6 @@ frp-manager-lite/
 │   └── add-frps-node.sh           # 一键添加 frps 节点
 ├── tools/
 │   └── build-obfuscated.py    # 代码编译加密工具
-├── license-authority/  # 独立鉴权服务（可选）
 └── docker-compose.yml  # 开发环境
 ```
 
@@ -76,7 +74,7 @@ frp-manager-lite/
 - ✅ 用户到期自动停用（所有节点即时生效）
 - ✅ 一键下载 frpc.toml（零配置）
 - ✅ 代码加密编译（生产环境保护）
-- ✅ 服务器软件授权激活（安装时鉴权一次，本地授权文件 + 机器指纹校验）
+- ✅ 服务器软件授权激活（向卖家的鉴权服务器激活 + 机器指纹绑定 + 定期静默校验，停用/解绑可下发）
 - ✅ SaaS 风格管理后台（浅色/深色/系统三模式）
 
 ## 许可

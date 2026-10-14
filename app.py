@@ -73,7 +73,8 @@ PROXY_TYPE_ORDER = ["tcp", "udp", "http", "https", "stcp", "xtcp", "tcpmux"]
 SOFTWARE_LICENSE_SECRET = os.getenv("FML_SOFTWARE_LICENSE_SECRET", "")
 SOFTWARE_LICENSE_SERVER_URL = "https://mcp.224130.xyz"
 SOFTWARE_LICENSE_FILE = Path(os.getenv("FML_LICENSE_FILE", DB_PATH.parent / "software-license.json"))
-SOFTWARE_LICENSE_AUTHORITY = os.getenv("FML_LICENSE_AUTHORITY", "0").lower() in {"1", "true", "yes", "on"}
+# 面板内不再内置「授权服务器」模式（防止拿到源码后自助授权）；授权只由卖家的独立服务签发
+SOFTWARE_LICENSE_AUTHORITY = False
 SOFTWARE_LICENSE_REQUIRED = True  # always enforced — no env-var off switch
 RATE_WINDOW = 15 * 60
 LOGIN_RATE_LIMIT = 8
@@ -1127,11 +1128,17 @@ def refresh_license_check(force: bool = False) -> None:
         msg = str(data.get("error") or "")
         lic = data.get("license")
     except urllib.error.HTTPError as e:
-        ok = False
-        try:
-            msg = str(json.loads(e.read().decode("utf-8", "replace")).get("error") or "")
-        except Exception:
-            msg = f"HTTP {e.code}"
+        if e.code == 400:
+            # 鉴权服务器明确判定无效（停用/解绑/过期/不存在）
+            ok = False
+            try:
+                msg = str(json.loads(e.read().decode("utf-8", "replace")).get("error") or "")
+            except Exception:
+                msg = "授权校验失败"
+        else:
+            # 接口未上线(403/404)/服务异常(5xx) → 无法判定，不误判失效
+            ok = None
+            msg = f"授权服务器异常（HTTP {e.code}）"
     except Exception as e:
         ok = None
         msg = f"无法连接授权服务器：{e.__class__.__name__}"

@@ -146,24 +146,23 @@ localPort = 80
 remotePort = 20000
 ```
 
-## 五、鉴权服务（可选）
+## 五、软件授权（由卖家签发）
 
-如果你需要给部署服务器签发软件授权码，部署独立的鉴权服务：
+软件授权由**卖家的鉴权服务器**统一签发与校验，源码里**不包含**鉴权服务实现：
 
-```bash
-cd license-authority
-export LCA_LICENSE_SECRET="$(openssl rand -base64 32)"
-export LCA_API_KEY="$(openssl rand -base64 24)"
-export LCA_PORT=8200
-python3 server.py
-```
+1. 向卖家索取：**鉴权服务器地址** + **软件授权码**。
+2. 面板首次打开时填入完成激活（授权码绑定本机指纹，同机器重装自动复用）。
+3. 激活后面板会**定期静默校验**（默认 12 小时）；卖家后台停用/解绑/改期会下发到面板。
+   连不上授权服务器时默认有 **7 天宽限期**，超过才失效。
 
-然后在面板 `.env` 中配置：
+可选 `.env`：
 
 ```bash
-FML_LICENSE_SERVER_URL=https://license.example.com
 # 可选：指定本地授权文件位置，建议放到持久化数据目录
 FML_LICENSE_FILE=/var/lib/frp-manager-lite/software-license.json
+# 可选：心跳间隔与离线宽限
+FML_LICENSE_CHECK_HOURS=12
+FML_LICENSE_GRACE_DAYS=7
 ```
 
 ## 六、常用命令
