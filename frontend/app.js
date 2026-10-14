@@ -2467,7 +2467,7 @@ function adminR2CardHtml(r2, r2Status, r2Source){
       <div class="r2-field"><label>Secret Access Key</label><input name="secret_access_key" type="password" placeholder="${r2.secret_set ? '已设置，留空则不修改' : 'R2 Secret Access Key'}"></div>
       <div class="r2-field r2-field-half"><label>Bucket</label><input name="bucket" value="${esc(r2.bucket || '')}" placeholder="bucket-name"></div>
       <div class="r2-field r2-field-half"><label>备份目录 Prefix</label><input name="prefix" value="${esc(r2.prefix || 'frp-manager-lite/backups')}" placeholder="frp-manager-lite/backups"></div>
-      <div class="form-actions r2-actions"><button type="submit">保存配置</button><button type="button" class="secondary" onclick="backupToR2()">上传备份</button></div>
+      <div class="form-actions r2-actions"><button type="submit">保存配置</button></div>
     </form>
     <p class="settings-hint">配置保存在本面板数据库中；Secret 不会明文回显。已有环境变量配置仍可作为兼容兜底。</p>
   </section>`;
