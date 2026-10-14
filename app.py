@@ -34,7 +34,7 @@ import urllib.parse
 import threading
 
 APP_NAME = "frp-manager-lite"
-APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.0.1")  # 面板版本，不是 frp 版本
+APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.0.2")  # 面板版本，不是 frp 版本
 SERVER_START_TS = time.time()  # 进程启动时间，用于计算面板运行时间
 FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0.66.0"))
 BASE_DIR = Path(__file__).resolve().parent
@@ -967,14 +967,29 @@ def _version_tuple(value: str) -> tuple:
 
 
 def fetch_latest_panel_version() -> str:
-    url = f"https://api.github.com/repos/{PANEL_UPDATE_REPO}/releases/latest"
-    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "frp-manager-lite"})
-    try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read().decode("utf-8", "replace"))
-        return str(data.get("tag_name") or "").strip().lstrip("vV")
-    except Exception:
-        return ""
+    """优先读 GitHub 最新 Release，否则回退到最新的 tag（兼容 release-vX.Y.Z 习惯）。"""
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "frp-manager-lite"}
+    base = f"https://api.github.com/repos/{PANEL_UPDATE_REPO}"
+    for url in (f"{base}/releases/latest", f"{base}/tags"):
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+        except Exception:
+            continue
+        tag = ""
+        if isinstance(data, dict):
+            tag = str(data.get("tag_name") or "").strip()
+        elif isinstance(data, list):
+            best_key: tuple = ()
+            for item in data:
+                name = str((item or {}).get("name") or "").strip()
+                key = _version_tuple(name)
+                if key > best_key:
+                    best_key, tag = key, name
+        if tag:
+            return ".".join(str(x) for x in _version_tuple(tag))
+    return ""
 
 
 def refresh_update_check(force: bool = False) -> None:
