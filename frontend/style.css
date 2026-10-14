@@ -1257,7 +1257,7 @@ html[data-theme="dark"] .app-shell.is-settings input,html[data-theme="dark"] .ap
 .app-shell.is-settings .backup-summary b.ok{color:var(--success)}
 
 /* ---- ops ---- */
-.app-shell.is-settings .ops-list{display:grid;grid-template-columns:1fr;gap:10px}
+.app-shell.is-settings .ops-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .app-shell.is-settings .ops-row{display:flex;align-items:center;gap:12px;width:100%;min-height:64px;padding:14px;border:1px solid var(--border);border-radius:10px;background:#fff;color:inherit;text-align:left;box-shadow:none}
 .app-shell.is-settings .ops-row:hover{border-color:var(--purple);background:var(--purple-bg)}
 .app-shell.is-settings .ops-row-icon .st-icon{width:38px;height:38px;border-radius:50%;background:var(--purple-icon-bg);color:var(--purple)}
@@ -1411,3 +1411,4 @@ html[data-theme="dark"] .tunnel-preview-endpoint>b,html[data-theme="dark"] .tunn
 .avatar-svg{display:block;border-radius:50%;overflow:hidden}
 .sidebar-user-avatar,.settings-admin-avatar,.profile-avatar{background:none;box-shadow:none;overflow:visible}
 .sidebar-user-avatar svg,.settings-admin-avatar svg,.profile-avatar svg{display:block}
+@media(max-width:560px){.app-shell.is-settings .ops-list{grid-template-columns:1fr}}
