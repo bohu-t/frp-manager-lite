@@ -1014,8 +1014,8 @@ function renderLicenseActivate(){
     try{
       const r = await api('/api/license/activate', {method:'POST', body:Object.fromEntries(fd)});
       softwareLicense = r.license || softwareLicense;
-      show(r.message || '授权已激活');
       await loadDashboard();
+      show(r.message || '授权已激活');
     }catch(err){ softwareLicense = err.data?.license || softwareLicense; show(err.message, true); }
   };
 }
@@ -1398,8 +1398,8 @@ async function loadDashboard(view='overview'){
       await api('/api/tunnels/create', {method:'POST', body:Object.fromEntries(fd)});
       tunnelFormDraft = {};
       closeTunnelModal();
-      show('隧道已创建，重新下载 frpc.toml 后重启 frpc 生效');
       await loadDashboard();
+      show('隧道已创建，重新下载 frpc.toml 后重启 frpc 生效');
     }catch(err){ show(err.message, true); }
   };
 }
@@ -1769,12 +1769,12 @@ async function loadAdmin(section=currentAdminSection){
       try{
         const r = await api('/api/admin/software-licenses/create', {method:'POST', body:Object.fromEntries(fd)});
         const keys = r.keys || (r.key ? [r.key] : []);
-        show(r.message || '软件授权码已生成');
         if(keys.length){
           const text = keys.join('\n');
           await copyText(text);
         }
         await loadAdmin();
+        show(r.message || '软件授权码已生成');
       }catch(err){ show(err.message, true); }
     };
   }
@@ -1798,8 +1798,8 @@ async function loadAdmin(section=currentAdminSection){
       const fd = new FormData(e.target);
       try{
         const r = await api('/api/admin/nodes/update', {method:'POST', body:Object.fromEntries(fd)});
-        show(r.message || '节点已更新');
         await loadAdmin();
+        show(r.message || '节点已更新');
       }catch(err){ show(err.message, true); }
     };
   }
@@ -1810,8 +1810,8 @@ async function loadAdmin(section=currentAdminSection){
       const fd = new FormData(e.target);
       try{
         const r = await api('/api/admin/users/create', {method:'POST', body:Object.fromEntries(fd)});
-        show(r.message || '用户已创建');
         await loadAdmin();
+        show(r.message || '用户已创建');
       }catch(err){ show(err.message, true); }
     };
   }
@@ -1823,12 +1823,12 @@ async function loadAdmin(section=currentAdminSection){
       try{
         const r = await api('/api/admin/invite-keys/create', {method:'POST', body:Object.fromEntries(fd)});
         const keys = r.keys || (r.key ? [r.key] : []);
-        show(r.message || '密钥已生成');
         if(keys.length){
           const text = keys.join('\n');
           await copyText(text);
         }
         await loadAdmin();
+        show(r.message || '密钥已生成');
       }catch(err){ show(err.message, true); }
     };
   }
@@ -1840,9 +1840,9 @@ async function loadAdmin(section=currentAdminSection){
       try{
         const r = await api('/api/admin/invite-keys/create', {method:'POST', body:Object.fromEntries(fd)});
         const keys = r.keys || (r.key ? [r.key] : []);
-        show(r.message || '续期密钥已生成');
         if(keys.length){ await copyText(keys.join('\n')); }
         await loadAdmin();
+        show(r.message || '续期密钥已生成');
       }catch(err){ show(err.message, true); }
     };
   }
@@ -1854,8 +1854,8 @@ async function loadAdmin(section=currentAdminSection){
       try{
         const r = await api('/api/admin/users/limits', {method:'POST', body});
         closeAdminLimits();
-        show(r.message || '已更新流量/速率限制');
         await loadAdmin();
+        show(r.message || '已更新流量/速率限制');
       }catch(err){ show(err.message, true); }
     };
   }
@@ -1867,8 +1867,8 @@ async function loadAdmin(section=currentAdminSection){
       try{
         const r = await api('/api/admin/users/email', {method:'POST', body});
         closeAdminEmail();
-        show(r.message || '邮箱已更新');
         await loadAdmin();
+        show(r.message || '邮箱已更新');
       }catch(err){ show(err.message, true); }
     };
   }
@@ -1906,7 +1906,7 @@ function renderRiskResult(data){
 async function banUser(id){
   const reason = prompt('请输入封禁原因', '违法/违规内容投诉');
   if(reason === null) return;
-  await api('/api/admin/users/ban', {method:'POST', body:{id, reason}}).then(r=>{show(r.message || '已封禁'); loadAdmin();}).catch(e=>show(e.message,true));
+  await api('/api/admin/users/ban', {method:'POST', body:{id, reason}}).then(r=>{loadAdmin().then(()=>show(r.message || '已封禁'));}).catch(e=>show(e.message,true));
 }
 
 async function backupToR2(){
@@ -1922,8 +1922,8 @@ async function saveR2Config(e){
   const fd = new FormData(e.target);
   try{
     const r = await api('/api/admin/r2/config', {method:'POST', body:Object.fromEntries(fd)});
-    show(r.message || 'R2 配置已保存');
     await reloadAdminCurrentPage();
+    show(r.message || 'R2 配置已保存');
   }catch(err){ show(err.message, true); }
 }
 
@@ -2030,10 +2030,10 @@ async function submitAdminFrpc(e){
     const r = await api('/api/admin/tunnels/create-for-user', {method:'POST', body});
     if(r.config) downloadText(r.filename || 'frpc.toml', r.config || '');
     if(r.deploy_script) downloadText(r.script_filename || 'deploy-frpc.sh', r.deploy_script || '');
-    show(r.message || '隧道已创建并下载 frpc 配置和部署脚本');
     adminFrpcDraftRows = [{name:'web', proxy_type:'tcp', local_ip:'127.0.0.1', local_port:'80', remote_port:'', custom_domains:'', secret_key:''}];
     closeAdminFrpcModal();
     await reloadAdminCurrentPage();
+    show(r.message || '隧道已创建并下载 frpc 配置和部署脚本');
   }catch(err){ show(err.message, true); }
 }
 function fileToDataUrl(file){
@@ -2059,7 +2059,7 @@ async function restoreFullBackup(){
 }
 
 async function adminToggle(id){ await api('/api/admin/users/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
-async function adminExtend(id){ await api('/api/admin/users/extend', {method:'POST', body:{id, days:30}}).then(r=>{show(r.message||'已续期'); loadAdmin();}).catch(e=>show(e.message,true)); }
+async function adminExtend(id){ await api('/api/admin/users/extend', {method:'POST', body:{id, days:30}}).then(r=>{loadAdmin().then(()=>show(r.message||'已续期'));}).catch(e=>show(e.message,true)); }
 function openAdminLimits(id, trafficBytes=0, bandwidthKbps=0, username=''){
   const modal = document.querySelector('#adminLimitsModal');
   if(!modal) return;
@@ -2085,13 +2085,13 @@ function openAdminEmail(id, email, username){
   modal.classList.remove('hidden');
 }
 function closeAdminEmail(){ document.querySelector('#adminEmailModal')?.classList.add('hidden'); }
-async function adminReset(id){ if(confirm('重置该用户密码？')) await api('/api/admin/users/reset-password', {method:'POST', body:{id}}).then(r=>{show(r.message); loadAdmin();}).catch(e=>show(e.message,true)); }
-async function adminResetToken(id){ if(confirm('重置该用户的面板令牌？重置后该用户需重新下载 frpc 配置。')) await api('/api/admin/users/reset-token', {method:'POST', body:{id}}).then(r=>{show(r.message||'已重置令牌'); loadAdmin();}).catch(e=>show(e.message,true)); }
-async function adminDelete(id){ if(confirm('删除用户会释放端口并删除隧道，确定？')) await api('/api/admin/users/delete', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
-async function inviteToggle(id){ await api('/api/admin/invite-keys/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
-async function inviteDelete(id){ if(confirm('删除这个注册密钥？')) await api('/api/admin/invite-keys/delete', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
+async function adminReset(id){ if(confirm('重置该用户密码？')) await api('/api/admin/users/reset-password', {method:'POST', body:{id}}).then(r=>{loadAdmin().then(()=>show(r.message||'密码已重置'));}).catch(e=>show(e.message,true)); }
+async function adminResetToken(id){ if(confirm('重置该用户的面板令牌？重置后该用户需重新下载 frpc 配置。')) await api('/api/admin/users/reset-token', {method:'POST', body:{id}}).then(r=>{loadAdmin().then(()=>show(r.message||'已重置令牌'));}).catch(e=>show(e.message,true)); }
+async function adminDelete(id){ if(confirm('删除用户会释放端口并删除隧道，确定？')) await api('/api/admin/users/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('用户已删除'))).catch(e=>show(e.message,true)); }
+async function inviteToggle(id){ await api('/api/admin/invite-keys/toggle', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥状态已更新'))).catch(e=>show(e.message,true)); }
+async function inviteDelete(id){ if(confirm('删除这个注册密钥？')) await api('/api/admin/invite-keys/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥已删除'))).catch(e=>show(e.message,true)); }
 async function softwareLicenseToggle(id){ await api('/api/admin/software-licenses/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
-async function softwareLicenseUnbind(id){ if(confirm('解绑后该授权码可被下一台客户服务器重新激活，确定？')) await api('/api/admin/software-licenses/unbind', {method:'POST', body:{id}}).then(r=>{show(r.message || '已解绑'); loadAdmin();}).catch(e=>show(e.message,true)); }
+async function softwareLicenseUnbind(id){ if(confirm('解绑后该授权码可被下一台客户服务器重新激活，确定？')) await api('/api/admin/software-licenses/unbind', {method:'POST', body:{id}}).then(r=>{loadAdmin().then(()=>show(r.message || '已解绑'));}).catch(e=>show(e.message,true)); }
 function editNode(n){
   const card = document.querySelector('#editNodeCard');
   const f = document.querySelector('#editNodeForm');
@@ -2526,8 +2526,8 @@ function wireAdminSettingsForms(){
       e.preventDefault();
       try{
         const r = await api('/api/admin/smtp-config', {method:'POST', body:Object.fromEntries(new FormData(e.target))});
-        show(r.message || '邮件设置已保存');
         await reloadAdminCurrentPage();
+        show(r.message || '邮件设置已保存');
       }catch(err){ show(err.message, true); }
     };
   }
@@ -2554,8 +2554,8 @@ function wireAdminSettingsForms(){
       };
       try{
         const r = await api('/api/admin/notify-config', {method:'POST', body});
-        show(r.message || '通知设置已保存');
         await reloadAdminCurrentPage();
+        show(r.message || '通知设置已保存');
       }catch(err){ show(err.message, true); }
     };
   }
@@ -2726,8 +2726,8 @@ function initUserEmailForm(){
     const email = String(new FormData(form).get('email') || '').trim();
     try{
       const r = await api('/api/user/email', {method:'POST', body:{email}});
-      show(r.message || '邮箱已更新');
       await loadDashboard('profile');
+      show(r.message || '邮箱已更新');
     }catch(err){ show(err.message, true); }
   };
 }
@@ -2745,8 +2745,8 @@ function initRenewForm(){
     try{
       const r = await api('/api/user/renew', {method:'POST', body:{key}});
       if(box){ box.className = 'renew-result ok'; box.textContent = r.message || '续期成功'; }
-      show(r.message || '续期成功');
       await loadDashboard('profile');
+      show(r.message || '续期成功');
     }catch(err){
       if(box){ box.className = 'renew-result error'; box.textContent = err.message || '续期失败'; }
     }finally{
@@ -2761,7 +2761,7 @@ async function switchDashboardNode(nodeId){
   try{
     await api('/api/user/node/switch',{method:'POST',body:{node_id:nodeId}});
     closeNodeSwitch();
-    show('接入节点已切换，建议重新下载 frpc 配置。');
     await loadDashboard();
+    show('接入节点已切换，建议重新下载 frpc 配置。');
   }catch(err){show(err.message,true);}
 }
