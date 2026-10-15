@@ -60,6 +60,15 @@ FML_SETUP_KEY=***               # 添加 frps 节点的密钥
 FRP_SERVER_ADDR=frp.example.com # frps 地址
 FRP_SERVER_PORT=7000            # frps 端口
 FRP_AUTH_TOKEN=***              # frps token
+# 软件授权（由卖家签发）
+FML_LICENSE_FILE=/data/software-license.json   # 本地授权文件位置
+FML_LICENSE_CHECK_HOURS=12      # 授权静默校验间隔（小时）
+FML_LICENSE_GRACE_DAYS=7        # 连不上授权服务器的宽限天数
+# 版本更新提醒（可选）
+FML_UPDATE_CHECK_HOURS=8        # 检查新版本间隔（小时）
+FML_UPDATE_URL=                 # 自定义版本地址（纯文本或 {"version":"x"}，优先）
+FML_UPDATE_VERSION_REPO=bohu-t/lite-install  # 公开仓库的 VERSION 文件
+FML_UPDATE_LINK=                # 升级提示跳转地址
 ```
 
 ## 二、添加 frps 节点
@@ -85,7 +94,9 @@ bash add-frps-node.sh
 
 ### 3.1 激活软件授权（首次）
 
-部署后访问面板，输入卖家给你的鉴权服务器地址和服务器软件授权码。程序只在安装/首次部署时向鉴权服务器验证一次；成功后会在部署机器上生成本地授权文件（默认随数据目录保存，或由 `FML_LICENSE_FILE` 指定）。以后重装时程序读取这个授权文件并与当前机器指纹校验，一致就不需要重新鉴权。
+部署后访问面板，输入卖家给你的鉴权服务器地址和软件授权码完成激活。激活会在部署机器上生成本地授权文件（默认随数据目录保存，或由 `FML_LICENSE_FILE` 指定），并与当前机器指纹绑定；**同机器重装无需重新鉴权**。
+
+激活后面板会**定期向鉴权服务器静默校验**（默认 12 小时）：卖家后台停用/解绑/调整有效期会下发到面板；连不上授权服务器时有 7 天宽限期（详见 [五、软件授权](#五软件授权由卖家签发)）。
 
 ### 3.2 创建注册密钥
 
