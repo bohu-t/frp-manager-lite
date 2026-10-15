@@ -71,7 +71,7 @@ DOMAIN_PROXY_TYPES = {"http", "https", "tcpmux"}
 SECRET_KEY_PROXY_TYPES = {"stcp", "xtcp"}
 PROXY_TYPE_ORDER = ["tcp", "udp", "http", "https", "stcp", "xtcp", "tcpmux"]
 SOFTWARE_LICENSE_SECRET = os.getenv("FML_SOFTWARE_LICENSE_SECRET", "")
-SOFTWARE_LICENSE_SERVER_URL = "https://mcp.224130.xyz"
+SOFTWARE_LICENSE_SERVER_URL = "http://mcp.224130.xyz:9014"
 SOFTWARE_LICENSE_FILE = Path(os.getenv("FML_LICENSE_FILE", DB_PATH.parent / "software-license.json"))
 # 面板内不再内置「授权服务器」模式（防止拿到源码后自助授权）；授权只由卖家的独立服务签发
 SOFTWARE_LICENSE_AUTHORITY = False
