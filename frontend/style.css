@@ -1417,3 +1417,39 @@ html[data-theme="dark"] .tunnel-preview-endpoint>b,html[data-theme="dark"] .tunn
 .admin-cred-modal{width:min(460px,100%)}
 .admin-cred-modal .section-title{margin-bottom:12px}
 .admin-cred-modal .grid{gap:12px}
+
+/* === 修复：登录页顶栏暗色跟随（覆盖 .auth-page>header.auth-topbar 的高优先级亮色） === */
+html[data-theme="dark"] .auth-page{background:#0f172a;color:#e2e8f0}
+html[data-theme="dark"] .auth-page>header.auth-topbar{background:#1e293b;border-bottom-color:#334155}
+html[data-theme="dark"] .auth-page .auth-brand{color:#f1f5f9}
+html[data-theme="dark"] .auth-page .auth-topbar-tools{color:#94a3b8}
+html[data-theme="dark"] .auth-theme-button:hover{background:#334155;color:#e2e8f0}
+html[data-theme="dark"] .auth-form-card{background:#1e293b;border-color:#334155}
+
+/* === 修复：设置页跟随暗色主题（覆盖作用域内的浅色 token） === */
+html[data-theme="dark"] .app-shell.is-settings{
+  --page-bg:#0f172a; --card-bg:#1e293b;
+  --primary-light:#1e3a8a; --primary-border:#334155;
+  --ink:#e2e8f0; --text:#e2e8f0; --muted:#94a3b8; --soft:#cbd5e1;
+  --border:#334155; --divider:#334155;
+  --success-bg:#123524; --warning-bg:#3a2c12; --danger-bg:#3a1a1e; --purple-bg:#2a2140;
+  --blue-icon-bg:#1e3a5f; --green-icon-bg:#12352a; --orange-icon-bg:#3a2a12; --purple-icon-bg:#2a2140;
+  --shadow-card:0 4px 18px rgba(0,0,0,.35);
+}
+html[data-theme="dark"] .app-shell.is-settings .workspace-main{background:var(--page-bg)}
+html[data-theme="dark"] .app-shell.is-settings .card{background:var(--card-bg);border-color:var(--border)}
+html[data-theme="dark"] .app-shell.is-settings input,
+html[data-theme="dark"] .app-shell.is-settings select,
+html[data-theme="dark"] .app-shell.is-settings textarea{background:#0f172a;border-color:var(--border);color:var(--ink)}
+html[data-theme="dark"] .app-shell.is-settings button.secondary{background:#0f172a;border-color:var(--border);color:#cbd5e1}
+html[data-theme="dark"] .app-shell.is-settings .notify-channel-fields{background:#0f172a}
+html[data-theme="dark"] .app-shell.is-settings .notify-chip{background:#0f172a;border-color:var(--border);color:#cbd5e1}
+html[data-theme="dark"] .app-shell.is-settings .ops-row{background:#1e293b}
+html[data-theme="dark"] .app-shell.is-settings .backup-unit{background:#0f172a}
+html[data-theme="dark"] .app-shell.is-settings .backup-summary{background:#172554;border-color:#1e3a8a}
+html[data-theme="dark"] .app-shell.is-settings .sidebar-service-status{background:#0b1220}
+html[data-theme="dark"] .app-shell.is-settings .switch-track{background:#334155}
+
+/* 设置页：主题切换按钮 */
+.app-shell.is-settings .settings-toolbar{display:flex;justify-content:flex-end;margin:0 0 14px}
+.app-shell.is-settings .settings-toolbar button{min-height:34px}

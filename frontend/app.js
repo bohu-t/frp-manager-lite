@@ -181,7 +181,7 @@ function authShell(title, subtitle, formHtml, footHtml='', nodes=[]){
       <header class="auth-topbar">
         <div class="auth-topbar-inner">
           <div class="auth-brand"><span class="auth-brand-mark">F</span><span>Frp 管理台</span></div>
-          <div class="auth-topbar-tools"><span>安全、稳定、易用</span><button type="button" class="auth-theme-button" data-nav="theme" title="切换主题">◐</button></div>
+          <div class="auth-topbar-tools"><span>安全、稳定、易用</span><button type="button" class="auth-theme-button" data-nav="theme-toggle" title="切换主题">◐</button></div>
         </div>
       </header>
       <main class="auth-main">
@@ -2704,6 +2704,7 @@ async function loadAdminSettings(){
   window.adminProxyTypeOptions = data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux'];
   const frpcUserOptions = frpcUsers.map(u => `<option value="${u.id}">${esc(u.username)} · ${esc(u.node_region || '-')} / ${esc(u.node_name || '-')} · 端口 ${u.port_count || 0} · 可用 ${(u.available_ports || []).length} · 隧道 ${u.tunnel_count || 0}</option>`).join('');
   app.innerHTML = appLayoutHtml(`
+    <div class="settings-toolbar"><button type="button" class="secondary" data-nav="theme-toggle">◐ 切换主题</button></div>
     <div class="admin-settings-grid">
       <div class="admin-settings-col">${adminNotifyCardHtml(notify)}${adminBackupCardHtml(r2, r2Status, r2Source)}</div>
       <div class="admin-settings-col">${adminSmtpCardHtml(smtp)}${adminOpsCardHtml()}${adminR2CardHtml(r2, r2Status, r2Source)}</div>
