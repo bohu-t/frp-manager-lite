@@ -3184,7 +3184,7 @@ case "$arch" in
 esac
 
 config_path="$DEFAULT_CONFIG"
-if need_cmd systemctl && systemctl list-unit-files 2>/dev/null | grep -q '^frpc\.service'; then
+if need_cmd systemctl && systemctl list-unit-files 2>/dev/null | grep -q '^frpc\\.service'; then
   detected="$(systemctl cat frpc 2>/dev/null | sed -nE 's/.*[[:space:]]-c[[:space:]]+([^[:space:]]+).*/\\1/p' | tail -1 || true)"
   [ -n "$detected" ] && config_path="$detected"
 elif [ -f /etc/init.d/frpc ]; then
