@@ -844,10 +844,16 @@ async function measureClientLatency(){
   if(ms == null){ ms = await probeLatency(LATENCY_PROBE_URL); if(ms != null) src = 'cloudflare'; }
   if(ms == null){ ms = await probeLatency('/api/ping'); if(ms != null) src = 'panel'; }
   const live = document.getElementById('nodeLatencyValue');
-  if(!live) return;
-  if(ms == null){ live.textContent = live.dataset.fallback || '暂未测量'; live.title = ''; return; }
-  live.textContent = `${Math.round(ms)} ms`;
-  live.title = {node:'用户→节点实测', cloudflare:'浏览器↔Cloudflare 就近节点', panel:'浏览器→面板'}[src] || '';
+  const overviewLive = document.getElementById('overviewNodeLatencyValue');
+  if(!live && !overviewLive) return;
+  if(ms == null){
+    [live, overviewLive].filter(Boolean).forEach(el => { el.textContent = el.dataset.fallback || '暂未测量'; el.title = ''; });
+    return;
+  }
+  [live, overviewLive].filter(Boolean).forEach(el => {
+    el.textContent = `${Math.round(ms)} ms`;
+    el.title = {node:'用户→节点实测', cloudflare:'浏览器↔Cloudflare 就近节点', panel:'浏览器→面板'}[src] || '';
+  });
 }
 
 async function measureNodeLatencyByAddr(addr){
@@ -1249,6 +1255,7 @@ async function loadDashboard(view='overview'){
         </section>
         <section class="workspace-stat ov-stat" style="--ov-accent:#22c55e;--ov-tint:#f0fdf4">
           <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.6"/></svg></span><div class="ov-stat-copy"><span class="ov-stat-label">当前节点</span><strong class="ov-stat-value">${esc(node.region || node.name || '-')}</strong><span class="ov-stat-sub">${esc(node.name || '未分配节点')}</span></div><span class="ov-stat-state ${nodeStateClass}"><i></i>${nodeState}</span></div>
+          <div class="ov-node-meta"><span>延迟 <b id="overviewNodeLatencyValue" data-fallback="${esc(nodeLatency)}">${esc(nodeLatency)}</b></span><span class="ov-node-meta-sep">·</span><span>带宽 <b>${node.bandwidth_mbps || node.bandwidth || node.bandwidth_mbps === 0 ? esc(node.bandwidth_mbps ?? node.bandwidth) + ' Mbps' : '未设置'}</b></span></div>
         </section>
         <section class="workspace-stat ov-stat" style="--ov-accent:#8b5cf6;--ov-tint:#f5f2ff">
           <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24">${UIICONS.chart}</svg></span><div class="ov-stat-copy"><span class="ov-stat-label">今日流量</span><strong class="ov-stat-value">${fmtBytes(todayTraffic)}</strong><span class="ov-stat-sub">${trafficLimit ? '上限 ' + fmtBytes(trafficLimit) : '当前不限额；按今日统计'}</span></div></div>

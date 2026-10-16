@@ -1533,6 +1533,12 @@ html[data-theme="dark"] .topbar-banner-copy .topbar-banner-sub{color:#c2d4ee}
 .user-overview-stats .ov-stat .tunnel-usage-track{height:5px;border-radius:999px;background:#f1f5f9}
 .user-overview-stats .ov-stat .tunnel-usage-track span{background:var(--ov-accent,#3478f6)}
 .user-overview-stats .ov-stat .tunnel-usage-track .expiry-usage-fill{background:var(--ov-accent,#f59e0b)}
+.user-overview-stats .ov-stat .ov-node-meta{display:flex;align-items:center;gap:7px;margin-top:auto;color:#9ca3af;font-size:11px;line-height:1.3;white-space:nowrap}
+.user-overview-stats .ov-stat .ov-node-meta b{color:#6b7280;font-weight:600}
+.user-overview-stats .ov-stat .ov-node-meta-sep{color:#d1d5db}
+html[data-theme="dark"] .user-overview-stats .ov-stat .ov-node-meta{color:#64748b}
+html[data-theme="dark"] .user-overview-stats .ov-stat .ov-node-meta b{color:#94a3b8}
+html[data-theme="dark"] .user-overview-stats .ov-stat .ov-node-meta-sep{color:#475569}
 html[data-theme="dark"] .user-overview-stats .ov-stat{background:#1e293b;border-color:#334155}
 html[data-theme="dark"] .user-overview-stats .ov-stat .ov-stat-badge{background:rgba(148,163,184,.14)}
 html[data-theme="dark"] .user-overview-stats .ov-stat .ov-stat-value{color:#f1f5f9}
