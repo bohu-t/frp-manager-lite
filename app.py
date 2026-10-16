@@ -1210,6 +1210,16 @@ def verify_email_code(username: str, code: str) -> tuple[bool, str]:
     return True, "ok"
 
 
+def verify_registration_code(username: str, email: str, code: str) -> tuple[bool, str]:
+    """校验注册邮箱验证码：必须与发送时的邮箱一致。"""
+    email = str(email or "").strip().lower()
+    with db() as conn:
+        row = conn.execute("SELECT email FROM email_codes WHERE username=? ORDER BY id DESC LIMIT 1", (username,)).fetchone()
+    if not row or str(row["email"] or "").strip().lower() != email:
+        return False, "请先获取邮箱验证码"
+    return verify_email_code(username, code)
+
+
 def reset_password_by_code(username: str, code: str, new_password: str) -> tuple[bool, str]:
     username = str(username or "").strip()
     if not username:
@@ -2834,15 +2844,28 @@ def create_invite_keys_batch(note: str, max_uses: int, max_ports: int, user_expi
     return True, f"已生成 {len(keys)} 枚密钥", keys
 
 
-def register_with_invite(username: str, password: str, invite_key: str, node_id: int) -> tuple[bool, str]:
+def register_with_invite(username: str, password: str, invite_key: str, node_id: int, email: str = "", code: str = "") -> tuple[bool, str]:
     username = username.strip()
     invite_key = invite_key.strip().upper()
+    email = str(email or "").strip()
     if not username or len(username) > 32 or not username.replace("_", "").replace("-", "").isalnum():
         return False, "用户名只能包含字母、数字、下划线、短横线，长度 1-32"
     if len(password) < 6:
         return False, "密码至少 6 位"
     if not OPEN_REGISTRATION and not invite_key:
         return False, "请输入注册密钥"
+    if OPEN_REGISTRATION and not invite_key:
+        # 开放注册：必须填写邮箱并通过邮箱验证码校验
+        if not email or "@" not in email or len(email) < 5 or len(email) > 120:
+            return False, "请填写正确的邮箱地址"
+        if not str(code or "").strip():
+            return False, "请填写邮箱验证码"
+        ok_code, msg_code = verify_registration_code(username, email, code)
+        if not ok_code:
+            return False, msg_code
+        with db() as conn:
+            if conn.execute("SELECT id FROM users WHERE lower(email)=lower(?) AND email!=''", (email,)).fetchone():
+                return False, "该邮箱已被注册"
     with db() as conn:
         key_row = None
         if invite_key:
@@ -2873,7 +2896,7 @@ def register_with_invite(username: str, password: str, invite_key: str, node_id:
         expires_days = int(key_row["user_expires_days"]) if key_row else OPEN_REGISTRATION_EXPIRES_DAYS
         user_expires_at = 0 if expires_days == 0 else now() + expires_days * 86400
         try:
-            cur = insert_user_record(conn, username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, user_expires_at, node_id, invite_key if key_row else ("OPEN-" + secrets.token_urlsafe(10)), traffic_limit_bytes, bandwidth_limit_kbps)
+            cur = insert_user_record(conn, username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, user_expires_at, node_id, invite_key if key_row else ("OPEN-" + secrets.token_urlsafe(10)), traffic_limit_bytes, bandwidth_limit_kbps, email)
         except sqlite3.IntegrityError as exc:
             if "users.username" in str(exc) or "username" in str(exc).lower():
                 return False, "用户名已存在"
@@ -4393,12 +4416,53 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, "user": public_user(user)}, headers={"Set-Cookie": f"fml_session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_TTL}"})
             return
 
+        if path == "/api/register/request-code":
+            if not OPEN_REGISTRATION:
+                self.send_json({"ok": False, "error": "当前未开放注册"}, 400)
+                return
+            ok_rate, retry_after = rate_limit_check(f"regcode:{client_ip(self)}", REGISTER_RATE_LIMIT)
+            if not ok_rate:
+                self.send_json({"ok": False, "error": f"操作过于频繁，请 {retry_after} 秒后再试", "retry_after": retry_after}, 429)
+                return
+            username = str(data.get("username", "")).strip()
+            email = str(data.get("email", "")).strip()
+            if not username or len(username) > 32 or not username.replace("_", "").replace("-", "").isalnum():
+                self.send_json({"ok": False, "error": "用户名只能包含字母、数字、下划线、短横线，长度 1-32"}, 400)
+                return
+            if not email or "@" not in email or len(email) < 5 or len(email) > 120:
+                self.send_json({"ok": False, "error": "请填写正确的邮箱地址"}, 400)
+                return
+            with db() as conn:
+                if not smtp_configured(conn):
+                    self.send_json({"ok": False, "error": "邮件服务未配置，请联系管理员"}, 400)
+                    return
+                if conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone():
+                    self.send_json({"ok": False, "error": "用户名已存在"}, 400)
+                    return
+                if conn.execute("SELECT id FROM users WHERE lower(email)=lower(?) AND email!=''", (email,)).fetchone():
+                    self.send_json({"ok": False, "error": "该邮箱已被注册"}, 400)
+                    return
+                last = conn.execute("SELECT created_at FROM email_codes WHERE username=? ORDER BY id DESC LIMIT 1", (username,)).fetchone()
+            if last and now() - int(last["created_at"]) < 60:
+                self.send_json({"ok": False, "error": f"验证码已发送，请 {60 - (now() - int(last['created_at']))} 秒后再试"}, 429)
+                return
+            code = create_email_code(username, email)
+            ok, msg = send_email(email, "【Frp 管理台】注册验证码",
+                                 f"您的注册验证码是：{code}（10 分钟内有效）。如果不是您本人操作，请忽略本邮件。")
+            if not ok:
+                self.send_json({"ok": False, "error": msg}, 500)
+                return
+            masked = mask_email(email)
+            audit("register_code_sent", None, None, None, "", f"向 {masked} 发送注册验证码")
+            self.send_json({"ok": True, "message": f"验证码已发送至 {masked}", "email": masked})
+            return
+
         if path == "/api/register":
             ok_rate, retry_after = rate_limit_check(f"register:{client_ip(self)}", REGISTER_RATE_LIMIT)
             if not ok_rate:
                 self.send_json({"ok": False, "error": f"注册尝试过多，请 {retry_after} 秒后再试", "retry_after": retry_after}, 429)
                 return
-            ok, msg = register_with_invite(str(data.get("username", "")), str(data.get("password", "")), str(data.get("invite_key", "")), int(data.get("node_id", 0)))
+            ok, msg = register_with_invite(str(data.get("username", "")), str(data.get("password", "")), str(data.get("invite_key", "")), int(data.get("node_id", 0)), str(data.get("email", "")), str(data.get("code", "")))
             self.send_json({"ok": ok, "message": msg, "error": None if ok else msg}, 200 if ok else 400)
             return
 

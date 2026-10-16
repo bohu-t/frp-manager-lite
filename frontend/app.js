@@ -913,12 +913,13 @@ async function renderRegister(){
   let nodes = [], registration = {open_registration: false};
   try { nodes = await loadNodes(); registration = await api('/api/registration-status'); } catch(e) { show('加载注册信息失败：' + e.message, true); }
   const openRegistration = !!registration.open_registration;
-  const registerIntro = openRegistration ? '创建账号，稍后再绑定节点和端口' : '输入密钥并选择适合你的地区';
+  const registerIntro = openRegistration ? '填写邮箱并通过验证码完成注册' : '输入密钥并选择适合你的地区';
   app.innerHTML = authShell(openRegistration ? '开放注册' : '密钥注册', registerIntro, `
       <form id="registerForm" class="stack-form auth-login-form">
         <div class="input-group"><label class="input-label" for="registerUsername">用户名</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('user')}</span><input id="registerUsername" class="input-ios" name="username" autocomplete="username" placeholder="请输入用户名" required></div></div>
         <div class="input-group"><label class="input-label" for="registerPassword">密码</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('lock')}</span><input id="registerPassword" class="input-ios auth-password-input" name="password" type="password" autocomplete="new-password" minlength="6" placeholder="请输入密码（至少 6 位）" required><button type="button" class="auth-password-toggle" onclick="togglePasswordVisibility('registerPassword', this)" aria-label="显示密码" title="显示密码">${iconSvg('eye')}</button></div></div>
-        ${openRegistration ? '<p class="panel-note small">当前已开放注册，账号默认不绑定节点、不占用端口，且无时间限制；后续可按需分配。</p><input type="hidden" name="node_id" value="0"><input type="hidden" name="invite_key" value="">' : '<div class="input-group"><label class="input-label" for="registerNode">接入节点</label><select id="registerNode" class="input-ios" name="node_id" required>${nodeOptions(nodes)}</select></div><div class="input-group"><label class="input-label" for="registerKey">注册密钥</label><input id="registerKey" class="input-ios" name="invite_key" placeholder="FML-..." required></div>'}
+        ${openRegistration ? `<div class="input-group"><label class="input-label" for="registerEmail">邮箱</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('mail')}</span><input id="registerEmail" class="input-ios" name="email" type="email" autocomplete="email" placeholder="请输入邮箱，用于接收验证码" required></div></div>
+        <div class="input-group"><label class="input-label" for="registerCode">邮箱验证码</label><div class="row" style="gap:8px"><input id="registerCode" class="input-ios" name="code" inputmode="numeric" maxlength="6" placeholder="6 位验证码" required style="flex:1;min-width:0"><button type="button" class="secondary" id="registerCodeBtn" onclick="sendRegisterCode()">获取验证码</button></div></div><input type="hidden" name="node_id" value="0"><input type="hidden" name="invite_key" value="">` : '<div class="input-group"><label class="input-label" for="registerNode">接入节点</label><select id="registerNode" class="input-ios" name="node_id" required>${nodeOptions(nodes)}</select></div><div class="input-group"><label class="input-label" for="registerKey">注册密钥</label><input id="registerKey" class="input-ios" name="invite_key" placeholder="FML-..." required></div>'}
         <p class="row"><button>注册</button><button type="button" class="secondary" onclick="renderLogin()">返回登录</button></p>
       </form>`, '', nodes);
   document.querySelector('#registerForm').onsubmit = async (e) => {
@@ -956,6 +957,26 @@ async function renderForgotPassword(){
       renderLogin();
     }catch(err){ show(err.message, true); }
   };
+}
+
+async function sendRegisterCode(){
+  const u = document.querySelector('#registerUsername');
+  const e = document.querySelector('#registerEmail');
+  const btn = document.querySelector('#registerCodeBtn');
+  const name = u ? u.value.trim() : '';
+  const email = e ? e.value.trim() : '';
+  if(!name){ show('请先填写用户名', true); return; }
+  if(!email){ show('请先填写邮箱', true); return; }
+  if(btn) btn.disabled = true;
+  try{
+    const r = await api('/api/register/request-code', {method:'POST', body:{username:name, email:email}});
+    show(r.message || '验证码已发送');
+    let n = 60;
+    if(btn){
+      btn.textContent = n + 's';
+      const t = setInterval(() => { n--; if(n <= 0){ clearInterval(t); btn.disabled = false; btn.textContent = '获取验证码'; } else { btn.textContent = n + 's'; } }, 1000);
+    }
+  }catch(err){ if(btn) btn.disabled = false; show(err.message, true); }
 }
 
 async function sendResetCode(){
