@@ -1274,7 +1274,7 @@ html[data-theme="dark"] .app-shell.is-settings input,html[data-theme="dark"] .ap
 /* ---- responsive ---- */
 @media(min-width:761px){
   .app-shell.is-settings .app-sidebar{width:232px;padding:0 14px 14px}
-  .app-shell.is-settings .workspace-main{margin-left:232px;padding:22px 24px 40px}
+  .app-shell.is-settings .workspace-main{margin-left:232px;padding:0 24px 40px}
   .app-shell.is-settings .workspace-topbar.settings-topbar{margin:0 -24px 22px}
 }
 @media(max-width:1200px){
@@ -1296,7 +1296,7 @@ html[data-theme="dark"] .app-shell.is-settings input,html[data-theme="dark"] .ap
 }
 @media(max-width:760px){
   .app-shell.is-settings .app-sidebar{background:var(--sidebar-bg);border-bottom:1px solid var(--border)}
-  .app-shell.is-settings .workspace-main{padding:16px 14px 28px}
+  .app-shell.is-settings .workspace-main{padding:0 14px 28px}
   .app-shell.is-settings .workspace-topbar.settings-topbar{margin:0 -14px 16px;padding:14px;flex-direction:column;align-items:flex-start;gap:12px}
   .app-shell.is-settings .settings-head-actions{width:100%;justify-content:space-between}
   .app-shell.is-settings .card{padding:16px}
