@@ -2776,11 +2776,22 @@ async function loadAdminDashboard(auto=false){
   app.innerHTML = appLayoutHtml(`
 
     <div class="workspace-stats user-overview-stats admin-overview-stats">
-      <section class="workspace-stat overview-icon-stat"><div class="overview-stat-main"><span class="overview-stat-icon">${QICON_TRAFFIC}</span><div class="overview-stat-copy"><span>总流量</span><strong>${fmtBytes(data.traffic_today)}</strong><small>今日全平台 · 所有用户</small></div></div></section>
-      <section class="workspace-stat highlight overview-icon-stat"><div class="overview-stat-main"><span class="overview-stat-icon">${QICON_VERSION}</span><div class="overview-stat-copy"><span>面板版本</span><strong>${esc(data.panel_version || data.version || '-')}</strong><small>frp-manager-lite</small></div></div></section>
-      <section class="workspace-stat overview-icon-stat"><div class="overview-stat-main"><span class="overview-stat-icon">${QICON_SERVER}</span><div class="overview-stat-copy"><span>节点在线</span><strong>${data.active_node_count}/${data.node_count}</strong><small>每 ${refreshSeconds} 秒检查认证端口</small></div></div></section>
-      <section class="workspace-stat overview-icon-stat"><div class="overview-stat-main"><span class="overview-stat-icon">${QICON_PORT}</span><div class="overview-stat-copy"><span>端口使用率</span><strong>${portUsage}%</strong><small>已用 ${usedPorts} · 空闲 ${freePorts} · 共 ${totalPorts}</small></div></div><div class="tunnel-usage"><div class="tunnel-usage-label"><span>端口池</span><b>${portUsage}%</b></div><div class="tunnel-usage-track" role="progressbar" aria-label="端口使用率" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${portUsage}"><span style="width:${portUsage}%"></span></div></div></section>
-      <section class="workspace-stat overview-icon-stat"><div class="overview-stat-main"><span class="overview-stat-icon">${QICON_USER}</span><div class="overview-stat-copy"><span>用户</span><strong>${userStats.active}/${userStats.total}</strong><small>活跃用户 / 总用户</small></div></div></section>
+      <section class="workspace-stat ov-stat" style="--ov-accent:#8b5cf6;--ov-tint:#f5f2ff">
+        <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24">${UIICONS.chart}</svg></span><div class="ov-stat-copy"><span class="ov-stat-label">总流量</span><strong class="ov-stat-value">${fmtBytes(data.traffic_today)}</strong><span class="ov-stat-sub">今日全平台 · 所有用户</span></div></div>
+      </section>
+      <section class="workspace-stat ov-stat" style="--ov-accent:#3478f6;--ov-tint:#eef4ff">
+        <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24">${UIICONS.file}</svg></span><div class="ov-stat-copy"><span class="ov-stat-label">面板版本</span><strong class="ov-stat-value">${esc(data.panel_version || data.version || '-')}</strong><span class="ov-stat-sub">frp-manager-lite</span></div></div>
+      </section>
+      <section class="workspace-stat ov-stat" style="--ov-accent:#22c55e;--ov-tint:#f0fdf4">
+        <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24">${UIICONS.node}</svg></span><div class="ov-stat-copy"><span class="ov-stat-label">节点在线</span><strong class="ov-stat-value">${data.active_node_count}/${data.node_count}</strong><span class="ov-stat-sub">每 ${refreshSeconds} 秒检查认证端口</span></div></div>
+      </section>
+      <section class="workspace-stat ov-stat" style="--ov-accent:#f59e0b;--ov-tint:#fff8ec">
+        <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24">${UIICONS.port}</svg></span><div class="ov-stat-copy"><span class="ov-stat-label">端口使用率</span><strong class="ov-stat-value">${portUsage}%</strong><span class="ov-stat-sub">已用 ${usedPorts} · 空闲 ${freePorts} · 共 ${totalPorts}</span></div></div>
+        <div class="tunnel-usage"><div class="tunnel-usage-label"><span>端口池</span><b>${portUsage}%</b></div><div class="tunnel-usage-track" role="progressbar" aria-label="端口使用率" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${portUsage}"><span style="width:${portUsage}%"></span></div></div>
+      </section>
+      <section class="workspace-stat ov-stat" style="--ov-accent:#2c6dd2;--ov-tint:#eef4ff">
+        <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24">${UIICONS.users}</svg></span><div class="ov-stat-copy"><span class="ov-stat-label">用户</span><strong class="ov-stat-value">${userStats.active}/${userStats.total}</strong><span class="ov-stat-sub">活跃用户 / 总用户</span></div></div>
+      </section>
     </div>
 
     <div class="admin-dashboard-grid">

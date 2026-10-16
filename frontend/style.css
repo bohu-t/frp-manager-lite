@@ -976,7 +976,7 @@ html[data-theme="dark"] .activity-icon{background:#1e3a8a}
 .admin-overview-stats{margin-bottom:0}
 .admin-overview-stats .overview-icon-stat{display:flex;flex-direction:column;justify-content:space-between;gap:12px;align-items:stretch}
 .admin-overview-stats .overview-stat-icon svg{display:block;width:100%;height:100%}
-@media(min-width:1101px){.admin-overview-stats{grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}.admin-overview-stats .workspace-stat{padding:12px 14px}.admin-overview-stats .workspace-stat strong{margin:3px 0 1px;font-size:20px}.admin-overview-stats .workspace-stat span,.admin-overview-stats .workspace-stat small{font-size:11px}}
+@media(min-width:1101px){.admin-overview-stats{grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}.admin-overview-stats .workspace-stat{padding:14px 16px}.admin-overview-stats .workspace-stat strong{margin:0}.admin-overview-stats .workspace-stat span,.admin-overview-stats .workspace-stat small{font-size:11px}}
 @media(min-width:761px) and (max-width:1100px){.admin-overview-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.admin-overview-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .admin-dashboard-grid{margin-top:16px}
