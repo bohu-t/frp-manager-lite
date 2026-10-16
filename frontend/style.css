@@ -1475,3 +1475,23 @@ html[data-theme="dark"] .workspace-topbar{background:#0f172a}
 .topbar-banner-theme:hover{background:rgba(255,255,255,.3);transform:none}
 @media(max-width:900px){.topbar-banner-right{display:none}}
 @media(max-width:760px){.workspace-topbar{margin:0 -14px 14px;padding:12px 14px}.topbar-banner{padding:14px 16px}.topbar-banner-copy b{font-size:15px}.topbar-banner-copy span{font-size:11px}}
+
+/* === 顶栏欢迎横幅（浅蓝版，按设计稿） === */
+.topbar-banner{background:linear-gradient(135deg,#EAF4FF 0%,#DCEBFF 52%,#C6DDFF 100%);color:#1D2129;border:1px solid #DCE8FA;box-shadow:0 6px 20px rgba(37,91,160,.08)}
+.topbar-kicker{display:block;margin-bottom:5px;color:#165DFF;font-size:10.5px;font-weight:700;letter-spacing:.14em}
+.topbar-banner-copy b{color:#1D2129;font-size:19px;font-weight:700}
+.topbar-banner-sub{display:block;margin-top:4px;color:#4E5969;font-size:12px}
+.topbar-brandmark{display:grid;place-items:center;width:42px;height:42px;flex:0 0 42px;border-radius:12px;background:linear-gradient(145deg,#4d8bff,#165DFF);color:#fff;box-shadow:0 6px 14px rgba(22,93,255,.28)}
+.topbar-brandmark svg{width:22px;height:22px}
+.topbar-banner-slogan b{color:#1D2129;font-size:14px}
+.topbar-banner-slogan span{color:#4E5969;font-size:11.5px}
+.topbar-banner-badge{background:rgba(255,255,255,.72);border:1px solid #D6E4FA;color:#165DFF}
+.topbar-banner-theme{background:rgba(255,255,255,.78);border:1px solid #D6E4FA;color:#165DFF}
+.topbar-banner-theme:hover{background:#fff;color:#165DFF}
+.topbar-banner-spark{position:absolute;right:26%;top:20%;width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.95);box-shadow:0 0 0 3px rgba(255,255,255,.4);z-index:1}
+html[data-theme="dark"] .topbar-banner{background:linear-gradient(135deg,#17284a 0%,#1b3a6b 52%,#1e4a8c 100%);border-color:#2b4a7d;box-shadow:none}
+html[data-theme="dark"] .topbar-banner-copy b,html[data-theme="dark"] .topbar-banner-slogan b{color:#e8f0ff}
+html[data-theme="dark"] .topbar-banner-sub,html[data-theme="dark"] .topbar-banner-slogan span{color:#a8c0e0}
+html[data-theme="dark"] .topbar-kicker{color:#7aa8ff}
+html[data-theme="dark"] .topbar-banner-badge,html[data-theme="dark"] .topbar-banner-theme{background:rgba(255,255,255,.12);border-color:#3a5a8f;color:#cfe0ff}
+html[data-theme="dark"] .topbar-banner-theme:hover{background:rgba(255,255,255,.22);color:#fff}
