@@ -79,6 +79,10 @@ SOFTWARE_LICENSE_REQUIRED = True  # always enforced — no env-var off switch
 RATE_WINDOW = 15 * 60
 LOGIN_RATE_LIMIT = 8
 REGISTER_RATE_LIMIT = 5
+# 开放注册：不要求邀请码；默认值由环境变量控制，dev 可开，生产保持关闭
+OPEN_REGISTRATION = os.getenv("FML_OPEN_REGISTRATION", "0").strip().lower() in ("1", "true", "yes", "on")
+OPEN_REGISTRATION_MAX_PORTS = max(0, min(100, int(os.getenv("FML_OPEN_REGISTRATION_MAX_PORTS", "0") or "0")))
+OPEN_REGISTRATION_EXPIRES_DAYS = max(0, min(3650, int(os.getenv("FML_OPEN_REGISTRATION_EXPIRES_DAYS", "30") or "30")))
 CSRF_TTL = 2 * 3600
 NODE_CHECK_TIMEOUT = float(os.getenv("FML_NODE_CHECK_TIMEOUT", "1.5"))
 NODE_CHECK_MAX_WORKERS = int(os.getenv("FML_NODE_CHECK_MAX_WORKERS", "16"))
@@ -2662,7 +2666,8 @@ def create_user(username: str, password: str, max_ports: int, expires_days: int,
         except sqlite3.IntegrityError:
             return False, "用户名已存在"
         user_id = cur.lastrowid
-        conn.executemany("UPDATE ports SET user_id=? WHERE node_id=? AND port=?", [(user_id, node_id, r["port"]) for r in free_ports])
+        if free_ports:
+            conn.executemany("UPDATE ports SET user_id=? WHERE node_id=? AND port=?", [(user_id, node_id, r["port"]) for r in free_ports])
     extra = []
     if traffic_limit_bytes:
         extra.append(f"今日流量上限 {traffic_limit_bytes / 1024 / 1024 / 1024:.1f}GB")
@@ -2836,43 +2841,54 @@ def register_with_invite(username: str, password: str, invite_key: str, node_id:
         return False, "用户名只能包含字母、数字、下划线、短横线，长度 1-32"
     if len(password) < 6:
         return False, "密码至少 6 位"
-    if not invite_key:
+    if not OPEN_REGISTRATION and not invite_key:
         return False, "请输入注册密钥"
     with db() as conn:
-        key_row = conn.execute("SELECT * FROM invite_keys WHERE key=?", (invite_key,)).fetchone()
-        if not key_row:
-            return False, "注册密钥无效"
-        if (row_val(key_row, "kind", "register") or "register") != "register":
-            return False, "注册密钥无效"
-        if key_row["used_count"] >= 1:
-            return False, "注册密钥已使用"
-        if not key_row["active"]:
-            return False, "注册密钥已停用"
-        if key_row["expires_at"] and key_row["expires_at"] <= now():
-            return False, "注册密钥已过期"
-        node = conn.execute("SELECT * FROM nodes WHERE id=? AND active=1", (node_id,)).fetchone()
-        if not node:
+        key_row = None
+        if invite_key:
+            key_row = conn.execute("SELECT * FROM invite_keys WHERE key=?", (invite_key,)).fetchone()
+            if not key_row:
+                if not OPEN_REGISTRATION:
+                    return False, "注册密钥无效"
+                key_row = None
+            elif (row_val(key_row, "kind", "register") or "register") != "register":
+                return False, "注册密钥无效"
+            elif key_row["used_count"] >= 1:
+                return False, "注册密钥已使用"
+            elif not key_row["active"]:
+                return False, "注册密钥已停用"
+            elif key_row["expires_at"] and key_row["expires_at"] <= now():
+                return False, "注册密钥已过期"
+        node = conn.execute("SELECT * FROM nodes WHERE id=? AND active=1", (node_id,)).fetchone() if node_id else None
+        if key_row and not node:
             return False, "请选择有效的地区节点"
-        max_ports = int(key_row["max_ports"])
-        traffic_limit_bytes = int(row_val(key_row, "traffic_limit_bytes", 0) or 0)
-        bandwidth_limit_kbps = int(row_val(key_row, "bandwidth_limit_kbps", 0) or 0)
-        free_ports = available_ports_for_assignment(conn, node_id, max_ports)
-        if len(free_ports) < max_ports:
+        if not node:
+            node_id = None
+        max_ports = int(key_row["max_ports"]) if key_row else OPEN_REGISTRATION_MAX_PORTS
+        traffic_limit_bytes = int(row_val(key_row, "traffic_limit_bytes", 0) or 0) if key_row else 0
+        bandwidth_limit_kbps = int(row_val(key_row, "bandwidth_limit_kbps", 0) or 0) if key_row else 0
+        free_ports = available_ports_for_assignment(conn, node_id, max_ports) if node and max_ports else []
+        if node and len(free_ports) < max_ports:
             return False, f"端口池不足，只剩 {len(free_ports)} 个可用端口"
-        expires_days = int(key_row["user_expires_days"])
+        expires_days = int(key_row["user_expires_days"]) if key_row else OPEN_REGISTRATION_EXPIRES_DAYS
         user_expires_at = 0 if expires_days == 0 else now() + expires_days * 86400
         try:
-            cur = insert_user_record(conn, username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, user_expires_at, node_id, invite_key, traffic_limit_bytes, bandwidth_limit_kbps)
-        except sqlite3.IntegrityError:
-            return False, "用户名已存在"
+            cur = insert_user_record(conn, username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, user_expires_at, node_id, invite_key if key_row else ("OPEN-" + secrets.token_urlsafe(10)), traffic_limit_bytes, bandwidth_limit_kbps)
+        except sqlite3.IntegrityError as exc:
+            if "users.username" in str(exc) or "username" in str(exc).lower():
+                return False, "用户名已存在"
+            print(f"[register] database integrity error: {exc}", flush=True)
+            return False, "注册失败，请稍后重试"
         user_id = cur.lastrowid
-        conn.executemany("UPDATE ports SET user_id=? WHERE node_id=? AND port=?", [(user_id, node_id, r["port"]) for r in free_ports])
-        claimed = conn.execute("UPDATE invite_keys SET used_count=used_count+1, active=0 WHERE id=? AND used_count=0 AND active=1", (key_row["id"],)).rowcount
-        if claimed != 1:
-            conn.rollback()
-            return False, "注册密钥已使用"
-    return True, f"注册成功，地区节点：{node['region']} / {node['name']}，已分配 {max_ports} 个端口，到期时间：{fmt_time(user_expires_at)}"
-
+        if free_ports:
+            conn.executemany("UPDATE ports SET user_id=? WHERE node_id=? AND port=?", [(user_id, node_id, r["port"]) for r in free_ports])
+        if key_row:
+            claimed = conn.execute("UPDATE invite_keys SET used_count=used_count+1, active=0 WHERE id=? AND used_count=0 AND active=1", (key_row["id"],)).rowcount
+            if claimed != 1:
+                conn.rollback()
+                return False, "注册密钥已使用"
+    detail = f"地区节点：{node['region']} / {node['name']}，已分配 {max_ports} 个端口" if node else "暂未绑定节点和端口"
+    return True, f"注册成功，{detail}，到期时间：{fmt_time(user_expires_at)}"
 
 def reset_password_with_key(username: str, new_password: str, raw_key: str) -> tuple[bool, str]:
     username = str(username or "").strip()
@@ -4058,6 +4074,9 @@ class Handler(BaseHTTPRequestHandler):
             # Lightweight client-side latency probe (no DB / no auth work).
             self.send_json({"ok": True, "t": now()}, headers={"Cache-Control": "no-store"})
             return
+        if path == "/api/registration-status":
+            self.send_json({"ok": True, "open_registration": OPEN_REGISTRATION, "max_ports": OPEN_REGISTRATION_MAX_PORTS, "expires_days": OPEN_REGISTRATION_EXPIRES_DAYS})
+            return
         if path == "/api/nodes":
             with db() as conn:
                 self.send_json({"ok": True, "nodes": list_public_nodes(conn, active_only=True)})
@@ -4099,12 +4118,13 @@ class Handler(BaseHTTPRequestHandler):
                 if SOFTWARE_LICENSE_REQUIRED and not sw_license.get("licensed"):
                     self.send_json({"ok": False, "error": "software_license_required", "license": sw_license}, 402)
                     return
-                node = conn.execute("SELECT * FROM nodes WHERE id=?", (user["node_id"],)).fetchone()
-                ports = [r["port"] for r in conn.execute("SELECT port FROM ports WHERE node_id=? AND user_id=? ORDER BY port", (user["node_id"], user["id"]))]
+                node_id = int(user["node_id"] or 0)
+                node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone() if node_id else None
+                ports = [r["port"] for r in conn.execute("SELECT port FROM ports WHERE node_id=? AND user_id=? ORDER BY port", (node_id, user["id"]))] if node_id else []
                 if not ports and user["role"] == "admin":
                     # Admin doesn't own ports — return empty; port_stats from node totals
                     ports = []
-                    port_count = conn.execute("SELECT MAX(port)-MIN(port)+1 FROM ports WHERE node_id=?", (user["node_id"],)).fetchone()
+                    port_count = conn.execute("SELECT MAX(port)-MIN(port)+1 FROM ports WHERE node_id=?", (node_id,)).fetchone()
                     port_count = (port_count[0] or 0) if port_count else 0
                 tunnel_rows = [row_dict(r) for r in conn.execute("""
                     SELECT t.*, n.server_addr, n.server_port
@@ -4118,7 +4138,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Cap: only send first 200 for rendering, too many would freeze the browser
                 ports_display = ports[:200] if port_count > 200 else ports
                 port_stats = {"total": port_count, "used": len(used_ports), "free": port_count - len(used_ports)}
-                user_dashboard = frps_user_dashboard(user["username"], user)
+                user_dashboard = frps_user_dashboard(user["username"], user) if node else None
             node_payload = node_public(node) if node else None
             if node_payload:
                 # 用节点健康快照（后台定时采集），避免每次打开概览都实时探测。

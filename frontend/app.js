@@ -910,14 +910,15 @@ async function renderLogin(){
 async function renderRegister(){
   clearAdminDashboardTimer();
   currentUser = null; setNav(); hideFlash();
-  let nodes = [];
-  try { nodes = await loadNodes(); } catch(e) { show('加载节点失败：' + e.message, true); }
-  app.innerHTML = authShell('密钥注册', '输入密钥并选择适合你的地区', `
+  let nodes = [], registration = {open_registration: false};
+  try { nodes = await loadNodes(); registration = await api('/api/registration-status'); } catch(e) { show('加载注册信息失败：' + e.message, true); }
+  const openRegistration = !!registration.open_registration;
+  const registerIntro = openRegistration ? '创建账号，稍后再绑定节点和端口' : '输入密钥并选择适合你的地区';
+  app.innerHTML = authShell(openRegistration ? '开放注册' : '密钥注册', registerIntro, `
       <form id="registerForm" class="stack-form auth-login-form">
         <div class="input-group"><label class="input-label" for="registerUsername">用户名</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('user')}</span><input id="registerUsername" class="input-ios" name="username" autocomplete="username" placeholder="请输入用户名" required></div></div>
         <div class="input-group"><label class="input-label" for="registerPassword">密码</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('lock')}</span><input id="registerPassword" class="input-ios auth-password-input" name="password" type="password" autocomplete="new-password" minlength="6" placeholder="请输入密码（至少 6 位）" required><button type="button" class="auth-password-toggle" onclick="togglePasswordVisibility('registerPassword', this)" aria-label="显示密码" title="显示密码">${iconSvg('eye')}</button></div></div>
-        <div class="input-group"><label class="input-label" for="registerNode">接入节点</label><select id="registerNode" class="input-ios" name="node_id" required>${nodeOptions(nodes)}</select></div>
-        <div class="input-group"><label class="input-label" for="registerKey">注册密钥</label><input id="registerKey" class="input-ios" name="invite_key" placeholder="FML-..." required></div>
+        ${openRegistration ? '<p class="panel-note small">当前已开放注册，账号默认不绑定节点、不占用端口，且无时间限制；后续可按需分配。</p><input type="hidden" name="node_id" value="0"><input type="hidden" name="invite_key" value="">' : '<div class="input-group"><label class="input-label" for="registerNode">接入节点</label><select id="registerNode" class="input-ios" name="node_id" required>${nodeOptions(nodes)}</select></div><div class="input-group"><label class="input-label" for="registerKey">注册密钥</label><input id="registerKey" class="input-ios" name="invite_key" placeholder="FML-..." required></div>'}
         <p class="row"><button>注册</button><button type="button" class="secondary" onclick="renderLogin()">返回登录</button></p>
       </form>`, '', nodes);
   document.querySelector('#registerForm').onsubmit = async (e) => {
