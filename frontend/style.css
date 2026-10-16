@@ -1495,3 +1495,19 @@ html[data-theme="dark"] .topbar-banner-sub,html[data-theme="dark"] .topbar-banne
 html[data-theme="dark"] .topbar-kicker{color:#7aa8ff}
 html[data-theme="dark"] .topbar-banner-badge,html[data-theme="dark"] .topbar-banner-theme{background:rgba(255,255,255,.12);border-color:#3a5a8f;color:#cfe0ff}
 html[data-theme="dark"] .topbar-banner-theme:hover{background:rgba(255,255,255,.22);color:#fff}
+
+/* 顶栏横幅：文字加深（提升可读性） */
+.topbar-banner{background:linear-gradient(135deg,#E1EEFF 0%,#D2E4FF 52%,#B9D4FF 100%)}
+.topbar-kicker{color:#0B47C8;font-weight:800}
+.topbar-banner-copy b{color:#0B1220;font-weight:800}
+.topbar-banner-sub{color:#2B3A52;font-weight:500}
+.topbar-banner-slogan b{color:#0B1220}
+.topbar-banner-slogan span{color:#2B3A52}
+html[data-theme="dark"] .topbar-banner-copy b,html[data-theme="dark"] .topbar-banner-slogan b{color:#f4f8ff}
+html[data-theme="dark"] .topbar-banner-sub,html[data-theme="dark"] .topbar-banner-slogan span{color:#c2d4ee}
+
+/* 顶栏横幅：小标签/副标题颜色修正（覆盖早期 .topbar-banner-copy span 规则） */
+.topbar-banner-copy .topbar-kicker{color:#0B47C8}
+.topbar-banner-copy .topbar-banner-sub{color:#2B3A52}
+html[data-theme="dark"] .topbar-banner-copy .topbar-kicker{color:#8fb6ff}
+html[data-theme="dark"] .topbar-banner-copy .topbar-banner-sub{color:#c2d4ee}
