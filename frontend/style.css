@@ -1511,3 +1511,23 @@ html[data-theme="dark"] .topbar-banner-sub,html[data-theme="dark"] .topbar-banne
 .topbar-banner-copy .topbar-banner-sub{color:#2B3A52}
 html[data-theme="dark"] .topbar-banner-copy .topbar-kicker{color:#8fb6ff}
 html[data-theme="dark"] .topbar-banner-copy .topbar-banner-sub{color:#c2d4ee}
+
+/* 概览「当前节点」小卡片：按设计稿改为白底横向卡（绿色定位徽标 + 地区 + 节点名 + 在线状态） */
+.user-overview-stats .overview-node-card{display:flex;flex-direction:row;align-items:center;gap:12px;padding:14px 16px;background:#fff;border:1px solid #e5e7eb;border-radius:12px}
+.user-overview-stats .overview-node-card:before{display:none}
+.user-overview-stats .overview-node-card .overview-node-badge{display:grid;place-items:center;flex:0 0 42px;width:42px;height:42px;border-radius:50%;background:#f0fdf4}
+.overview-node-badge svg{display:block;width:22px;height:22px;fill:none;stroke:#22c55e;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.overview-node-badge svg circle{fill:#22c55e;stroke:none}
+.user-overview-stats .overview-node-card .overview-node-copy{display:flex;flex:1 1 auto;flex-direction:column;align-items:flex-start;gap:2px;min-width:0}
+.user-overview-stats .overview-node-card .overview-node-label{display:block;color:#6b7280;font-size:11px;line-height:1.2}
+.user-overview-stats .overview-node-card .overview-node-region{display:block;margin:0;color:#111827;font-size:16px;font-weight:700;line-height:1.25;letter-spacing:0;overflow-wrap:anywhere}
+.user-overview-stats .overview-node-card .overview-node-name{display:block;max-width:100%;overflow:hidden;color:#9ca3af;font-size:11px;line-height:1.3;text-overflow:ellipsis;white-space:nowrap}
+.user-overview-stats .overview-node-card .overview-node-state{display:inline-flex;flex:0 0 auto;align-items:center;gap:5px;margin-left:auto;padding:3px 9px;border-radius:999px;background:#dcfce7;color:#15803d;font-size:11px;font-weight:600;white-space:nowrap}
+.overview-node-state i{display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor}
+.user-overview-stats .overview-node-card .overview-node-state.bad{background:#fee2e2;color:#b91c1c}
+html[data-theme="dark"] .user-overview-stats .overview-node-card{background:#1e293b;border-color:#334155}
+html[data-theme="dark"] .user-overview-stats .overview-node-card .overview-node-region{color:#f1f5f9}
+html[data-theme="dark"] .user-overview-stats .overview-node-card .overview-node-label{color:#94a3b8}
+html[data-theme="dark"] .user-overview-stats .overview-node-card .overview-node-name{color:#64748b}
+html[data-theme="dark"] .user-overview-stats .overview-node-card .overview-node-badge{background:rgba(34,197,94,.14)}
+@media(max-width:760px){.user-overview-stats .overview-node-card{padding:12px}.overview-node-badge{flex-basis:36px;width:36px;height:36px}.overview-node-badge svg{width:19px;height:19px}.user-overview-stats .overview-node-card .overview-node-region{font-size:15px}}
