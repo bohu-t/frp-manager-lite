@@ -1548,3 +1548,27 @@ html[data-theme="dark"] .user-overview-stats .ov-stat .ov-stat-state{background:
 html[data-theme="dark"] .user-overview-stats .ov-stat .ov-stat-state.bad{background:rgba(248,113,113,.16);color:#fca5a5}
 html[data-theme="dark"] .user-overview-stats .ov-stat .tunnel-usage-track{background:#0f172a}
 @media(max-width:760px){.user-overview-stats .ov-stat{padding:12px}.user-overview-stats .ov-stat .ov-stat-badge{flex-basis:36px;width:36px;height:36px}.user-overview-stats .ov-stat .ov-stat-badge svg{width:19px;height:19px}.user-overview-stats .ov-stat .ov-stat-value{font-size:15px}}
+
+/* 当前节点大卡：世界地图背景换成设计稿的浅色真实地图（羽化大陆 + 虚线航线 + 定位点） */
+.node-map-panel{background:linear-gradient(135deg,#F8FBFF 0%,#F1F6FD 55%,#EAF2FB 100%)!important}
+.node-map-panel>.node-map-backdrop{opacity:1!important}
+.node-map-panel>.node-map-backdrop .node-map-grid{opacity:.5!important}
+.node-map-world{position:absolute;inset:0;width:100%;height:100%}
+.node-map-graticule line{stroke:#BCD3EE;stroke-width:1;opacity:.5}
+.node-map-land path{fill:#D8E4F2}
+.node-map-route{fill:none;stroke:#7FAEE8;stroke-width:2.4;stroke-dasharray:8 7;stroke-linecap:round;opacity:.95}
+.node-map-route-2{stroke-dasharray:6 9;opacity:.6}
+.node-map-dot{fill:#C6D5E8;stroke:#fff;stroke-width:2}
+.node-map-pin-halo{fill:rgba(47,111,228,.16)}
+.node-map-pin-mark{fill:#2F6FE4}
+.node-map-pin-core{fill:#fff}
+html[data-theme="dark"] .node-map-panel>.node-map-backdrop{opacity:1!important}
+html[data-theme="dark"] .node-map-panel{background:linear-gradient(135deg,#16233a 0%,#16283f 55%,#142b46 100%)!important}
+html[data-theme="dark"] .node-map-graticule line{stroke:#2f4a6e;opacity:.55}
+html[data-theme="dark"] .node-map-land path{fill:#31527c}
+html[data-theme="dark"] .node-map-route{stroke:#7FB2EE}
+html[data-theme="dark"] .node-map-route-2{stroke:#5d8cc4;opacity:.5}
+html[data-theme="dark"] .node-map-dot{fill:#4a6f9c;stroke:#16283f}
+html[data-theme="dark"] .node-map-pin-halo{fill:rgba(90,150,255,.22)}
+html[data-theme="dark"] .node-map-pin-mark{fill:#5B9BFF}
+html[data-theme="dark"] .node-map-pin-core{fill:#16283f}
