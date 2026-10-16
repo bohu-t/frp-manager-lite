@@ -1572,3 +1572,32 @@ html[data-theme="dark"] .node-map-dot{fill:#4a6f9c;stroke:#16283f}
 html[data-theme="dark"] .node-map-pin-halo{fill:rgba(90,150,255,.22)}
 html[data-theme="dark"] .node-map-pin-mark{fill:#5B9BFF}
 html[data-theme="dark"] .node-map-pin-core{fill:#16283f}
+
+/* 用户侧「节点」页：节点详情卡 */
+.node-list-page{margin-top:0}
+.node-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr));gap:14px}
+.node-card{display:flex;flex-direction:column;gap:12px;padding:16px 18px;border:1px solid var(--border);border-radius:12px;background:#fff;box-shadow:var(--shadow)}
+.node-card.is-current{border-color:#bfdbfe;background:linear-gradient(135deg,#f8fbff,#eff6ff)}
+.node-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.node-card-title{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
+.node-card-region{color:#6b7280;font-size:12px}
+.node-card-title strong{color:var(--ink);font-size:16px;font-weight:700}
+.node-current-tag{padding:2px 8px;border-radius:999px;background:#dcfce7;color:#15803d;font-size:11px;font-weight:600}
+.node-card .status-badge{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto}
+.node-card .status-badge i{display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor}
+.node-card-rows{display:grid;gap:7px}
+.node-info-line{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-top:7px;border-top:1px dashed var(--border);font-size:12px}
+.node-info-line span{flex:0 0 auto;color:var(--muted)}
+.node-info-line strong{min-width:0;color:var(--ink);font-weight:600;text-align:right;overflow-wrap:anywhere}
+.node-card-pool{display:grid;gap:5px}
+.node-pool-label{display:flex;justify-content:space-between;color:var(--muted);font-size:11px}
+.node-pool-label b{color:#6b7280}
+.node-pool-track{height:5px;border-radius:999px;background:#f1f5f9;overflow:hidden}
+.node-pool-track span{display:block;height:100%;border-radius:999px;background:#3478f6}
+.node-card-foot{margin-top:auto}
+.node-card-foot button{width:100%}
+html[data-theme="dark"] .node-card{background:#1e293b;border-color:#334155}
+html[data-theme="dark"] .node-card.is-current{background:#1b2b45;border-color:#33507c}
+html[data-theme="dark"] .node-card-title strong,html[data-theme="dark"] .node-info-line strong{color:#f1f5f9}
+html[data-theme="dark"] .node-pool-track{background:#0f172a}
+@media(max-width:760px){.node-card{padding:14px}}

@@ -1489,6 +1489,8 @@ def node_public(row: sqlite3.Row) -> dict[str, Any]:
         "server_addr": row["server_addr"],
         "server_port": row["server_port"],
         "bandwidth_mbps": int(row_val(row, "bandwidth_mbps", 0) or 0),
+        "plan_name": row_val(row, "plan_name", "") or "",
+        "price_per_gb": float(row_val(row, "price_per_gb", 0) or 0),
         "auth_token": row["auth_token"],
         "port_start": row["port_start"],
         "port_end": row["port_end"],
@@ -1531,6 +1533,10 @@ def ensure_default_node(conn: sqlite3.Connection) -> int | None:
         conn.execute("ALTER TABLE nodes ADD COLUMN dashboard_user TEXT NOT NULL DEFAULT ''")
     if "dashboard_password" not in cols:
         conn.execute("ALTER TABLE nodes ADD COLUMN dashboard_password TEXT NOT NULL DEFAULT ''")
+    if "plan_name" not in cols:
+        conn.execute("ALTER TABLE nodes ADD COLUMN plan_name TEXT NOT NULL DEFAULT ''")
+    if "price_per_gb" not in cols:
+        conn.execute("ALTER TABLE nodes ADD COLUMN price_per_gb REAL NOT NULL DEFAULT 0")
     # Do not provision a node automatically. Existing nodes are left untouched;
     # a fresh installation starts empty and the administrator creates nodes in UI.
     row = conn.execute("SELECT id FROM nodes ORDER BY id LIMIT 1").fetchone()
@@ -4056,6 +4062,21 @@ class Handler(BaseHTTPRequestHandler):
             with db() as conn:
                 self.send_json({"ok": True, "nodes": list_public_nodes(conn, active_only=True)})
             return
+        if path == "/api/user/nodes":
+            user_row = self.current_user
+            if not user_row:
+                self.send_json({"ok": False, "error": "unauthorized"}, 401)
+                return
+            with db() as conn:
+                nodes = list_public_nodes(conn, active_only=True)
+            current_node_id = int(user_row["node_id"] or 0)
+            attach_node_auth_port_status(nodes)
+            for n in nodes:
+                for k in ("auth_token", "dashboard_url", "dashboard_user", "dashboard_password", "dashboard_configured"):
+                    n.pop(k, None)
+                n["is_current"] = int(n["id"]) == current_node_id
+            self.send_json({"ok": True, "nodes": nodes, "current_node_id": current_node_id})
+            return
         if path == "/api/license/status":
             with db() as conn:
                 self.send_json({"ok": True, "license": current_software_license(conn)})
@@ -5054,6 +5075,11 @@ class Handler(BaseHTTPRequestHandler):
             dashboard_user = str(data.get("dashboard_user", "")).strip()[:80]
             dashboard_password = str(data.get("dashboard_password", "")).strip()[:200]
             bandwidth_mbps = max(0, int(data.get("bandwidth_mbps", 0) or 0))
+            plan_name = str(data.get("plan_name", "")).strip()[:60]
+            try:
+                price_per_gb = max(0.0, float(data.get("price_per_gb", 0) or 0))
+            except (TypeError, ValueError):
+                raise ValueError("单价（元/GB）不合法")
             if len(region) > 40:
                 raise ValueError("地区名称太长")
             if not name or len(name) > 40 or not name.replace("_", "").replace("-", "").isalnum():
@@ -5072,8 +5098,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("单节点端口池不要超过 20000 个")
             with db() as conn:
                 cur = conn.execute(
-                    "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, 1, note, now()),
+                    "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, plan_name, price_per_gb, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, plan_name, price_per_gb, 1, note, now()),
                 )
                 node_id = int(cur.lastrowid)
                 conn.executemany("INSERT OR IGNORE INTO ports(node_id, port, created_at) VALUES(?,?,?)", [(node_id, p, now()) for p in range(port_start, port_end + 1)])
@@ -5101,6 +5127,11 @@ class Handler(BaseHTTPRequestHandler):
             dashboard_user = str(data.get("dashboard_user", "")).strip()[:80]
             dashboard_password = str(data.get("dashboard_password", "")).strip()[:200]
             bandwidth_mbps = max(0, int(data.get("bandwidth_mbps", 0) or 0))
+            plan_name = str(data.get("plan_name", "")).strip()[:60]
+            try:
+                price_per_gb = max(0.0, float(data.get("price_per_gb", 0) or 0))
+            except (TypeError, ValueError):
+                raise ValueError("单价（元/GB）不合法")
             active = 1 if str(data.get("active", "1")) in ("1", "true", "True", "on", "yes") else 0
             if len(region) > 40:
                 raise ValueError("地区名称太长")
@@ -5120,8 +5151,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"ok": False, "error": "节点不存在"}, 404)
                     return
                 conn.execute(
-                    "UPDATE nodes SET region=?, name=?, server_addr=?, server_port=?, auth_token=?, web_port=?, dashboard_url=?, dashboard_user=?, dashboard_password=?, bandwidth_mbps=?, active=?, note=? WHERE id=?",
-                    (region, name, server_addr, server_port, auth_token, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, active, note, node_id),
+                    "UPDATE nodes SET region=?, name=?, server_addr=?, server_port=?, auth_token=?, web_port=?, dashboard_url=?, dashboard_user=?, dashboard_password=?, bandwidth_mbps=?, plan_name=?, price_per_gb=?, active=?, note=? WHERE id=?",
+                    (region, name, server_addr, server_port, auth_token, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, plan_name, price_per_gb, active, note, node_id),
                 )
             self.send_json({"ok": True, "message": f"节点 {region} / {name} 已更新"})
         except sqlite3.IntegrityError:
