@@ -1629,3 +1629,7 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 /* ---- 支付渠道多选 ---- */
 .pay-channels{display:flex;flex-wrap:wrap;gap:14px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:rgba(148,163,184,.06)}
 .pay-channels .check{display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;margin:0}
+
+/* ---- 概览：积分卡片操作 ---- */
+.ov-points-action{display:flex;justify-content:flex-end;margin-top:auto}
+.ov-points-action button{padding:6px 12px;font-size:12px}

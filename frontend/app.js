@@ -1460,11 +1460,8 @@ async function loadDashboard(view='overview'){
 ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label"><span>${trafficUsageLabel}</span><b>${trafficUsagePercent}%</b></div><div class="tunnel-usage-track" role="progressbar" aria-label="今日流量使用情况" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${trafficUsagePercent}"><span style="width:${trafficUsagePercent}%"></span></div></div>` : ''}
         </section>
         <section class="workspace-stat ov-stat" style="--ov-accent:#f59e0b;--ov-tint:#fff8ec">
-          <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M8 3v4M16 3v4M3.5 10.5h17"/></svg></span><div class="ov-stat-copy"><span class="ov-stat-label">账号有效期</span><strong class="ov-stat-value">${esc(data.user.expires_text || '-')}</strong><span class="ov-stat-sub">${data.user.expired ? '账号已到期' : '到期日期'}</span></div></div>
-          <div class="tunnel-usage">
-            <div class="tunnel-usage-label"><span>${expiryLabel}</span><b>${expiryPercent}%</b></div>
-            <div class="tunnel-usage-track" role="progressbar" aria-label="账号有效状态" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${expiryPercent}"><span style="width:${expiryPercent}%"></span></div>
-          </div>
+          <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v9M9.6 10.2h4.2a2.1 2.1 0 0 1 0 4.2H9.6"/></svg></span><div class="ov-stat-copy"><span class="ov-stat-label">积分余额</span><strong class="ov-stat-value">${esc(data.user.points ?? 0)}</strong><span class="ov-stat-sub">可用于购买套餐</span></div></div>
+          <div class="ov-points-action"><button type="button" class="secondary" onclick="loadPoints()">充值积分</button></div>
         </section>
         <section class="workspace-stat ov-stat" style="--ov-accent:#2c6dd2;--ov-tint:#eef4ff">
           <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24">${UIICONS.port}</svg></span><div class="ov-stat-copy"><span class="ov-stat-label">端口上限</span><strong class="ov-stat-value">${esc(data.user.max_ports ?? '-')}</strong><span class="ov-stat-sub">可分配端口总数</span></div></div>
@@ -1627,21 +1624,11 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
             <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存邮箱</button></div>
           </form>
         </section>
-        <section class="card profile-tools">
-          <div class="section-title"><div><div class="section-kicker">RENEW</div><h2>${stIcon('key')}账号续期</h2><p>输入管理员发放的续期密钥，为当前账号延长有效期。</p></div></div>
-          <form id="renewForm" class="grid renew-form">
-            <div><label>续期密钥</label><input name="key" placeholder="RNW-XXXXXXXXXXXXXXXX" autocomplete="off" spellcheck="false" required></div>
-            <div style="align-self:end"><button type="submit">立即续期</button></div>
-          </form>
-          <div id="renewResult" class="renew-result hidden"></div>
-          <div class="profile-rows"><div class="info-line"><span>当前到期</span><strong>${esc(data.user.expires_text || '-')}</strong></div></div>
-        </section>
         <section class="card profile-pwd">
           <div class="section-title"><div><div class="section-kicker">SECURITY</div><h2>${stIcon('key')}修改登录密码</h2><p>修改当前账号的登录密码，下次登录请使用新密码。</p></div></div>
           <form id="profilePwdForm" class="grid">${passwordFieldsHtml()}<div class="form-actions" style="grid-column:1/-1"><button type="submit">保存新密码</button></div></form>
         </section>
       </div>`, 'dashboard-profile', '个人中心');
-    initRenewForm();
     initUserEmailForm();
     initPasswordForm();
     return;
