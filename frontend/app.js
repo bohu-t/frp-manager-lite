@@ -2702,15 +2702,15 @@ function adminPaymentCardHtml(pay){
     <div class="settings-card-head"><span class="settings-card-icon icon-green">${stIcon('license')}</span><div><h2>支付设置</h2><p>配置在线支付渠道，用户购买套餐时使用。</p></div>${status}</div>
     <form id="paymentForm" class="settings-form form-grid">
       <div><label>支付渠道</label><select name="provider">${opt('', '关闭在线支付')}${opt('alipay', '支付宝')}${opt('wechat', '微信支付')}${opt('mock', '测试模式（不收款）')}</select></div>
-      <div><label>对外访问地址</label><input name="public_url" value="${esc(pay.public_url || '')}" placeholder="https://frp.example.com"><span class="muted small">用于支付回调，必须是公网可访问的 https 地址</span></div>
-      <div class="span-2"><label>支付宝 App ID</label><input name="alipay_app_id" value="${esc(pay.alipay_app_id || '')}" placeholder="2021000000000000"></div>
-      <div class="span-2"><label>支付宝应用私钥</label><textarea name="alipay_private_key" rows="3" placeholder="${pay.alipay_configured ? '已设置，留空不修改' : '-----BEGIN PRIVATE KEY-----'}"></textarea></div>
-      <div class="span-2"><label>支付宝公钥</label><textarea name="alipay_public_key" rows="3" placeholder="${pay.alipay_configured ? '已设置，留空不修改' : '-----BEGIN PUBLIC KEY-----'}"></textarea></div>
-      <div class="span-2"><label>支付宝网关</label><input name="alipay_gateway" value="${esc(pay.alipay_gateway || 'https://openapi.alipay.com/gateway.do')}"><span class="muted small">沙箱环境填 https://openapi-sandbox.dl.alipaydev.com/gateway.do</span></div>
+      <div><label>对外访问地址</label><input name="public_url" value="${esc(pay.public_url || '')}" placeholder="https://frp.example.com"></div>
+      <div><label>支付宝 App ID</label><input name="alipay_app_id" value="${esc(pay.alipay_app_id || '')}" placeholder="2021000000000000"></div>
+      <div><label>支付宝网关</label><input name="alipay_gateway" value="${esc(pay.alipay_gateway || 'https://openapi.alipay.com/gateway.do')}"></div>
+      <div class="span-2"><label>支付宝应用私钥</label><textarea name="alipay_private_key" rows="2" placeholder="${pay.alipay_configured ? '已设置，留空不修改' : '-----BEGIN PRIVATE KEY-----'}"></textarea></div>
+      <div class="span-2"><label>支付宝公钥</label><textarea name="alipay_public_key" rows="2" placeholder="${pay.alipay_configured ? '已设置，留空不修改' : '-----BEGIN PUBLIC KEY-----'}"></textarea></div>
       <div><label>微信 AppID</label><input name="wechat_appid" value="${esc(pay.wechat_appid || '')}" placeholder="wx0000000000000000"></div>
       <div><label>微信商户号</label><input name="wechat_mch_id" value="${esc(pay.wechat_mch_id || '')}" placeholder="1600000000"></div>
       <div class="span-2"><label>微信支付 API 密钥</label><input name="wechat_api_key" type="password" placeholder="${pay.wechat_configured ? '已设置，留空不修改' : '32 位 API 密钥'}"></div>
-      <div class="form-actions span-2"><button type="submit">保存支付设置</button></div>
+      <div class="form-actions span-2"><button type="submit">保存支付设置</button><span class="muted small">回调地址需公网 https，沙箱网关填 https://openapi-sandbox.dl.alipaydev.com/gateway.do</span></div>
     </form>
   </section>`;
 }
@@ -2977,8 +2977,8 @@ async function loadAdminSettings(){
   const frpcUserOptions = frpcUsers.map(u => `<option value="${u.id}">${esc(u.username)} · ${esc(u.node_region || '-')} / ${esc(u.node_name || '-')} · 端口 ${u.port_count || 0} · 可用 ${(u.available_ports || []).length} · 隧道 ${u.tunnel_count || 0}</option>`).join('');
   app.innerHTML = appLayoutHtml(`
     <div class="admin-settings-grid">
-      <div class="admin-settings-col">${adminNotifyCardHtml(notify)}${adminBackupCardHtml(r2, r2Status, r2Source)}</div>
-      <div class="admin-settings-col">${adminPaymentCardHtml(data.payment)}${adminSmtpCardHtml(smtp)}${adminOpsCardHtml()}${adminR2CardHtml(r2, r2Status, r2Source)}</div>
+      <div class="admin-settings-col">${adminNotifyCardHtml(notify)}${adminPaymentCardHtml(data.payment)}</div>
+      <div class="admin-settings-col">${adminSmtpCardHtml(smtp)}${adminBackupCardHtml(r2, r2Status, r2Source)}${adminR2CardHtml(r2, r2Status, r2Source)}${adminOpsCardHtml()}</div>
     </div>
     ${adminFrpcModalHtml(frpcUserOptions)}
     ${adminPwdModalHtml()}

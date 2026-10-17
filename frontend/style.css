@@ -1616,3 +1616,8 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .plan-buy{margin-top:auto;width:100%;padding:10px 14px;border:0;border-radius:10px;background:var(--accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer}
 .plan-buy:disabled{opacity:.55;cursor:not-allowed}
 .plan-buy:not(:disabled):hover{filter:brightness(1.06)}
+
+/* 支付设置：密钥文本域与长地址防溢出 */
+.app-shell.is-settings .settings-form textarea{min-height:72px;resize:vertical;font-family:var(--font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12px;line-height:1.5}
+.app-shell.is-settings .settings-form input[name="public_url"],
+.app-shell.is-settings .settings-form input[name="alipay_gateway"]{text-overflow:ellipsis}
