@@ -3123,9 +3123,9 @@ def session_user(cookie_header: str | None) -> sqlite3.Row | None:
         return conn.execute(
             """
             SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id
-            WHERE s.token=? AND s.expires_at>? AND u.active=1 AND (u.expires_at=0 OR u.expires_at>?)
+            WHERE s.token=? AND s.expires_at>? AND u.active=1
             """,
-            (morsel.value, now(), now()),
+            (morsel.value, now()),
         ).fetchone()
 
 
@@ -3138,9 +3138,9 @@ def download_token_user(token: str) -> sqlite3.Row | None:
         return conn.execute(
             """
             SELECT * FROM users
-            WHERE token=? AND role!='admin' AND active=1 AND (expires_at=0 OR expires_at>?)
+            WHERE token=? AND role!='admin' AND active=1
             """,
-            (token, now()),
+            (token,),
         ).fetchone()
 
 
@@ -4019,9 +4019,14 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
     if free_ports:
         conn.executemany("UPDATE ports SET user_id=? WHERE node_id=? AND port=?",
                          [(user["id"], node_id, r["port"]) for r in free_ports])
+    duration_days = int(order["duration_days"] or 0)
+    base = int(user["expires_at"] or 0)
+    if base < now():
+        base = now()
+    new_expiry = 0 if duration_days <= 0 else base + duration_days * 86400
     conn.execute(
-        "UPDATE users SET node_id=?, max_ports=MAX(max_ports, ?), traffic_limit_bytes=?, bandwidth_limit_kbps=?, expires_at=0 WHERE id=?",
-        (node_id, max_ports, int(order["traffic_limit_bytes"] or 0), int(order["bandwidth_limit_kbps"] or 0), user["id"]))
+        "UPDATE users SET node_id=?, max_ports=MAX(max_ports, ?), traffic_limit_bytes=?, bandwidth_limit_kbps=?, expires_at=? WHERE id=?",
+        (node_id, max_ports, int(order["traffic_limit_bytes"] or 0), int(order["bandwidth_limit_kbps"] or 0), new_expiry, user["id"]))
     return True, "已开通"
 
 
@@ -4690,7 +4695,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         q = urllib.parse.parse_qs(urlparse(self.path).query)
         node_id = int_or_none((q.get("node_id") or [""])[0])
-        params: list[Any] = [now()]
+        params: list[Any] = []
         node_clause = ""
         if node_id:
             node_clause = "AND t.node_id=?"
@@ -4705,7 +4710,6 @@ class Handler(BaseHTTPRequestHandler):
                   AND t.proxy_type IN ('tcp','udp')
                   AND t.remote_port IS NOT NULL
                   AND u.active=1
-                  AND (u.expires_at=0 OR u.expires_at>?)
                   AND u.bandwidth_limit_kbps>0
                   {node_clause}
                 ORDER BY t.remote_port
@@ -6349,7 +6353,7 @@ class Handler(BaseHTTPRequestHandler):
             reason = ""
 
             with db() as conn:
-                user = conn.execute("SELECT * FROM users WHERE username=? AND active=1 AND (expires_at=0 OR expires_at>?)", (user_name, now())).fetchone()
+                user = conn.execute("SELECT * FROM users WHERE username=? AND active=1", (user_name,)).fetchone()
                 if not user:
                     reject, reason = True, "unknown, disabled or expired user"
                 elif user_over_traffic_limit(user):

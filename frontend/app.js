@@ -958,6 +958,7 @@ async function loadPlans(){
       <div class="plan-card-head"><h3>${esc(p.name)}</h3><span class="plan-price">${p.price_points} <small>积分</small></span></div>
       <ul class="plan-meta">
         <li><span>端口数</span><b>${p.max_ports}</b></li>
+        <li><span>有效期</span><b>${p.duration_days ? p.duration_days + ' 天' : '不限期'}</b></li>
         <li><span>流量上限</span><b>${p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '不限'}</b></li>
         <li><span>速率上限</span><b>${p.bandwidth_limit_mbs ? p.bandwidth_limit_mbs + ' MB/s' : '不限'}</b></li>
       </ul>
@@ -1610,6 +1611,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         <section class="card profile-card">
           <div class="profile-head"><span class="profile-avatar">${avatarSvg(data.user.username||'U', data.user.role, 56)}</span><div class="profile-id"><strong>${esc(data.user.username||'-')}</strong><small>${data.user.role === 'admin' ? '系统管理员' : '普通用户'}</small></div></div>
           <div class="profile-rows">
+            <div class="info-line"><span>套餐到期</span><strong>${esc(data.user.expires_text || '永不过期')}</strong></div>
             <div class="info-line"><span>今日流量</span><strong>${fmtBytes(todayTraffic)}${trafficLimit ? ' / ' + fmtBytes(trafficLimit) : ' / 不限'}</strong></div>
             <div class="info-line"><span>隧道数量</span><strong>${data.tunnels.length} 条</strong></div>
             <div class="info-line"><span>端口上限</span><strong>${esc(data.user.max_ports ?? '-')}</strong></div>
@@ -1959,6 +1961,7 @@ async function loadAdmin(section=currentAdminSection){
       <td>${esc(p.name)}</td>
       <td><b>${p.price_points}</b> 积分</td>
       <td>${p.max_ports}</td>
+      <td>${p.duration_days ? p.duration_days + ' 天' : '不限期'}</td>
       <td>${p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '不限'} / ${p.bandwidth_limit_mbs ? p.bandwidth_limit_mbs + ' MB/s' : '不限'}</td>
       <td>${esc(nodeName(p.node_id))}</td>
       <td><span class="status-badge ${p.active ? 'ok' : 'bad'}"><i></i>${p.active ? '上架' : '下架'}</span></td>
@@ -1990,6 +1993,7 @@ async function loadAdmin(section=currentAdminSection){
       <input type="hidden" name="id" value="">
       <div><label>套餐名称</label><input name="name" placeholder="例如 入门版 / 专业版" required></div>
       <div><label>积分价格</label><input name="price_points" type="number" value="100" min="0" step="1"><span class="muted small">用户购买时扣除的积分</span></div>
+      <div><label>有效期（天）</label><input name="duration_days" type="number" value="30" min="0" max="3650"><span class="muted small">0 表示不限期</span></div>
       <div><label>端口数</label><input name="max_ports" type="number" value="5" min="0" max="100"></div>
       <div><label>流量上限 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
       <div><label>速率 MB/s</label><input name="bandwidth_limit_mbs" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
@@ -1999,7 +2003,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>状态</label><select name="active"><option value="1">上架</option><option value="0">下架</option></select></div>
       <div class="form-actions" style="grid-column:1/-1"><button>保存套餐</button><button type="button" class="secondary" onclick="resetPlanForm()">清空</button></div>
     </form></section>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>ID</th><th>名称</th><th>积分价格</th><th>端口</th><th>流量 / 速率</th><th>节点</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>ID</th><th>名称</th><th>积分价格</th><th>端口</th><th>有效期</th><th>流量 / 速率</th><th>节点</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
     <section class="card" id="recharge-keys"><div class="section-title"><div><h2>${stIcon('key')}积分充值密钥</h2><p>生成后发给用户，用户在「积分充值」页兑换；每枚只能使用一次</p></div><span class="section-count">可用 ${(data.recharge_keys || []).filter(k => !k.used_by && k.active).length}</span></div>
       <form id="rechargeKeyForm" class="grid">
         <div><label>每枚积分</label><input name="points" type="number" value="100" min="1" step="1"></div>
@@ -2516,6 +2520,7 @@ function resetPlanForm(){
   f.elements.id.value = '';
   f.elements.price_points.value = '100';
   f.elements.max_ports.value = '5';
+  f.elements.duration_days.value = '30';
   f.elements.traffic_limit_gb.value = '0';
   f.elements.bandwidth_limit_mbs.value = '0';
   f.elements.sort_order.value = '0';
@@ -2529,6 +2534,7 @@ function editPlan(id){
   f.elements.name.value = p.name;
   f.elements.price_points.value = p.price_points;
   f.elements.max_ports.value = p.max_ports;
+  f.elements.duration_days.value = p.duration_days;
   f.elements.traffic_limit_gb.value = p.traffic_limit_gb;
   f.elements.bandwidth_limit_mbs.value = p.bandwidth_limit_mbs;
   f.elements.node_id.value = p.node_id || 0;
