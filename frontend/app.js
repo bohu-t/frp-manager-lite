@@ -1941,7 +1941,7 @@ async function loadAdmin(section=currentAdminSection){
   `).join('') || emptyRow(7, '暂无审计日志');
   const softwareKeyRows = (data.software_license_keys || []).map(k => `
     <tr>
-      <td>${k.id}</td><td><code class="token" title="${esc(k.license_key)}">${esc(k.license_key)}</code></td><td>${esc(k.note)}</td><td>${esc(k.plan)}</td>
+      <td>${k.seq_no || k.id}</td><td><code class="token" title="${esc(k.license_key)}">${esc(k.license_key)}</code></td><td>${esc(k.note)}</td><td>${esc(k.plan)}</td>
       <td>${k.machine_id ? `<code class="token">${esc(k.machine_id)}</code>` : '未绑定'}</td>
       <td>${esc(k.expires_text)} ${k.expired ? '<span class="bad">已过期</span>' : ''}</td>
       <td>${k.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
@@ -2012,7 +2012,7 @@ async function loadAdmin(section=currentAdminSection){
       <td>${o.status === 'pending' ? `<button type="button" class="secondary" onclick="orderComplete('${esc(o.order_no)}')">手动开通</button>` : '-'}</td>
     </tr>`).join('') || '<tr><td colspan="10" class="muted">暂无订单</td></tr>';
   const rkRows = (data.recharge_keys || []).map(k => `<tr>
-      <td>${k.id}</td>
+      <td>${k.seq_no || k.id}</td>
       <td><code class="token">${esc(k.key)}</code></td>
       <td>${k.points}</td>
       <td>${esc(k.note || '—')}</td>
@@ -2048,7 +2048,7 @@ async function loadAdmin(section=currentAdminSection){
         <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
         <div class="form-actions" style="grid-column:1/-1"><button>生成充值密钥</button></div>
       </form>
-      <table><thead><tr><th>ID</th><th>密钥</th><th>积分</th><th>备注</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${rkRows}</tbody></table>
+      <table><thead><tr><th>序号</th><th>密钥</th><th>积分</th><th>备注</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${rkRows}</tbody></table>
     </section>
     ${data.software_license_authority ? `<section class="card" id="software-licenses"><div class="section-title"><h2>${stIcon('license')}服务器软件授权码</h2><p>卖家后台使用：先批量生成授权码发给客户；客户输入授权码后自动绑定他的部署服务器。</p></div><form id="softwareLicenseForm" class="grid">
       <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
@@ -2057,7 +2057,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>有效期天数</label><input name="expires_days" type="number" value="0" min="0" max="3650"><span class="muted small">0 表示永不过期</span></div>
       <div style="align-self:end"><button>生成软件授权码</button></div>
     </form><p class="panel-note small">客户不需要提供机器码；首次激活时授权服务器会自动绑定机器。批量生成后会自动复制并下载 txt。</p>
-    <table><thead><tr><th>ID</th><th>授权码</th><th>备注</th><th>套餐</th><th>绑定机器</th><th>到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${softwareKeyRows}</tbody></table></section>` : ''}`;
+    <table><thead><tr><th>序号</th><th>授权码</th><th>备注</th><th>套餐</th><th>绑定机器</th><th>到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${softwareKeyRows}</tbody></table></section>` : ''}`;
   const usersHtml = `
     <section class="card"><div class="section-title"><h2>${stIcon('userPlus')}创建用户</h2><p>管理员直开账号，可指定接入节点</p></div><form id="createUserForm" class="grid">
       <div><label>用户名</label><input name="username" required></div>

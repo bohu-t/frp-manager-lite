@@ -2518,6 +2518,8 @@ def init_db() -> None:
             );
             CREATE TABLE IF NOT EXISTS invite_keys (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                seq_no INTEGER NOT NULL DEFAULT 0,
+                deleted INTEGER NOT NULL DEFAULT 0,
                 key TEXT NOT NULL UNIQUE,
                 kind TEXT NOT NULL DEFAULT 'register',
                 note TEXT NOT NULL DEFAULT '',
@@ -2557,6 +2559,8 @@ def init_db() -> None:
             );
             CREATE TABLE IF NOT EXISTS software_license_keys (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                seq_no INTEGER NOT NULL DEFAULT 0,
+                deleted INTEGER NOT NULL DEFAULT 0,
                 license_key TEXT NOT NULL UNIQUE,
                 note TEXT NOT NULL DEFAULT '',
                 plan TEXT NOT NULL DEFAULT 'deploy',
@@ -2623,6 +2627,8 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_point_logs_user ON point_logs(user_id, id);
             CREATE TABLE IF NOT EXISTS recharge_keys (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                seq_no INTEGER NOT NULL DEFAULT 0,
+                deleted INTEGER NOT NULL DEFAULT 0,
                 key TEXT NOT NULL UNIQUE,
                 points INTEGER NOT NULL DEFAULT 0,
                 note TEXT NOT NULL DEFAULT '',
@@ -2664,6 +2670,17 @@ def init_db() -> None:
             base = conn.execute("SELECT COALESCE(MAX(seq_no),0) FROM plans").fetchone()[0]
             for offset, r in enumerate(missing, start=1):
                 conn.execute("UPDATE plans SET seq_no=? WHERE id=?", (int(base) + offset, r["id"]))
+        for table in ("invite_keys", "recharge_keys", "software_license_keys"):
+            tcols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if "seq_no" not in tcols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN seq_no INTEGER NOT NULL DEFAULT 0")
+            if "deleted" not in tcols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+            missing = conn.execute(f"SELECT id FROM {table} WHERE seq_no=0 ORDER BY id").fetchall()
+            if missing:
+                base = conn.execute(f"SELECT COALESCE(MAX(seq_no),0) FROM {table}").fetchone()[0]
+                for offset, r in enumerate(missing, start=1):
+                    conn.execute(f"UPDATE {table} SET seq_no=? WHERE id=?", (int(base) + offset, r["id"]))
         order_cols = {r["name"] for r in conn.execute("PRAGMA table_info(orders)").fetchall()}
         if "kind" not in order_cols:
             conn.execute("ALTER TABLE orders ADD COLUMN kind TEXT NOT NULL DEFAULT 'plan'")
@@ -2892,8 +2909,9 @@ def create_invite_key(note: str, max_uses: int, max_ports: int, user_expires_day
     key_expires_at = 0 if key_expires_days == 0 else now() + key_expires_days * 86400
     with db() as conn:
         conn.execute(
-            "INSERT INTO invite_keys(key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, expires_at, created_by, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, key_expires_at, created_by, now()),
+            "INSERT INTO invite_keys(seq_no, key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, expires_at, created_by, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (int(conn.execute("SELECT COALESCE(MAX(seq_no),0) FROM invite_keys").fetchone()[0]) + 1,
+             key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, key_expires_at, created_by, now()),
         )
     return True, "密钥已生成", key
 
@@ -2921,8 +2939,9 @@ def create_invite_keys_batch(note: str, max_uses: int, max_ports: int, user_expi
         for _ in range(count):
             key = prefix + secrets.token_urlsafe(18).replace("-", "").replace("_", "")[:24].upper()
             conn.execute(
-                "INSERT INTO invite_keys(key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, expires_at, created_by, created_at, kind) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                (key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, key_expires_at, created_by, now(), kind),
+                "INSERT INTO invite_keys(seq_no, key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, expires_at, created_by, created_at, kind) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (int(conn.execute("SELECT COALESCE(MAX(seq_no),0) FROM invite_keys").fetchone()[0]) + 1,
+                 key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, key_expires_at, created_by, now(), kind),
             )
             keys.append(key)
     return True, f"已生成 {len(keys)} 枚密钥", keys
@@ -2953,7 +2972,7 @@ def register_with_invite(username: str, password: str, invite_key: str, node_id:
     with db() as conn:
         key_row = None
         if invite_key:
-            key_row = conn.execute("SELECT * FROM invite_keys WHERE key=?", (invite_key,)).fetchone()
+            key_row = conn.execute("SELECT * FROM invite_keys WHERE key=? AND deleted=0", (invite_key,)).fetchone()
             if not key_row:
                 if not OPEN_REGISTRATION:
                     return False, "注册密钥无效"
@@ -3006,7 +3025,7 @@ def reset_password_with_key(username: str, new_password: str, raw_key: str) -> t
     if not key:
         return False, "请输入重置密钥"
     with db() as conn:
-        row = conn.execute("SELECT * FROM invite_keys WHERE key=?", (key,)).fetchone()
+        row = conn.execute("SELECT * FROM invite_keys WHERE key=? AND deleted=0", (key,)).fetchone()
         if not row or (row_val(row, "kind", "register") or "register") != "reset":
             return False, "重置密钥无效"
         if row["used_count"] >= 1:
@@ -3033,7 +3052,7 @@ def renew_user_with_key(user: sqlite3.Row, raw_key: str) -> tuple[bool, str]:
     if not key:
         return False, "请输入续期密钥"
     with db() as conn:
-        row = conn.execute("SELECT * FROM invite_keys WHERE key=?", (key,)).fetchone()
+        row = conn.execute("SELECT * FROM invite_keys WHERE key=? AND deleted=0", (key,)).fetchone()
         if not row or (row_val(row, "kind", "register") or "register") != "renew":
             return False, "续期密钥无效"
         if row["used_count"] >= 1:
@@ -3987,8 +4006,9 @@ def create_recharge_keys(points: int, count: int, note: str, expires_days: int, 
         for _ in range(count):
             key = "PT-" + secrets.token_urlsafe(18).replace("-", "").replace("_", "")[:24].upper()
             conn.execute(
-                "INSERT INTO recharge_keys(key, points, note, active, expires_at, created_by, created_at) VALUES(?,?,?,?,?,?,?)",
-                (key, points, str(note or "")[:120], 1, expires_at, created_by, now()))
+                "INSERT INTO recharge_keys(seq_no, key, points, note, active, expires_at, created_by, created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (int(conn.execute("SELECT COALESCE(MAX(seq_no),0) FROM recharge_keys").fetchone()[0]) + 1,
+                 key, points, str(note or "")[:120], 1, expires_at, created_by, now()))
             keys.append(key)
     return True, f"已生成 {len(keys)} 枚充值密钥", keys
 
@@ -3998,7 +4018,7 @@ def redeem_recharge_key(user: sqlite3.Row, raw_key: str) -> tuple[bool, str, int
     if not key:
         return False, "请输入充值密钥", 0
     with db() as conn:
-        row = conn.execute("SELECT * FROM recharge_keys WHERE key=?", (key,)).fetchone()
+        row = conn.execute("SELECT * FROM recharge_keys WHERE key=? AND deleted=0", (key,)).fetchone()
         if not row:
             return False, "充值密钥无效", 0
         if int(row["used_by"] or 0):
@@ -4671,7 +4691,7 @@ class Handler(BaseHTTPRequestHandler):
         w = csv.writer(buf)
         w.writerow(["密钥", "类型", "备注", "已用次数", "可用次数", "端口数", "每日流量上限(GB)", "速率上限(MB/s)", "有效期或续期天数", "状态", "密钥到期", "创建时间"])
         with db() as conn:
-            for k in conn.execute("SELECT * FROM invite_keys WHERE active=1 AND used_count=0 AND used_count < max_uses AND (expires_at=0 OR expires_at>?) ORDER BY id DESC", (now(),)):
+            for k in conn.execute("SELECT * FROM invite_keys WHERE deleted=0 AND active=1 AND used_count=0 AND used_count < max_uses AND (expires_at=0 OR expires_at>?) ORDER BY id DESC", (now(),)):
                 kind = row_val(k, "kind", "register") or "register"
                 is_register = kind == "register"
                 kind_label = {"register": "注册", "renew": "续期", "reset": "重置"}.get(kind, "注册")
@@ -4913,14 +4933,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with db() as conn:
                 keys = []
-                for r in conn.execute("SELECT * FROM recharge_keys ORDER BY id DESC LIMIT 300"):
-                    keys.append({"id": r["id"], "key": r["key"], "points": r["points"], "note": r["note"],
+                for r in conn.execute("SELECT * FROM recharge_keys WHERE deleted=0 ORDER BY id DESC LIMIT 300"):
+                    keys.append({"id": r["id"], "seq_no": r["seq_no"], "key": r["key"], "points": r["points"], "note": r["note"],
                                  "active": bool(r["active"]), "expires_at": r["expires_at"],
                                  "used_by": r["used_by"], "used_at": r["used_at"], "created_at": r["created_at"]})
                 stats = {
-                    "total": conn.execute("SELECT COUNT(*) FROM recharge_keys").fetchone()[0],
-                    "unused": conn.execute("SELECT COUNT(*) FROM recharge_keys WHERE used_by IS NULL AND active=1").fetchone()[0],
-                    "points_total": conn.execute("SELECT COALESCE(SUM(points),0) FROM point_logs WHERE kind='key_recharge'").fetchone()[0],
+                    "total": conn.execute("SELECT COUNT(*) FROM recharge_keys WHERE deleted=0").fetchone()[0],
+                    "unused": conn.execute("SELECT COUNT(*) FROM recharge_keys WHERE deleted=0 AND used_by IS NULL AND active=1").fetchone()[0],
+                    "points_total": conn.execute("SELECT COALESCE(SUM(delta),0) FROM point_logs WHERE kind='key_recharge'").fetchone()[0],
                 }
             self.send_json({"ok": True, "keys": keys, "stats": stats})
             return
@@ -4968,9 +4988,10 @@ class Handler(BaseHTTPRequestHandler):
                     users.append(item)
                 nodes = list_public_nodes(conn, active_only=False)
                 invite_keys = []
-                for k in conn.execute("SELECT * FROM invite_keys ORDER BY id DESC LIMIT 200"):
+                for k in conn.execute("SELECT * FROM invite_keys WHERE deleted=0 ORDER BY id DESC LIMIT 200"):
                     invite_keys.append({
                         "id": k["id"],
+                        "seq_no": row_val(k, "seq_no", 0),
                         "key": k["key"],
                         "kind": row_val(k, "kind", "register") or "register",
                         "note": k["note"],
@@ -4994,7 +5015,7 @@ class Handler(BaseHTTPRequestHandler):
                     "total_ports": conn.execute("SELECT COUNT(*) c FROM ports").fetchone()["c"],
                     "free_ports": conn.execute("SELECT COUNT(*) c FROM ports WHERE user_id IS NULL").fetchone()["c"],
                     "tunnel_count": conn.execute("SELECT COUNT(*) c FROM tunnels").fetchone()["c"],
-                    "invite_key_count": conn.execute("SELECT COUNT(*) c FROM invite_keys").fetchone()["c"],
+                    "invite_key_count": conn.execute("SELECT COUNT(*) c FROM invite_keys WHERE deleted=0").fetchone()["c"],
                     "ban_count": conn.execute("SELECT COUNT(*) c FROM user_bans").fetchone()["c"],
                     "plan_count": conn.execute("SELECT COUNT(*) c FROM plans WHERE active=1").fetchone()["c"],
                     "order_count": conn.execute("SELECT COUNT(*) c FROM orders WHERE status='paid'").fetchone()["c"],
@@ -5003,13 +5024,13 @@ class Handler(BaseHTTPRequestHandler):
                 sw_license = current_software_license(conn)
                 software_keys = []
                 if SOFTWARE_LICENSE_AUTHORITY:
-                    for k in conn.execute("SELECT * FROM software_license_keys ORDER BY id DESC LIMIT 200"):
+                    for k in conn.execute("SELECT * FROM software_license_keys WHERE deleted=0 ORDER BY id DESC LIMIT 200"):
                         software_keys.append({
-                            "id": k["id"], "license_key": k["license_key"], "note": k["note"], "plan": k["plan"], "machine_id": k["machine_id"],
+                            "id": k["id"], "seq_no": k["seq_no"], "license_key": k["license_key"], "note": k["note"], "plan": k["plan"], "machine_id": k["machine_id"],
                             "active": bool(k["active"]), "expires_at": k["expires_at"], "expires_text": fmt_time(k["expires_at"]),
                             "expired": bool(k["expires_at"] and k["expires_at"] <= now()), "activated_at": k["activated_at"], "last_check_at": k["last_check_at"], "created_at": k["created_at"],
                         })
-            self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "invite_keys": invite_keys, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": effective_setup_key(), "has_setup_key": bool(effective_setup_key()), "setup_key_source": setup_key_source(), "smtp": smtp_public(smtp_config(conn)), "payment": payment_public(payment_config(conn)), "plans": list_plans(conn, active_only=False), "orders": [order_public(r) for r in conn.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 100")], "recharge_keys": [{"id": r["id"], "key": r["key"], "points": r["points"], "note": r["note"], "active": bool(r["active"]), "expires_at": r["expires_at"], "used_by": r["used_by"], "used_at": r["used_at"], "created_at": r["created_at"]} for r in conn.execute("SELECT * FROM recharge_keys ORDER BY id DESC LIMIT 200")]})
+            self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "invite_keys": invite_keys, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": effective_setup_key(), "has_setup_key": bool(effective_setup_key()), "setup_key_source": setup_key_source(), "smtp": smtp_public(smtp_config(conn)), "payment": payment_public(payment_config(conn)), "plans": list_plans(conn, active_only=False), "orders": [order_public(r) for r in conn.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 100")], "recharge_keys": [{"id": r["id"], "seq_no": r["seq_no"], "key": r["key"], "points": r["points"], "note": r["note"], "active": bool(r["active"]), "expires_at": r["expires_at"], "used_by": r["used_by"], "used_at": r["used_at"], "created_at": r["created_at"]} for r in conn.execute("SELECT * FROM recharge_keys WHERE deleted=0 ORDER BY id DESC LIMIT 200")]})
             return
         if path == "/api/admin/frps-proxies":
             if not self.require_admin():
@@ -5043,7 +5064,7 @@ class Handler(BaseHTTPRequestHandler):
                     "active": int(user_row["active"] or 0),
                 }
                 tunnel_count = conn.execute("SELECT COUNT(*) c FROM tunnels").fetchone()["c"]
-                invite_key_count = conn.execute("SELECT COUNT(*) c FROM invite_keys").fetchone()["c"]
+                invite_key_count = conn.execute("SELECT COUNT(*) c FROM invite_keys WHERE deleted=0").fetchone()["c"]
                 ban_count = conn.execute("SELECT COUNT(*) c FROM user_bans").fetchone()["c"]
                 traffic_row = conn.execute(
                     "SELECT COALESCE(SUM(mx), 0) AS total FROM (SELECT MAX(bytes) AS mx FROM traffic_samples WHERE day=? GROUP BY user_id, proxy_type)",
@@ -5892,7 +5913,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "error": "参数错误"}, 400)
             return
         with db() as conn:
-            conn.execute("DELETE FROM recharge_keys WHERE id=? AND used_by IS NULL", (kid,))
+            conn.execute("UPDATE recharge_keys SET deleted=1, active=0 WHERE id=? AND used_by IS NULL", (kid,))
         self.send_json({"ok": True, "message": "密钥已删除"})
 
     def admin_user_points(self, data: dict[str, Any]) -> None:
@@ -6155,8 +6176,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         key_id = int(data.get("id", 0))
         with db() as conn:
-            conn.execute("DELETE FROM invite_keys WHERE id=?", (key_id,))
-        self.send_json({"ok": True})
+            conn.execute("UPDATE invite_keys SET deleted=1, active=0 WHERE id=?", (key_id,))
+        self.send_json({"ok": True, "message": "密钥已删除"})
 
     def admin_node_create(self, data: dict[str, Any]) -> None:
         if not self.require_admin():
