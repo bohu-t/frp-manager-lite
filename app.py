@@ -3787,6 +3787,7 @@ def rsa_verify_sha256(message: bytes, signature_b64: str, public_pem: str) -> bo
 def payment_config(conn: sqlite3.Connection) -> dict[str, Any]:
     return {
         "provider": setting_get(conn, "pay_provider", ""),
+        "providers": setting_get(conn, "pay_providers", ""),
         "public_url": setting_get(conn, "pay_public_url", "").rstrip("/"),
         "alipay_app_id": setting_get(conn, "alipay_app_id", ""),
         "alipay_private_key": setting_get(conn, "alipay_private_key", ""),
@@ -3795,20 +3796,42 @@ def payment_config(conn: sqlite3.Connection) -> dict[str, Any]:
         "wechat_appid": setting_get(conn, "wechat_appid", ""),
         "wechat_mch_id": setting_get(conn, "wechat_mch_id", ""),
         "wechat_api_key": setting_get(conn, "wechat_api_key", ""),
-        "points_per_yuan": max(1, int(setting_get(conn, "points_per_yuan", "10") or 10)),
+        "points_per_yuan": max(1, int(setting_get(conn, "points_per_yuan", "1") or 1)),
     }
 
 
+PAYMENT_NAMES = {"alipay": "支付宝", "wechat": "微信支付", "mock": "测试模式"}
+
+
+def enabled_payment_providers(cfg: dict[str, Any]) -> list[str]:
+    raw = str(cfg.get("providers") or "").strip()
+    if not raw:
+        raw = str(cfg.get("provider") or "").strip()
+    out: list[str] = []
+    for item in raw.split(","):
+        name = item.strip()
+        if name in PAYMENT_NAMES and name not in out:
+            out.append(name)
+    return out
+
+
+def provider_ready(name: str, cfg: dict[str, Any]) -> bool:
+    if name == "mock":
+        return True
+    if name == "alipay":
+        return bool(cfg.get("alipay_app_id") and cfg.get("alipay_private_key") and cfg.get("alipay_public_key"))
+    if name == "wechat":
+        return bool(cfg.get("wechat_appid") and cfg.get("wechat_mch_id") and cfg.get("wechat_api_key"))
+    return False
+
+
 def payment_public(cfg: dict[str, Any]) -> dict[str, Any]:
-    provider = cfg.get("provider") or ""
-    ready = False
-    if provider == "mock":
-        ready = True
-    elif provider == "alipay":
-        ready = bool(cfg.get("alipay_app_id") and cfg.get("alipay_private_key") and cfg.get("alipay_public_key"))
-    elif provider == "wechat":
-        ready = bool(cfg.get("wechat_appid") and cfg.get("wechat_mch_id") and cfg.get("wechat_api_key"))
+    enabled = enabled_payment_providers(cfg)
+    providers = [{"key": k, "name": PAYMENT_NAMES[k], "ready": provider_ready(k, cfg)} for k in enabled]
+    ready = any(x["ready"] for x in providers)
+    provider = next((x["key"] for x in providers if x["ready"]), (enabled[0] if enabled else ""))
     return {
+        "providers": providers,
         "provider": provider,
         "ready": ready,
         "public_url": cfg.get("public_url", ""),
@@ -3816,7 +3839,7 @@ def payment_public(cfg: dict[str, Any]) -> dict[str, Any]:
         "alipay_gateway": cfg.get("alipay_gateway", DEFAULT_ALIPAY_GATEWAY),
         "wechat_appid": cfg.get("wechat_appid", ""),
         "wechat_mch_id": cfg.get("wechat_mch_id", ""),
-        "points_per_yuan": int(cfg.get("points_per_yuan") or 10),
+        "points_per_yuan": int(cfg.get("points_per_yuan") or 1),
         "alipay_configured": bool(cfg.get("alipay_app_id") and cfg.get("alipay_private_key") and cfg.get("alipay_public_key")),
         "wechat_configured": bool(cfg.get("wechat_appid") and cfg.get("wechat_mch_id") and cfg.get("wechat_api_key")),
     }
@@ -4072,9 +4095,14 @@ def create_points_order(user: sqlite3.Row, points: int, provider: str = "") -> t
     with db() as conn:
         cfg = payment_config(conn)
         rate = max(1, int(setting_get(conn, "points_per_yuan", "10") or 10))
-    provider = provider or cfg.get("provider") or ""
-    if provider not in ("mock", "alipay", "wechat"):
+    enabled = enabled_payment_providers(cfg)
+    if not enabled:
         return False, "在线支付未配置，请联系管理员", None
+    provider = provider or next((x for x in enabled if provider_ready(x, cfg)), enabled[0])
+    if provider not in enabled:
+        return False, "该支付方式未开通", None
+    if not provider_ready(provider, cfg):
+        return False, f"{PAYMENT_NAMES.get(provider, provider)} 尚未配置完成", None
     amount_cents = max(1, int(round(points * 100.0 / rate)))
     order_no = new_order_no()
     with db() as conn:
@@ -5922,11 +5950,16 @@ class Handler(BaseHTTPRequestHandler):
     def admin_payment_config_save(self, data: dict[str, Any]) -> None:
         if not self.require_admin():
             return
-        provider = str(data.get("provider", "")).strip()
-        if provider not in ("", "mock", "alipay", "wechat"):
-            self.send_json({"ok": False, "error": "不支持的支付方式"}, 400)
-            return
+        raw = data.get("providers", data.get("provider", ""))
+        if isinstance(raw, (list, tuple)):
+            items = [str(x).strip() for x in raw]
+        else:
+            items = [x.strip() for x in str(raw or "").split(",")]
+        providers = [x for x in items if x in PAYMENT_NAMES]
+        providers = list(dict.fromkeys(providers))
+        provider = providers[0] if providers else ""
         with db() as conn:
+            setting_set(conn, "pay_providers", ",".join(providers))
             setting_set(conn, "pay_provider", provider)
             setting_set(conn, "pay_public_url", str(data.get("public_url", "")).strip().rstrip("/"))
             setting_set(conn, "alipay_app_id", str(data.get("alipay_app_id", "")).strip())
@@ -5940,9 +5973,9 @@ class Handler(BaseHTTPRequestHandler):
             if str(data.get("wechat_api_key", "")).strip():
                 setting_set(conn, "wechat_api_key", str(data.get("wechat_api_key", "")).strip())
             try:
-                rate = int(data.get("points_per_yuan", 10) or 10)
+                rate = int(data.get("points_per_yuan", 1) or 1)
             except (TypeError, ValueError):
-                rate = 10
+                rate = 1
             setting_set(conn, "points_per_yuan", str(max(1, min(10000, rate))))
         self.send_json({"ok": True, "message": "支付设置已保存"})
 

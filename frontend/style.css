@@ -1625,3 +1625,7 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 /* ---- 积分充值 ---- */
 .points-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:16px}
 .plan-price small{font-size:12px;font-weight:500;color:var(--muted)}
+
+/* ---- 支付渠道多选 ---- */
+.pay-channels{display:flex;flex-wrap:wrap;gap:14px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:rgba(148,163,184,.06)}
+.pay-channels .check{display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;margin:0}
