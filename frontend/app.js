@@ -692,7 +692,7 @@ function appSidebarHtml(kind='dashboard'){
   const isAdmin = currentUser?.role === 'admin';
   const username = currentUser?.username || '用户';
   const items = isAdmin ? [
-    ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
+    ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','chart','订单','orders'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
   ] : [
     ['dashboard','home','概览'],['dashboard-nodes','node','可用节点'],['dashboard-plans','license','购买套餐'],['dashboard-points','bolt','积分充值'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
   ];
@@ -739,6 +739,7 @@ function setNav(){
   const adminNav = isAdmin && !licenseRequired ? [
     navButton('用户', 'admin', 'secondary', 'users'),
     navButton('套餐', 'admin', 'secondary', 'plans'),
+    navButton('订单', 'admin', 'secondary', 'orders'),
     navButton('新增节点', 'admin', 'secondary', 'nodes'),
     navButton('节点健康', 'admin-health', 'secondary', 'health'),
     navButton('映射监控', 'admin-proxies', 'secondary', 'proxies'),
@@ -1830,7 +1831,7 @@ async function loadAdminProxies(page=adminProxyPage){
 async function loadAdmin(section=currentAdminSection){
   clearAdminDashboardTimer();
   hideFlash();
-  currentAdminSection = ['users','plans','nodes','risk'].includes(section) ? section : currentAdminSection;
+  currentAdminSection = ['users','plans','orders','nodes','risk'].includes(section) ? section : currentAdminSection;
   setNav();
   let data;
   try{ data = await api('/api/admin/overview'); }
@@ -1971,13 +1972,15 @@ async function loadAdmin(section=currentAdminSection){
   const orderRows = orderList.map(o => `<tr>
       <td>${esc(o.order_no)}</td>
       <td>${esc(o.username)}</td>
+      <td>${o.kind === 'points' ? '积分充值' : '套餐购买'}</td>
       <td>${esc(o.plan_name)}</td>
-      <td>¥${o.amount_text}</td>
+      <td>${o.points ? (o.kind === 'points' ? '+' : '-') + o.points : '-'}</td>
+      <td>${o.kind === 'points' ? '¥' + o.amount_text : '-'}</td>
       <td><span class="status-badge ${o.status === 'paid' ? 'ok' : (o.status === 'pending' ? '' : 'bad')}"><i></i>${orderStatusText[o.status] || esc(o.status)}</span></td>
       <td>${esc(o.provider || '-')}</td>
       <td>${fmtTs(o.created_at)}</td>
       <td>${o.status === 'pending' ? `<button type="button" class="secondary" onclick="orderComplete('${esc(o.order_no)}')">手动开通</button>` : '-'}</td>
-    </tr>`).join('') || '<tr><td colspan="8" class="muted">暂无订单</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="10" class="muted">暂无订单</td></tr>';
   const rkRows = (data.recharge_keys || []).map(k => `<tr>
       <td>${k.id}</td>
       <td><code class="token">${esc(k.key)}</code></td>
@@ -1987,6 +1990,10 @@ async function loadAdmin(section=currentAdminSection){
       <td>${fmtTs(k.created_at)}</td>
       <td class="row-actions">${k.used_by ? '-' : `<button type="button" class="secondary" onclick="rechargeKeyToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button type="button" class="danger" onclick="rechargeKeyDelete(${k.id})">删除</button>`}</td>
     </tr>`).join('') || '<tr><td colspan="7" class="muted">还没有充值密钥</td></tr>';
+  const ordersHtml = `
+    <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}订单</h2><p>最近 100 条；待支付订单可手动开通</p></div><span class="section-count">已支付 ${orderList.filter(o => o.status === 'paid').length} / 共 ${orderList.length}</span></div>
+      <table><thead><tr><th>订单号</th><th>用户</th><th>类型</th><th>套餐 / 内容</th><th>积分</th><th>金额</th><th>状态</th><th>支付方式</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table>
+    </section>`;
   const plansHtml = `
     <section class="card" id="plans"><div class="section-title"><h2>${stIcon('license')}套餐模板</h2><p>用户按套餐在线购买，支付成功后自动分配端口与有效期</p></div>
     <form id="planForm" class="grid">
@@ -2014,7 +2021,6 @@ async function loadAdmin(section=currentAdminSection){
       </form>
       <table><thead><tr><th>ID</th><th>密钥</th><th>积分</th><th>备注</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${rkRows}</tbody></table>
     </section>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}订单</h2><p>最近 100 条；待支付订单可手动开通</p></div><span class="section-count">已支付 ${orderList.filter(o => o.status === 'paid').length}</span></div><table><thead><tr><th>订单号</th><th>用户</th><th>套餐</th><th>金额</th><th>状态</th><th>支付方式</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></section>
     ${data.software_license_authority ? `<section class="card" id="software-licenses"><div class="section-title"><h2>${stIcon('license')}服务器软件授权码</h2><p>卖家后台使用：先批量生成授权码发给客户；客户输入授权码后自动绑定他的部署服务器。</p></div><form id="softwareLicenseForm" class="grid">
       <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
       <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
@@ -2091,8 +2097,8 @@ async function loadAdmin(section=currentAdminSection){
       <div id="riskResult" class="risk-result"></div>
     </section>
     <section class="card"><div class="section-title"><h2>${stIcon('log')}审计日志</h2><p>最近 80 条关键操作和风控事件</p></div><table><thead><tr><th>ID</th><th>事件</th><th>用户</th><th>端口</th><th>协议</th><th>详情</th><th>时间</th></tr></thead><tbody>${logRows}</tbody></table>${paginationHtml('risk', riskPage, (data.logs || []).length, ADMIN_PAGE_SIZE)}</section>`;
-  const sectionHtml = {users: usersHtml, plans: plansHtml, nodes: nodeHtml, risk: riskHtml}[currentAdminSection] || usersHtml;
-  const sectionTitles = {users:'用户管理', plans:'套餐管理', nodes:'新增节点', risk:'风控审计'};
+  const sectionHtml = {users: usersHtml, plans: plansHtml, orders: ordersHtml, nodes: nodeHtml, risk: riskHtml}[currentAdminSection] || usersHtml;
+  const sectionTitles = {users:'用户管理', plans:'套餐管理', orders:'订单管理', nodes:'新增节点', risk:'风控审计'};
   app.innerHTML = appLayoutHtml(sectionHtml, currentAdminSection, sectionTitles[currentAdminSection] || '管理台');
   const adminUserFilterForm = document.querySelector('#adminUserFilterForm');
   if(adminUserFilterForm){
