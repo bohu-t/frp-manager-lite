@@ -694,7 +694,7 @@ function appSidebarHtml(kind='dashboard'){
   const items = isAdmin ? [
     ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
   ] : [
-    ['dashboard','home','概览'],['dashboard-nodes','node','节点'],['dashboard-plans','license','套餐'],['dashboard-points','bolt','积分'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
+    ['dashboard','home','概览'],['dashboard-nodes','node','可用节点'],['dashboard-plans','license','购买套餐'],['dashboard-points','bolt','积分充值'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
   ];
   const links = items.map(([action, icon, label, section]) => {
     const active = kind === action || (section && kind === section) ? ' active' : '';
@@ -976,10 +976,10 @@ async function loadPlans(){
       <td>${o.status === 'pending' ? `<button type="button" class="secondary" onclick="resumePay('${esc(o.order_no)}')">继续支付</button>` : '-'}</td>
     </tr>`).join('') || '<tr><td colspan="6" class="muted">暂无订单</td></tr>';
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">PLANS</span><h1>套餐</h1><p>使用积分购买套餐，购买后自动开通端口与有效期。</p></div><div class="ov-head-badge"><span>我的积分</span><b>${data.balance}</b></div></div>
+    <div class="ov-page-head"><div><span class="section-kicker">PLANS</span><h1>购买套餐</h1><p>使用积分购买套餐，购买后自动开通端口与有效期。</p></div><div class="ov-head-badge"><span>我的积分</span><b>${data.balance}</b></div></div>
     <section class="card"><div class="section-title"><div><h2>${stIcon('license')}可选套餐</h2><p>共 ${(data.plans || []).length} 个套餐</p></div><button type="button" class="secondary" onclick="loadPoints()">充值积分</button></div><div class="plan-grid">${cards}</div></section>
     <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}我的订单</h2><p>最近 50 条</p></div></div><table><thead><tr><th>订单号</th><th>套餐</th><th>积分</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></section>
-  `, 'dashboard-plans', '套餐');
+  `, 'dashboard-plans', '购买套餐');
 }
 
 async function buyPlan(planId){
@@ -1025,7 +1025,7 @@ async function loadPoints(){
       <td>${esc(l.note || l.ref || '-')}</td>
     </tr>`).join('') || '<tr><td colspan="5" class="muted">暂无积分记录</td></tr>';
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">POINTS</span><h1>积分</h1><p>在线充值或使用充值密钥，积分可用于购买套餐。</p></div><div class="ov-head-badge"><span>当前余额</span><b>${data.balance}</b></div></div>
+    <div class="ov-page-head"><div><span class="section-kicker">POINTS</span><h1>积分充值</h1><p>在线充值或使用充值密钥，积分可用于购买套餐。</p></div><div class="ov-head-badge"><span>当前余额</span><b>${data.balance}</b></div></div>
     <div class="points-grid">
       <section class="card">
         <div class="section-title"><div><h2>${stIcon('license')}在线充值</h2><p>1 元 = ${rate} 积分</p></div></div>
@@ -1044,7 +1044,7 @@ async function loadPoints(){
       </section>
     </div>
     <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}积分明细</h2><p>最近 100 条</p></div></div><table><thead><tr><th>时间</th><th>类型</th><th>变动</th><th>余额</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table></section>
-  `, 'dashboard-points', '积分');
+  `, 'dashboard-points', '积分充值');
 
   const rf = document.querySelector('#pointsRechargeForm');
   if(rf){
@@ -2006,7 +2006,7 @@ async function loadAdmin(section=currentAdminSection){
       <div class="form-actions" style="grid-column:1/-1"><button>保存套餐</button><button type="button" class="secondary" onclick="resetPlanForm()">清空</button></div>
     </form></section>
     <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>ID</th><th>名称</th><th>积分价格</th><th>端口</th><th>有效期</th><th>流量 / 速率</th><th>节点</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
-    <section class="card" id="recharge-keys"><div class="section-title"><div><h2>${stIcon('key')}积分充值密钥</h2><p>生成后发给用户，用户在「积分」页兑换；每枚只能使用一次</p></div><span class="section-count">可用 ${(data.recharge_keys || []).filter(k => !k.used_by && k.active).length}</span></div>
+    <section class="card" id="recharge-keys"><div class="section-title"><div><h2>${stIcon('key')}积分充值密钥</h2><p>生成后发给用户，用户在「积分充值」页兑换；每枚只能使用一次</p></div><span class="section-count">可用 ${(data.recharge_keys || []).filter(k => !k.used_by && k.active).length}</span></div>
       <form id="rechargeKeyForm" class="grid">
         <div><label>每枚积分</label><input name="points" type="number" value="100" min="1" step="1"></div>
         <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
