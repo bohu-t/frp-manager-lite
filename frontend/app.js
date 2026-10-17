@@ -1989,7 +1989,7 @@ async function loadAdmin(section=currentAdminSection){
     return n ? `${n.region} / ${n.name}` : (id ? ('#' + id) : '自动分配');
   };
   const planRows = plansList.map(p => `<tr>
-      <td>${p.id}</td>
+      <td>${p.seq_no || p.id}</td>
       <td>${esc(p.name)}</td>
       <td><b>${p.price_points}</b> 积分</td>
       <td>${p.max_ports}</td>
@@ -2039,7 +2039,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>状态</label><select name="active"><option value="1">上架</option><option value="0">下架</option></select></div>
       <div class="form-actions" style="grid-column:1/-1"><button>保存套餐</button><button type="button" class="secondary" onclick="resetPlanForm()">清空</button></div>
     </form></section>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>ID</th><th>名称</th><th>积分价格</th><th>端口</th><th>有效期</th><th>流量 / 速率</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>序号</th><th>名称</th><th>积分价格</th><th>端口</th><th>有效期</th><th>流量 / 速率</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
     <section class="card" id="recharge-keys"><div class="section-title"><div><h2>${stIcon('key')}积分充值密钥</h2><p>生成后发给用户，用户在「积分充值」页兑换；每枚只能使用一次</p></div><span class="section-count">可用 ${(data.recharge_keys || []).filter(k => !k.used_by && k.active).length}</span></div>
       <form id="rechargeKeyForm" class="grid">
         <div><label>每枚积分</label><input name="points" type="number" value="100" min="1" step="1"></div>
@@ -2593,7 +2593,7 @@ async function adminAdjustPoints(id, username){
 async function rechargeKeyToggle(id){ await api('/api/admin/recharge-keys/toggle', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥状态已更新'))).catch(e=>show(e.message,true)); }
 async function rechargeKeyDelete(id){ if(confirm('删除这枚充值密钥？')) await api('/api/admin/recharge-keys/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥已删除'))).catch(e=>show(e.message,true)); }
 async function planToggle(id){ await api('/api/admin/plans/toggle', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('套餐状态已更新'))).catch(e=>show(e.message,true)); }
-async function planDelete(id){ if(confirm('删除这个套餐？已产生的订单不受影响。')) await api('/api/admin/plans/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('套餐已删除'))).catch(e=>show(e.message,true)); }
+async function planDelete(id){ if(confirm('删除这个套餐？删除后不再展示，历史订单和套餐数据仍保留。')) await api('/api/admin/plans/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('套餐已删除'))).catch(e=>show(e.message,true)); }
 async function orderComplete(orderNo){ if(confirm('确认手动开通该订单？将立即分配端口并延长有效期。')) await api('/api/admin/orders/complete', {method:'POST', body:{order_no:orderNo}}).then(r=>loadAdmin().then(()=>show(r.message || '已开通'))).catch(e=>show(e.message,true)); }
 
 async function inviteToggle(id){ await api('/api/admin/invite-keys/toggle', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥状态已更新'))).catch(e=>show(e.message,true)); }

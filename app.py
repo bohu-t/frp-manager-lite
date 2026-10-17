@@ -2574,6 +2574,8 @@ def init_db() -> None:
             );
             CREATE TABLE IF NOT EXISTS plans (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                seq_no INTEGER NOT NULL DEFAULT 0,
+                deleted INTEGER NOT NULL DEFAULT 0,
                 name TEXT NOT NULL,
                 price_cents INTEGER NOT NULL DEFAULT 0,
                 max_ports INTEGER NOT NULL DEFAULT 5,
@@ -2652,6 +2654,16 @@ def init_db() -> None:
         plan_cols = {r["name"] for r in conn.execute("PRAGMA table_info(plans)").fetchall()}
         if "price_points" not in plan_cols:
             conn.execute("ALTER TABLE plans ADD COLUMN price_points INTEGER NOT NULL DEFAULT 0")
+        if "seq_no" not in plan_cols:
+            conn.execute("ALTER TABLE plans ADD COLUMN seq_no INTEGER NOT NULL DEFAULT 0")
+        if "deleted" not in plan_cols:
+            conn.execute("ALTER TABLE plans ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+        # 为历史套餐补齐展示序号
+        missing = conn.execute("SELECT id FROM plans WHERE seq_no=0 ORDER BY id").fetchall()
+        if missing:
+            base = conn.execute("SELECT COALESCE(MAX(seq_no),0) FROM plans").fetchone()[0]
+            for offset, r in enumerate(missing, start=1):
+                conn.execute("UPDATE plans SET seq_no=? WHERE id=?", (int(base) + offset, r["id"]))
         order_cols = {r["name"] for r in conn.execute("PRAGMA table_info(orders)").fetchall()}
         if "kind" not in order_cols:
             conn.execute("ALTER TABLE orders ADD COLUMN kind TEXT NOT NULL DEFAULT 'plan'")
@@ -3852,6 +3864,7 @@ def payment_public(cfg: dict[str, Any]) -> dict[str, Any]:
 def plan_public(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": int(row["id"]),
+        "seq_no": int(row_val(row, "seq_no", 0) or 0),
         "name": row["name"],
         "price_cents": int(row["price_cents"] or 0),
         "price_text": f"{int(row['price_cents'] or 0) / 100:.2f}",
@@ -3871,10 +3884,10 @@ def plan_public(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def list_plans(conn: sqlite3.Connection, active_only: bool = False) -> list[dict[str, Any]]:
-    sql = "SELECT * FROM plans"
+    sql = "SELECT * FROM plans WHERE deleted=0"
     if active_only:
-        sql += " WHERE active=1"
-    sql += " ORDER BY sort_order, id"
+        sql += " AND active=1"
+    sql += " ORDER BY sort_order, seq_no, id"
     return [plan_public(r) for r in conn.execute(sql)]
 
 
@@ -3905,9 +3918,10 @@ def save_plan(plan_id: int, name: str, price_cents: int, max_ports: int, traffic
             if cur.rowcount == 0:
                 return False, "套餐不存在"
         else:
+            seq_no = int(conn.execute("SELECT COALESCE(MAX(seq_no),0) FROM plans").fetchone()[0]) + 1
             conn.execute(
-                "INSERT INTO plans(name, price_cents, price_points, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days, node_id, note, active, sort_order, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                (name, price_cents, price_points, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days,
+                "INSERT INTO plans(seq_no, name, price_cents, price_points, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days, node_id, note, active, sort_order, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (seq_no, name, price_cents, price_points, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days,
                  node_id or None, str(note or "")[:200], 1 if active else 0, sort_order, now()))
     return True, "套餐已保存"
 
@@ -4054,7 +4068,7 @@ def mark_order_paid(order_no: str, transaction_id: str = "", provider: str = "")
 def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: int = 0) -> tuple[bool, str, dict[str, Any] | None]:
     """积分购买套餐：用户自选节点，扣积分后立即开通。"""
     with db() as conn:
-        plan = conn.execute("SELECT * FROM plans WHERE id=? AND active=1", (plan_id,)).fetchone()
+        plan = conn.execute("SELECT * FROM plans WHERE id=? AND active=1 AND deleted=0", (plan_id,)).fetchone()
         if not plan:
             return False, "套餐不存在或已下架", None
         chosen_node = None
@@ -5938,8 +5952,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "error": "参数错误"}, 400)
             return
         with db() as conn:
-            conn.execute("DELETE FROM plans WHERE id=?", (plan_id,))
-        audit("plan_delete", admin, None, None, "", f"删除套餐 id={plan_id}")
+            conn.execute("UPDATE plans SET deleted=1, active=0 WHERE id=?", (plan_id,))
+        audit("plan_delete", admin, None, None, "", f"逻辑删除套餐 id={plan_id}")
         self.send_json({"ok": True, "message": "套餐已删除"})
 
     def admin_plan_toggle(self, data: dict[str, Any]) -> None:
