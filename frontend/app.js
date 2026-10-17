@@ -958,7 +958,6 @@ async function loadPlans(){
       <div class="plan-card-head"><h3>${esc(p.name)}</h3><span class="plan-price">${p.price_points} <small>积分</small></span></div>
       <ul class="plan-meta">
         <li><span>端口数</span><b>${p.max_ports}</b></li>
-        <li><span>有效期</span><b>${p.duration_days ? p.duration_days + ' 天' : '不限期'}</b></li>
         <li><span>流量上限</span><b>${p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '不限'}</b></li>
         <li><span>速率上限</span><b>${p.bandwidth_limit_mbs ? p.bandwidth_limit_mbs + ' MB/s' : '不限'}</b></li>
       </ul>
@@ -1611,7 +1610,6 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         <section class="card profile-card">
           <div class="profile-head"><span class="profile-avatar">${avatarSvg(data.user.username||'U', data.user.role, 56)}</span><div class="profile-id"><strong>${esc(data.user.username||'-')}</strong><small>${data.user.role === 'admin' ? '系统管理员' : '普通用户'}</small></div></div>
           <div class="profile-rows">
-            <div class="info-line"><span>账号有效期</span><strong>${esc(data.user.expires_text || '-')}</strong></div>
             <div class="info-line"><span>今日流量</span><strong>${fmtBytes(todayTraffic)}${trafficLimit ? ' / ' + fmtBytes(trafficLimit) : ' / 不限'}</strong></div>
             <div class="info-line"><span>隧道数量</span><strong>${data.tunnels.length} 条</strong></div>
             <div class="info-line"><span>端口上限</span><strong>${esc(data.user.max_ports ?? '-')}</strong></div>
@@ -1658,7 +1656,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
     <section class="card tunnel-config-entry"><div class="section-title"><div><div class="section-kicker">QUICK ACTION</div><h2>${stIcon('plus')}开始创建映射</h2></div><p>支持 TCP / UDP / HTTP / HTTPS 等协议</p></div><button onclick="loadDashboard('tunnels')">去创建隧道</button><span class="muted small">在「隧道管理」页填写本地服务和公网访问方式，创建后下载最新 frpc 配置。</span></section>
     <section class="card tunnel-list-section"><div class="section-title"><div><div class="section-kicker">MY TUNNELS</div><h2>${stIcon('tunnel')}我的隧道</h2><p>一张卡片对应一条映射。修改配置后，请重新下载 frpc.toml 并重启客户端。</p></div><span class="section-count">${data.tunnels.length} 条隧道</span></div><div class="tc-grid">${tunnelRows}</div></section>
     </div><aside class="workspace-aside">
-      <section class="side-info-card"><div class="section-kicker">ACCOUNT</div><h3>${stIcon('user')}账号信息</h3><div class="info-line"><span>当前账号</span><strong>${esc(data.user.username)}</strong></div><div class="info-line"><span>所在节点</span><strong>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</strong></div><div class="info-line"><span>端口上限</span><strong>${esc(data.user.max_ports)}</strong></div><div class="info-line"><span>有效期</span><strong>${esc(data.user.expires_text)}</strong></div></section>
+      <section class="side-info-card"><div class="section-kicker">ACCOUNT</div><h3>${stIcon('user')}账号信息</h3><div class="info-line"><span>当前账号</span><strong>${esc(data.user.username)}</strong></div><div class="info-line"><span>所在节点</span><strong>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</strong></div><div class="info-line"><span>端口上限</span><strong>${esc(data.user.max_ports)}</strong></div></section>
       <section class="side-info-card dark-side"><div class="section-kicker">ACCESS POINT</div><h3>${stIcon('node')}FRPS 接入点</h3><div class="endpoint-big">${esc(data.frps.addr)}</div><code>${esc(data.frps.port)}</code><div class="side-actions"><a class="btn" href="/config/frpc.toml">下载配置</a><a class="btn secondary" href="/config/deploy-frpc.sh">部署脚本</a></div></section>
       ${userDeployScriptAddressHtml(data.user, {title:'部署地址', desc:'复制给需要安装客户端的服务器。'})}
     </aside></div>`, 'dashboard', '概览');
@@ -1864,12 +1862,10 @@ async function loadAdmin(section=currentAdminSection){
     <tr>
       <td>${u.id}</td><td>${esc(u.username)}</td><td>${u.email ? esc(u.email) : '—'}</td><td>${esc(u.role)}</td><td><b>${Number(u.points || 0)}</b></td><td>${esc(u.node_region || '-')} / ${esc(u.node_name || '-')}</td><td>${u.port_count}/${u.max_ports}</td><td>${u.tunnel_count}</td>
       <td>${fmtBytes(u.traffic_limit_bytes)} / ${u.bandwidth_limit_kbps ? `${(Number(u.bandwidth_limit_kbps) / 1024).toFixed(1)} MB/s` : '不限'}</td>
-      <td>${esc(u.expires_text)} ${u.expired ? '<span class="bad">已到期</span>' : ''}</td>
       <td>${u.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
       <td><code class="token" title="${esc(u.invite_key_used || '')}">${esc(u.invite_key_used || '后台创建')}</code></td>
       <td class="actions node-actions user-actions">
         <button class="node-action" onclick="adminToggle(${u.id})">${u.active ? '停用' : '启用'}</button>
-        <button class="node-action" onclick="adminExtend(${u.id})">续30天</button>
         <button class="node-action" onclick="openAdminLimits(${u.id}, ${Number(u.traffic_limit_bytes || 0)}, ${Number(u.bandwidth_limit_kbps || 0)}, '${esc(u.username)}')">流量限制</button>
         <button class="node-action" onclick="openAdminCred('password', ${u.id}, '${esc(u.username)}')">重置密码</button>
         <button class="node-action" onclick="openAdminCred('token', ${u.id}, '${esc(u.username)}')">重置令牌</button>
@@ -1963,7 +1959,6 @@ async function loadAdmin(section=currentAdminSection){
       <td>${esc(p.name)}</td>
       <td><b>${p.price_points}</b> 积分</td>
       <td>${p.max_ports}</td>
-      <td>${p.duration_days ? p.duration_days + ' 天' : '不限期'}</td>
       <td>${p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '不限'} / ${p.bandwidth_limit_mbs ? p.bandwidth_limit_mbs + ' MB/s' : '不限'}</td>
       <td>${esc(nodeName(p.node_id))}</td>
       <td><span class="status-badge ${p.active ? 'ok' : 'bad'}"><i></i>${p.active ? '上架' : '下架'}</span></td>
@@ -1996,7 +1991,6 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>套餐名称</label><input name="name" placeholder="例如 入门版 / 专业版" required></div>
       <div><label>积分价格</label><input name="price_points" type="number" value="100" min="0" step="1"><span class="muted small">用户购买时扣除的积分</span></div>
       <div><label>端口数</label><input name="max_ports" type="number" value="5" min="0" max="100"></div>
-      <div><label>有效期（天）</label><input name="duration_days" type="number" value="30" min="0" max="3650"><span class="muted small">0 表示不限期</span></div>
       <div><label>流量上限 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
       <div><label>速率 MB/s</label><input name="bandwidth_limit_mbs" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
       <div><label>适用节点</label><select name="node_id"><option value="0">自动分配</option>${nodeOptions(data.nodes || [])}</select></div>
@@ -2005,7 +1999,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>状态</label><select name="active"><option value="1">上架</option><option value="0">下架</option></select></div>
       <div class="form-actions" style="grid-column:1/-1"><button>保存套餐</button><button type="button" class="secondary" onclick="resetPlanForm()">清空</button></div>
     </form></section>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>ID</th><th>名称</th><th>积分价格</th><th>端口</th><th>有效期</th><th>流量 / 速率</th><th>节点</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>ID</th><th>名称</th><th>积分价格</th><th>端口</th><th>流量 / 速率</th><th>节点</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
     <section class="card" id="recharge-keys"><div class="section-title"><div><h2>${stIcon('key')}积分充值密钥</h2><p>生成后发给用户，用户在「积分充值」页兑换；每枚只能使用一次</p></div><span class="section-count">可用 ${(data.recharge_keys || []).filter(k => !k.used_by && k.active).length}</span></div>
       <form id="rechargeKeyForm" class="grid">
         <div><label>每枚积分</label><input name="points" type="number" value="100" min="1" step="1"></div>
@@ -2044,7 +2038,7 @@ async function loadAdmin(section=currentAdminSection){
         <div><label for="adminUserStatus">账号状态</label><select id="adminUserStatus" name="status"><option value="all" ${adminUserStatus==='all'?'selected':''}>全部状态</option><option value="active" ${adminUserStatus==='active'?'selected':''}>正常启用</option><option value="disabled" ${adminUserStatus==='disabled'?'selected':''}>已停用</option><option value="expired" ${adminUserStatus==='expired'?'selected':''}>已到期</option></select></div>
         <div class="form-actions"><button type="submit">筛选</button><button type="button" class="secondary" id="adminUserFilterReset">重置</button></div>
       </form>
-      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>ID</th><th>用户</th><th>邮箱</th><th>角色</th><th>积分</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>到期</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>
+      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>ID</th><th>用户</th><th>邮箱</th><th>角色</th><th>积分</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>
     <div id="adminLimitsModal" class="modal-backdrop modal-center hidden" role="dialog" aria-modal="true" aria-labelledby="adminLimitsTitle" onclick="if(event.target===this)closeAdminLimits()">
       <section class="modal-page card admin-limits-modal">
         <div class="section-title modal-title">
@@ -2522,7 +2516,6 @@ function resetPlanForm(){
   f.elements.id.value = '';
   f.elements.price_points.value = '100';
   f.elements.max_ports.value = '5';
-  f.elements.duration_days.value = '30';
   f.elements.traffic_limit_gb.value = '0';
   f.elements.bandwidth_limit_mbs.value = '0';
   f.elements.sort_order.value = '0';
@@ -2536,7 +2529,6 @@ function editPlan(id){
   f.elements.name.value = p.name;
   f.elements.price_points.value = p.price_points;
   f.elements.max_ports.value = p.max_ports;
-  f.elements.duration_days.value = p.duration_days;
   f.elements.traffic_limit_gb.value = p.traffic_limit_gb;
   f.elements.bandwidth_limit_mbs.value = p.bandwidth_limit_mbs;
   f.elements.node_id.value = p.node_id || 0;

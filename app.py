@@ -1270,8 +1270,8 @@ def row_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
 
 
 def is_expired(user: sqlite3.Row | dict[str, Any]) -> bool:
-    expires_at = int(user["expires_at"] or 0)
-    return bool(expires_at and expires_at <= now())
+    """账号不再有有效期限制（保留函数以兼容旧调用）。"""
+    return False
 
 
 def make_license_key() -> str:
@@ -2735,7 +2735,7 @@ def create_user(username: str, password: str, max_ports: int, expires_days: int,
         return False, "流量限制不能小于 0"
     if bandwidth_limit_kbps < 0:
         return False, "网速限制不能小于 0"
-    expires_at = 0 if expires_days == 0 else now() + expires_days * 86400
+    expires_at = 0
     with db() as conn:
         node = conn.execute("SELECT * FROM nodes WHERE id=? AND active=1", (node_id,)).fetchone()
         if not node:
@@ -2965,8 +2965,7 @@ def register_with_invite(username: str, password: str, invite_key: str, node_id:
         free_ports = available_ports_for_assignment(conn, node_id, max_ports) if node and max_ports else []
         if node and len(free_ports) < max_ports:
             return False, f"端口池不足，只剩 {len(free_ports)} 个可用端口"
-        expires_days = int(key_row["user_expires_days"]) if key_row else OPEN_REGISTRATION_EXPIRES_DAYS
-        user_expires_at = 0 if expires_days == 0 else now() + expires_days * 86400
+        user_expires_at = 0
         try:
             cur = insert_user_record(conn, username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, user_expires_at, node_id, invite_key if key_row else ("OPEN-" + secrets.token_urlsafe(10)), traffic_limit_bytes, bandwidth_limit_kbps, email)
         except sqlite3.IntegrityError as exc:
@@ -4020,14 +4019,9 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
     if free_ports:
         conn.executemany("UPDATE ports SET user_id=? WHERE node_id=? AND port=?",
                          [(user["id"], node_id, r["port"]) for r in free_ports])
-    duration_days = int(order["duration_days"] or 0)
-    base = int(user["expires_at"] or 0)
-    if base and base < now():
-        base = now()
-    new_expiry = 0 if duration_days <= 0 else (base or now()) + duration_days * 86400
     conn.execute(
-        "UPDATE users SET node_id=?, max_ports=MAX(max_ports, ?), traffic_limit_bytes=?, bandwidth_limit_kbps=?, expires_at=? WHERE id=?",
-        (node_id, max_ports, int(order["traffic_limit_bytes"] or 0), int(order["bandwidth_limit_kbps"] or 0), new_expiry, user["id"]))
+        "UPDATE users SET node_id=?, max_ports=MAX(max_ports, ?), traffic_limit_bytes=?, bandwidth_limit_kbps=?, expires_at=0 WHERE id=?",
+        (node_id, max_ports, int(order["traffic_limit_bytes"] or 0), int(order["bandwidth_limit_kbps"] or 0), user["id"]))
     return True, "已开通"
 
 
