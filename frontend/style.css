@@ -1633,3 +1633,12 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 /* ---- 概览：积分卡片操作 ---- */
 .ov-points-action{display:flex;justify-content:flex-end;margin-top:auto}
 .ov-points-action button{padding:6px 12px;font-size:12px}
+
+/* ---- 购买套餐：节点选择 ---- */
+.node-pick-list{display:grid;gap:10px;margin:4px 0 14px}
+.node-pick{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;cursor:pointer;background:var(--card)}
+.node-pick:hover{border-color:var(--accent)}
+.node-pick input{margin:0}
+.node-pick-body{display:flex;flex-direction:column;gap:2px}
+.node-pick-body b{font-size:14px}
+.node-pick-body small{color:var(--muted);font-size:12px}

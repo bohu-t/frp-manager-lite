@@ -3894,10 +3894,9 @@ def save_plan(plan_id: int, name: str, price_cents: int, max_ports: int, traffic
         return False, "流量/速率限制不能小于 0"
     if price_points < 0 or price_points > 100_000_000:
         return False, "积分价格不合法"
-    node_id = int(node_id or 0)
+    # 套餐不再绑定节点，节点由用户在购买时自行选择
+    node_id = 0
     with db() as conn:
-        if node_id and not conn.execute("SELECT 1 FROM nodes WHERE id=?", (node_id,)).fetchone():
-            return False, "所选节点不存在"
         if plan_id:
             cur = conn.execute(
                 "UPDATE plans SET name=?, price_cents=?, price_points=?, max_ports=?, traffic_limit_bytes=?, bandwidth_limit_kbps=?, duration_days=?, node_id=?, note=?, active=?, sort_order=? WHERE id=?",
@@ -4052,12 +4051,17 @@ def mark_order_paid(order_no: str, transaction_id: str = "", provider: str = "")
     return True, "已开通"
 
 
-def create_order(user: sqlite3.Row, plan_id: int, provider: str = "") -> tuple[bool, str, dict[str, Any] | None]:
-    """积分购买套餐：扣积分后立即开通，不再走在线支付。"""
+def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: int = 0) -> tuple[bool, str, dict[str, Any] | None]:
+    """积分购买套餐：用户自选节点，扣积分后立即开通。"""
     with db() as conn:
         plan = conn.execute("SELECT * FROM plans WHERE id=? AND active=1", (plan_id,)).fetchone()
         if not plan:
             return False, "套餐不存在或已下架", None
+        chosen_node = None
+        if node_id:
+            chosen_node = conn.execute("SELECT id, name FROM nodes WHERE id=? AND active=1", (node_id,)).fetchone()
+            if not chosen_node:
+                return False, "所选节点不存在或已停用", None
         cost = int(row_val(plan, "price_points", 0) or 0)
         balance = int(row_val(conn.execute("SELECT points FROM users WHERE id=?", (user["id"],)).fetchone(), "points", 0) or 0)
         if cost > balance:
@@ -4067,7 +4071,7 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "") -> tuple[b
             "INSERT INTO orders(order_no, user_id, username, plan_id, plan_name, kind, points, amount_cents, duration_days, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, node_id, provider, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (order_no, user["id"], user["username"], plan["id"], plan["name"], "plan", cost, 0,
              int(plan["duration_days"] or 0), int(plan["max_ports"] or 0), int(plan["traffic_limit_bytes"] or 0),
-             int(plan["bandwidth_limit_kbps"] or 0), int(plan["node_id"] or 0), "points", "pending", now(), now()))
+             int(plan["bandwidth_limit_kbps"] or 0), int(node_id or 0), "points", "pending", now(), now()))
         order = conn.execute("SELECT * FROM orders WHERE order_no=?", (order_no,)).fetchone()
         try:
             if cost:
@@ -5254,7 +5258,11 @@ class Handler(BaseHTTPRequestHandler):
                 plan_id = int(data.get("plan_id", 0))
             except Exception:
                 plan_id = 0
-            ok, msg, payload = create_order(user, plan_id, str(data.get("provider", "")))
+            try:
+                node_id = int(data.get("node_id", 0) or 0)
+            except (TypeError, ValueError):
+                node_id = 0
+            ok, msg, payload = create_order(user, plan_id, str(data.get("provider", "")), node_id)
             if ok:
                 audit("order_create", user, None, None, "", f"套餐 {payload['plan_name']} 订单 {payload['order_no']}")
             self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "order": payload}, 200 if ok else 400)
@@ -5372,6 +5380,10 @@ class Handler(BaseHTTPRequestHandler):
                 target = conn.execute("SELECT id, name, active FROM nodes WHERE id=?", (target_node_id,)).fetchone()
                 if not target or not target["active"]:
                     self.send_json({"ok": False, "error": "目标节点不存在或已停用"}, 400)
+                    return
+                expires_at = int(user["expires_at"] or 0)
+                if expires_at and expires_at <= now():
+                    self.send_json({"ok": False, "error": "套餐已到期，请先购买套餐后再切换节点"}, 403)
                     return
                 if int(user["node_id"] or 0) == target_node_id:
                     self.send_json({"ok": True, "message": "当前已使用该节点"})

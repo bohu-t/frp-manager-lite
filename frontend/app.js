@@ -952,6 +952,7 @@ async function loadPlans(){
     show(err.message, true);
     return;
   }
+  window.__fmlPlans = data.plans || [];
   const cards = (data.plans || []).map(p => {
     const enough = Number(data.balance) >= Number(p.price_points);
     return `
@@ -984,9 +985,39 @@ async function loadPlans(){
 }
 
 async function buyPlan(planId){
-  if(!confirm('确认使用积分购买该套餐？')) return;
+  let nodes = [];
+  try{ nodes = await loadNodes(); }catch(e){ show('加载节点失败：' + e.message, true); return; }
+  const active = (nodes || []).filter(n => n.active !== false);
+  if(!active.length){ show('暂无可选节点，请联系管理员', true); return; }
+  const plan = (window.__fmlPlans || []).find(p => Number(p.id) === Number(planId)) || {};
+  const current = String(currentDashboardNodeId || '');
+  const options = active.map((n, i) => `<label class="node-pick">
+      <input type="radio" name="buyNode" value="${Number(n.id)}"${String(n.id) === current || (!current && i === 0) ? ' checked' : ''}>
+      <span class="node-pick-body"><b>${esc(n.region || '')} / ${esc(n.name || '')}</b><small>${esc(n.server_addr || '')} · 空闲端口 ${Number(n.free_count || 0)}</small></span>
+    </label>`).join('');
+  const html = `<div class="modal-backdrop" id="buyPlanModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeBuyPlan()">
+    <section class="modal-page card">
+      <div class="section-title modal-title"><div><h2>选择接入节点</h2><p>套餐：${esc(plan.name || '')} · ${Number(plan.price_points || 0)} 积分</p></div><button type="button" class="secondary modal-close" onclick="closeBuyPlan()">关闭 ×</button></div>
+      <div class="node-pick-list">${options}</div>
+      <p class="muted small">购买后仍可在「可用节点」页更换节点（套餐有效期内，且需先清空该账号的隧道）。</p>
+      <div class="form-actions"><button type="button" onclick="confirmBuyPlan(${Number(planId)})">确认购买</button></div>
+    </section>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function closeBuyPlan(){
+  const el = document.querySelector('#buyPlanModal');
+  if(el) el.remove();
+}
+
+async function confirmBuyPlan(planId){
+  const picked = document.querySelector('#buyPlanModal input[name="buyNode"]:checked');
+  if(!picked){ show('请选择接入节点', true); return; }
+  const nodeId = Number(picked.value);
+  closeBuyPlan();
   try{
-    const r = await api('/api/user/orders', {method:'POST', body:{plan_id:planId}});
+    const r = await api('/api/user/orders', {method:'POST', body:{plan_id:planId, node_id:nodeId}});
     show(r.message || '购买成功');
     await loadPlans();
   }catch(err){ show(err.message, true); }
@@ -1964,7 +1995,6 @@ async function loadAdmin(section=currentAdminSection){
       <td>${p.max_ports}</td>
       <td>${p.duration_days ? p.duration_days + ' 天' : '不限期'}</td>
       <td>${p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '不限'} / ${p.bandwidth_limit_mbs ? p.bandwidth_limit_mbs + ' MB/s' : '不限'}</td>
-      <td>${esc(nodeName(p.node_id))}</td>
       <td><span class="status-badge ${p.active ? 'ok' : 'bad'}"><i></i>${p.active ? '上架' : '下架'}</span></td>
       <td class="row-actions"><button type="button" class="secondary" onclick="editPlan(${p.id})">编辑</button><button type="button" class="secondary" onclick="planToggle(${p.id})">${p.active ? '下架' : '上架'}</button><button type="button" class="danger" onclick="planDelete(${p.id})">删除</button></td>
     </tr>`).join('') || '<tr><td colspan="9" class="muted">还没有套餐，先在上方创建</td></tr>';
@@ -2004,13 +2034,12 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>端口数</label><input name="max_ports" type="number" value="5" min="0" max="100"></div>
       <div><label>流量上限 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
       <div><label>速率 MB/s</label><input name="bandwidth_limit_mbs" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
-      <div><label>适用节点</label><select name="node_id"><option value="0">自动分配</option>${nodeOptions(data.nodes || [])}</select></div>
       <div><label>排序</label><input name="sort_order" type="number" value="0"><span class="muted small">数字越小越靠前</span></div>
       <div><label>备注</label><input name="note" placeholder="套餐说明，展示给用户"></div>
       <div><label>状态</label><select name="active"><option value="1">上架</option><option value="0">下架</option></select></div>
       <div class="form-actions" style="grid-column:1/-1"><button>保存套餐</button><button type="button" class="secondary" onclick="resetPlanForm()">清空</button></div>
     </form></section>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>ID</th><th>名称</th><th>积分价格</th><th>端口</th><th>有效期</th><th>流量 / 速率</th><th>节点</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>ID</th><th>名称</th><th>积分价格</th><th>端口</th><th>有效期</th><th>流量 / 速率</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
     <section class="card" id="recharge-keys"><div class="section-title"><div><h2>${stIcon('key')}积分充值密钥</h2><p>生成后发给用户，用户在「积分充值」页兑换；每枚只能使用一次</p></div><span class="section-count">可用 ${(data.recharge_keys || []).filter(k => !k.used_by && k.active).length}</span></div>
       <form id="rechargeKeyForm" class="grid">
         <div><label>每枚积分</label><input name="points" type="number" value="100" min="1" step="1"></div>
