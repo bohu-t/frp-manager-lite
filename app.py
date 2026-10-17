@@ -3801,6 +3801,8 @@ def payment_config(conn: sqlite3.Connection) -> dict[str, Any]:
 
 
 PAYMENT_NAMES = {"alipay": "支付宝", "wechat": "微信支付", "mock": "测试模式"}
+# 测试支付只允许在显式开启的本地环境使用，避免被用户直接调用刷积分
+MOCK_PAY_ENABLED = os.getenv("FML_ALLOW_MOCK_PAY", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
 def enabled_payment_providers(cfg: dict[str, Any]) -> list[str]:
@@ -3810,6 +3812,8 @@ def enabled_payment_providers(cfg: dict[str, Any]) -> list[str]:
     out: list[str] = []
     for item in raw.split(","):
         name = item.strip()
+        if name == "mock" and not MOCK_PAY_ENABLED:
+            continue
         if name in PAYMENT_NAMES and name not in out:
             out.append(name)
     return out
@@ -3826,7 +3830,8 @@ def provider_ready(name: str, cfg: dict[str, Any]) -> bool:
 
 
 def payment_public(cfg: dict[str, Any]) -> dict[str, Any]:
-    enabled = enabled_payment_providers(cfg)
+    # 测试模式仅用于本地联调，不对外展示
+    enabled = [k for k in enabled_payment_providers(cfg) if k != "mock"]
     providers = [{"key": k, "name": PAYMENT_NAMES[k], "ready": provider_ready(k, cfg)} for k in enabled]
     ready = any(x["ready"] for x in providers)
     provider = next((x["key"] for x in providers if x["ready"]), (enabled[0] if enabled else ""))
@@ -4097,7 +4102,7 @@ def create_points_order(user: sqlite3.Row, points: int, provider: str = "") -> t
         rate = max(1, int(setting_get(conn, "points_per_yuan", "1") or 1))
     enabled = enabled_payment_providers(cfg)
     if not enabled:
-        return False, "在线支付未配置，请联系管理员", None
+        return False, "管理员未配置在线支付，请使用密钥充值", None
     provider = provider or next((x for x in enabled if provider_ready(x, cfg)), enabled[0])
     if provider not in enabled:
         return False, "该支付方式未开通", None

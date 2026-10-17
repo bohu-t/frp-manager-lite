@@ -1012,8 +1012,7 @@ async function loadPoints(){
   }
   const payment = data.payment || {};
   const rate = Number(payment.points_per_yuan || 1);
-  const usableChannels = (payment.providers || []).filter(x => x.ready);
-  const channelNames = usableChannels.map(x => x.name).join(' / ') || '未配置';
+  const usableChannels = (payment.providers || []).filter(x => x.ready && x.key !== 'mock');
   const channelHtml = usableChannels.length > 1
     ? `<div class="span-2"><label>支付方式</label><div class="pay-channels">${usableChannels.map((x, i) => `<label class="check"><input type="radio" name="provider" value="${x.key}"${i === 0 ? ' checked' : ''}> ${x.name}</label>`).join('')}</div></div>`
     : (usableChannels.length === 1 ? `<input type="hidden" name="provider" value="${usableChannels[0].key}">` : '');
@@ -1029,11 +1028,11 @@ async function loadPoints(){
     <div class="ov-page-head"><div><span class="section-kicker">POINTS</span><h1>积分</h1><p>在线充值或使用充值密钥，积分可用于购买套餐。</p></div><div class="ov-head-badge"><span>当前余额</span><b>${data.balance}</b></div></div>
     <div class="points-grid">
       <section class="card">
-        <div class="section-title"><div><h2>${stIcon('license')}在线充值</h2><p>1 元 = ${rate} 积分 · 可用渠道：${esc(channelNames)}</p></div></div>
+        <div class="section-title"><div><h2>${stIcon('license')}在线充值</h2><p>1 元 = ${rate} 积分</p></div></div>
         <form id="pointsRechargeForm" class="grid">
           <div><label>充值积分</label><input name="points" type="number" min="1" step="1" value="${rate * 10}" required><span class="muted small" id="pointsAmountHint">应付 ¥${(10).toFixed(2)}</span></div>
           ${channelHtml}
-          <div class="form-actions" style="grid-column:1/-1"><button ${usableChannels.length ? '' : 'disabled'}>${usableChannels.length ? '去支付' : '支付未配置'}</button></div>
+          <div class="form-actions" style="grid-column:1/-1"><button>去支付</button></div>
         </form>
       </section>
       <section class="card">
@@ -1062,6 +1061,7 @@ async function loadPoints(){
       const fd = new FormData(e.target);
       const pts = Number(fd.get('points') || 0);
       const provider = String(fd.get('provider') || '');
+      if(!usableChannels.length){ show('管理员未配置在线支付，请使用密钥充值', true); return; }
       if(!pts || pts < 1){ show('请输入有效的充值积分', true); return; }
       try{
         const r = await api('/api/user/points/orders', {method:'POST', body:{points:pts, provider}});
@@ -2843,7 +2843,7 @@ function adminPaymentCardHtml(pay){
       <div class="span-2"><label>支付渠道（可多选，用户下单时自行选择）</label><div class="pay-channels">
         <label class="check"><input type="checkbox" name="providers" value="alipay"${enabledChannels.includes('alipay') ? ' checked' : ''}> 支付宝</label>
         <label class="check"><input type="checkbox" name="providers" value="wechat"${enabledChannels.includes('wechat') ? ' checked' : ''}> 微信支付</label>
-        <label class="check"><input type="checkbox" name="providers" value="mock"${enabledChannels.includes('mock') ? ' checked' : ''}> 测试模式（不收款）</label>
+
       </div><span class="muted small">全部取消即关闭在线支付；只有已填好密钥的渠道才会对用户可用</span></div>
       <div><label>对外访问地址</label><input name="public_url" value="${esc(pay.public_url || '')}" placeholder="https://frp.example.com"></div>
       <div><label>积分兑换比例</label><input name="points_per_yuan" type="number" value="${Number(pay.points_per_yuan || 1)}" min="1" max="10000"><span class="muted small">1 元 = N 积分</span></div>
