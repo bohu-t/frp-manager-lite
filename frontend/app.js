@@ -969,18 +969,19 @@ async function loadPlans(){
     </article>`;
   }).join('') || '<p class="muted">管理员还没有上架套餐。</p>';
   const statusText = {pending:'待支付', paid:'已完成', cancelled:'已取消', expired:'已过期', refunded:'已退款'};
-  const orderRows = (data.orders || []).map(o => `<tr>
+  const orderRows = (data.orders || []).map((o, i) => `<tr>
+      <td>${i + 1}</td>
       <td>${esc(o.order_no)}</td>
       <td>${esc(o.plan_name)}</td>
       <td>${o.kind === 'points' ? '+' + o.points + ' 积分' : '-' + o.points + ' 积分'}</td>
       <td><span class="status-badge ${o.status === 'paid' ? 'ok' : (o.status === 'pending' ? '' : 'bad')}"><i></i>${statusText[o.status] || esc(o.status)}</span></td>
       <td>${fmtTs(o.created_at)}</td>
       <td>${o.status === 'pending' ? `<button type="button" class="secondary" onclick="resumePay('${esc(o.order_no)}')">继续支付</button>` : '-'}</td>
-    </tr>`).join('') || '<tr><td colspan="6" class="muted">暂无订单</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">暂无订单</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">PLANS</span><h1>购买套餐</h1><p>使用积分购买套餐，购买后自动开通端口与有效期。</p></div><div class="ov-head-badge"><span>我的积分</span><b>${data.balance}</b></div></div>
     <section class="card"><div class="section-title"><div><h2>${stIcon('license')}可选套餐</h2><p>共 ${(data.plans || []).length} 个套餐</p></div><button type="button" class="secondary" onclick="loadPoints()">充值积分</button></div><div class="plan-grid">${cards}</div></section>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}我的订单</h2><p>最近 50 条</p></div></div><table><thead><tr><th>订单号</th><th>套餐</th><th>积分</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}我的订单</h2><p>最近 50 条</p></div></div><table><thead><tr><th>序号</th><th>订单号</th><th>套餐</th><th>积分</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></section>
   `, 'dashboard-plans', '购买套餐');
 }
 
@@ -1049,13 +1050,14 @@ async function loadPoints(){
     ? `<div class="span-2"><label>支付方式</label><div class="pay-channels">${usableChannels.map((x, i) => `<label class="check"><input type="radio" name="provider" value="${x.key}"${i === 0 ? ' checked' : ''}> ${x.name}</label>`).join('')}</div></div>`
     : (usableChannels.length === 1 ? `<input type="hidden" name="provider" value="${usableChannels[0].key}">` : '');
   const kindText = {recharge:'在线充值', key_recharge:'密钥充值', plan_purchase:'购买套餐', admin_adjust:'管理员调整'};
-  const rows = (data.logs || []).map(l => `<tr>
+  const rows = (data.logs || []).map((l, i) => `<tr>
+      <td>${i + 1}</td>
       <td>${fmtTs(l.created_at)}</td>
       <td>${kindText[l.kind] || esc(l.kind)}</td>
       <td>${l.delta > 0 ? '+' : ''}${l.delta}</td>
       <td>${l.balance_after}</td>
       <td>${esc(l.note || l.ref || '-')}</td>
-    </tr>`).join('') || '<tr><td colspan="5" class="muted">暂无积分记录</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">暂无积分记录</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">POINTS</span><h1>积分充值</h1><p>在线充值或使用充值密钥，积分可用于购买套餐。</p></div><div class="ov-head-badge"><span>当前余额</span><b>${data.balance}</b></div></div>
     <div class="points-grid">
@@ -1075,7 +1077,7 @@ async function loadPoints(){
         </form>
       </section>
     </div>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}积分明细</h2><p>最近 100 条</p></div></div><table><thead><tr><th>时间</th><th>类型</th><th>变动</th><th>余额</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table></section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}积分明细</h2><p>最近 100 条</p></div></div><table><thead><tr><th>序号</th><th>时间</th><th>类型</th><th>变动</th><th>余额</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table></section>
   `, 'dashboard-points', '积分充值');
 
   const rf = document.querySelector('#pointsRechargeForm');
@@ -1892,9 +1894,9 @@ async function loadAdmin(section=currentAdminSection){
   const keysSlice = pageItems(data.invite_keys || [], keysPage, ADMIN_PAGE_SIZE);
   const nodesSlice = pageItems(data.nodes || [], nodesPage, ADMIN_PAGE_SIZE);
   const logsSlice = pageItems(data.logs || [], riskPage, ADMIN_PAGE_SIZE);
-  const rows = usersSlice.map(u => `
+  const rows = usersSlice.map((u, i) => `
     <tr>
-      <td>${u.id}</td><td>${esc(u.username)}</td><td>${u.email ? esc(u.email) : '—'}</td><td>${esc(u.role)}</td><td><b>${Number(u.points || 0)}</b></td><td>${esc(u.node_region || '-')} / ${esc(u.node_name || '-')}</td><td>${u.port_count}/${u.max_ports}</td><td>${u.tunnel_count}</td>
+      <td>${(usersPage - 1) * ADMIN_PAGE_SIZE + i + 1}</td><td>${esc(u.username)}</td><td>${u.email ? esc(u.email) : '—'}</td><td>${esc(u.role)}</td><td><b>${Number(u.points || 0)}</b></td><td>${esc(u.node_region || '-')} / ${esc(u.node_name || '-')}</td><td>${u.port_count}/${u.max_ports}</td><td>${u.tunnel_count}</td>
       <td>${fmtBytes(u.traffic_limit_bytes)} / ${u.bandwidth_limit_kbps ? `${(Number(u.bandwidth_limit_kbps) / 1024).toFixed(1)} MB/s` : '不限'}</td>
       <td>${u.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
       <td><code class="token" title="${esc(u.invite_key_used || '')}">${esc(u.invite_key_used || '后台创建')}</code></td>
@@ -1908,9 +1910,9 @@ async function loadAdmin(section=currentAdminSection){
         <button class="node-action node-action-danger" onclick="adminDelete(${u.id})">删除</button>
       </td>
     </tr>`).join('');
-  const nodeRows = nodesSlice.map(n => `
+  const nodeRows = nodesSlice.map((n, i) => `
     <tr>
-      <td>${n.id}</td><td>${esc(n.region)}</td><td>${esc(n.name)}</td><td>${esc(n.server_addr)}:${n.server_port}</td>
+      <td>${(nodesPage - 1) * ADMIN_PAGE_SIZE + i + 1}</td><td>${esc(n.region)}</td><td>${esc(n.name)}</td><td>${esc(n.server_addr)}:${n.server_port}</td>
       <td>${n.port_start}-${n.port_end}</td><td>${n.free_count}/${n.port_count}</td>
       <td>${n.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
       <td>${esc(n.plan_name || '—')}${Number(n.price_per_gb || 0) > 0 ? ' · ¥' + Number(n.price_per_gb) + '/GB' : ''}</td>
@@ -1936,12 +1938,12 @@ async function loadAdmin(section=currentAdminSection){
       <td class="actions"><button onclick="copyText('${k.key}')">复制</button><button onclick="inviteToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button class="danger" onclick="inviteDelete(${k.id})">删除</button></td>
     </tr>`;
   }).join('') || emptyRow(11, '还没有密钥');
-  const logRows = logsSlice.map(l => `
-    <tr><td>${l.id}</td><td>${esc(l.event)}</td><td>${esc(l.username || '-')}</td><td>${esc(l.remote_port || '-')}</td><td>${esc(l.proxy_type || '-')}</td><td>${esc(l.detail || '')}</td><td>${fmtTs(l.created_at)}</td></tr>
+  const logRows = logsSlice.map((l, i) => `
+    <tr><td>${(riskPage - 1) * ADMIN_PAGE_SIZE + i + 1}</td><td>${esc(l.event)}</td><td>${esc(l.username || '-')}</td><td>${esc(l.remote_port || '-')}</td><td>${esc(l.proxy_type || '-')}</td><td>${esc(l.detail || '')}</td><td>${fmtTs(l.created_at)}</td></tr>
   `).join('') || emptyRow(7, '暂无审计日志');
-  const softwareKeyRows = (data.software_license_keys || []).map(k => `
+  const softwareKeyRows = (data.software_license_keys || []).map((k, i) => `
     <tr>
-      <td>${k.seq_no || k.id}</td><td><code class="token" title="${esc(k.license_key)}">${esc(k.license_key)}</code></td><td>${esc(k.note)}</td><td>${esc(k.plan)}</td>
+      <td>${i + 1}</td><td><code class="token" title="${esc(k.license_key)}">${esc(k.license_key)}</code></td><td>${esc(k.note)}</td><td>${esc(k.plan)}</td>
       <td>${k.machine_id ? `<code class="token">${esc(k.machine_id)}</code>` : '未绑定'}</td>
       <td>${esc(k.expires_text)} ${k.expired ? '<span class="bad">已过期</span>' : ''}</td>
       <td>${k.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
@@ -1980,7 +1982,7 @@ async function loadAdmin(section=currentAdminSection){
       <div class="form-actions" style="grid-column:1/-1"><button>创建节点</button></div>
     </form>
     <div id="nodeDeployScriptBox" class="deploy-script-item hidden" style="margin-top:14px"><div class="label">一键部署脚本（复制到新节点机器上执行）</div><div class="copy-line"><code class="token deploy-token" id="nodeDeployScriptCmd"></code><button type="button" class="secondary" onclick="copyNodeDeployScript()">复制命令</button></div><p class="muted small">脚本从公开仓库拉取，不依赖本面板；执行时会把该节点注册到当前面板（地址、密钥与节点信息已按上方表单预填）。</p></div></section>
-    <section class="card" id="nodes"><div class="section-title"><h2>${stIcon('node')}节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>ID</th><th>地区</th><th>节点</th><th>frps</th><th>端口池</th><th>剩余</th><th>状态</th><th>套餐/单价</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table>${paginationHtml('nodes', nodesPage, (data.nodes || []).length, ADMIN_PAGE_SIZE)}</section>`;
+    <section class="card" id="nodes"><div class="section-title"><h2>${stIcon('node')}节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>序号</th><th>地区</th><th>节点</th><th>frps</th><th>端口池</th><th>剩余</th><th>状态</th><th>套餐/单价</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table>${paginationHtml('nodes', nodesPage, (data.nodes || []).length, ADMIN_PAGE_SIZE)}</section>`;
   const plansList = data.plans || [];
   const orderList = data.orders || [];
   window.__fmlPlans = plansList;
@@ -1988,8 +1990,8 @@ async function loadAdmin(section=currentAdminSection){
     const n = (data.nodes || []).find(x => Number(x.id) === Number(id));
     return n ? `${n.region} / ${n.name}` : (id ? ('#' + id) : '自动分配');
   };
-  const planRows = plansList.map(p => `<tr>
-      <td>${p.seq_no || p.id}</td>
+  const planRows = plansList.map((p, i) => `<tr>
+      <td>${i + 1}</td>
       <td>${esc(p.name)}</td>
       <td><b>${p.price_points}</b> 积分</td>
       <td>${p.max_ports}</td>
@@ -1999,7 +2001,8 @@ async function loadAdmin(section=currentAdminSection){
       <td class="row-actions"><button type="button" class="secondary" onclick="editPlan(${p.id})">编辑</button><button type="button" class="secondary" onclick="planToggle(${p.id})">${p.active ? '下架' : '上架'}</button><button type="button" class="danger" onclick="planDelete(${p.id})">删除</button></td>
     </tr>`).join('') || '<tr><td colspan="9" class="muted">还没有套餐，先在上方创建</td></tr>';
   const orderStatusText = {pending:'待支付', paid:'已支付', cancelled:'已取消', expired:'已过期', refunded:'已退款'};
-  const orderRows = orderList.map(o => `<tr>
+  const orderRows = orderList.map((o, i) => `<tr>
+      <td>${i + 1}</td>
       <td>${esc(o.order_no)}</td>
       <td>${esc(o.username)}</td>
       <td>${o.kind === 'points' ? '积分充值' : '套餐购买'}</td>
@@ -2010,9 +2013,9 @@ async function loadAdmin(section=currentAdminSection){
       <td>${esc(o.provider || '-')}</td>
       <td>${fmtTs(o.created_at)}</td>
       <td>${o.status === 'pending' ? `<button type="button" class="secondary" onclick="orderComplete('${esc(o.order_no)}')">手动开通</button>` : '-'}</td>
-    </tr>`).join('') || '<tr><td colspan="10" class="muted">暂无订单</td></tr>';
-  const rkRows = (data.recharge_keys || []).map(k => `<tr>
-      <td>${k.seq_no || k.id}</td>
+    </tr>`).join('') || '<tr><td colspan="11" class="muted">暂无订单</td></tr>';
+  const rkRows = (data.recharge_keys || []).map((k, i) => `<tr>
+      <td>${i + 1}</td>
       <td><code class="token">${esc(k.key)}</code></td>
       <td>${k.points}</td>
       <td>${esc(k.note || '—')}</td>
@@ -2022,7 +2025,7 @@ async function loadAdmin(section=currentAdminSection){
     </tr>`).join('') || '<tr><td colspan="7" class="muted">还没有充值密钥</td></tr>';
   const ordersHtml = `
     <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}订单</h2><p>最近 100 条；待支付订单可手动开通</p></div><span class="section-count">已支付 ${orderList.filter(o => o.status === 'paid').length} / 共 ${orderList.length}</span></div>
-      <table><thead><tr><th>订单号</th><th>用户</th><th>类型</th><th>套餐 / 内容</th><th>积分</th><th>金额</th><th>状态</th><th>支付方式</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table>
+      <table><thead><tr><th>序号</th><th>订单号</th><th>用户</th><th>类型</th><th>套餐 / 内容</th><th>积分</th><th>金额</th><th>状态</th><th>支付方式</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table>
     </section>`;
   const plansHtml = `
     <section class="card" id="plans"><div class="section-title"><h2>${stIcon('license')}套餐模板</h2><p>用户按套餐在线购买，支付成功后自动分配端口与有效期</p></div>
@@ -2077,7 +2080,7 @@ async function loadAdmin(section=currentAdminSection){
         <div><label for="adminUserStatus">账号状态</label><select id="adminUserStatus" name="status"><option value="all" ${adminUserStatus==='all'?'selected':''}>全部状态</option><option value="active" ${adminUserStatus==='active'?'selected':''}>正常启用</option><option value="disabled" ${adminUserStatus==='disabled'?'selected':''}>已停用</option><option value="expired" ${adminUserStatus==='expired'?'selected':''}>已到期</option></select></div>
         <div class="form-actions"><button type="submit">筛选</button><button type="button" class="secondary" id="adminUserFilterReset">重置</button></div>
       </form>
-      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>ID</th><th>用户</th><th>邮箱</th><th>角色</th><th>积分</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>
+      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>序号</th><th>用户</th><th>邮箱</th><th>角色</th><th>积分</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>
     <div id="adminLimitsModal" class="modal-backdrop modal-center hidden" role="dialog" aria-modal="true" aria-labelledby="adminLimitsTitle" onclick="if(event.target===this)closeAdminLimits()">
       <section class="modal-page card admin-limits-modal">
         <div class="section-title modal-title">
@@ -2125,7 +2128,7 @@ async function loadAdmin(section=currentAdminSection){
       </form>
       <div id="riskResult" class="risk-result"></div>
     </section>
-    <section class="card"><div class="section-title"><h2>${stIcon('log')}审计日志</h2><p>最近 80 条关键操作和风控事件</p></div><table><thead><tr><th>ID</th><th>事件</th><th>用户</th><th>端口</th><th>协议</th><th>详情</th><th>时间</th></tr></thead><tbody>${logRows}</tbody></table>${paginationHtml('risk', riskPage, (data.logs || []).length, ADMIN_PAGE_SIZE)}</section>`;
+    <section class="card"><div class="section-title"><h2>${stIcon('log')}审计日志</h2><p>最近 80 条关键操作和风控事件</p></div><table><thead><tr><th>序号</th><th>事件</th><th>用户</th><th>端口</th><th>协议</th><th>详情</th><th>时间</th></tr></thead><tbody>${logRows}</tbody></table>${paginationHtml('risk', riskPage, (data.logs || []).length, ADMIN_PAGE_SIZE)}</section>`;
   const sectionHtml = {users: usersHtml, plans: plansHtml, orders: ordersHtml, nodes: nodeHtml, risk: riskHtml}[currentAdminSection] || usersHtml;
   const sectionTitles = {users:'用户管理', plans:'套餐管理', orders:'订单管理', nodes:'新增节点', risk:'风控审计'};
   app.innerHTML = appLayoutHtml(sectionHtml, currentAdminSection, sectionTitles[currentAdminSection] || '管理台');
