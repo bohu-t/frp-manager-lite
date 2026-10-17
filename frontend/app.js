@@ -2042,12 +2042,12 @@ async function loadAdmin(section=currentAdminSection){
     </form></section>
     <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>序号</th><th>名称</th><th>积分价格</th><th>端口</th><th>有效期</th><th>流量 / 速率</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
     <section class="card" id="recharge-keys"><div class="section-title"><div><h2>${stIcon('key')}积分充值密钥</h2><p>生成后发给用户，用户在「积分充值」页兑换；每枚只能使用一次</p></div><span class="section-count">可用 ${(data.recharge_keys || []).filter(k => !k.used_by && k.active).length}</span></div>
-      <form id="rechargeKeyForm" class="grid">
+      <form id="rechargeKeyForm" class="grid" style="margin-bottom:18px">
         <div><label>每枚积分</label><input name="points" type="number" value="100" min="1" step="1"></div>
         <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
         <div><label>有效期（天）</label><input name="duration_days" type="number" value="0" min="0" max="3650"><span class="muted small">0 表示长期有效</span></div>
         <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
-        <div class="form-actions" style="grid-column:1/-1"><button>生成充值密钥</button></div>
+        <div class="form-actions" style="grid-column:1/-1;justify-content:flex-end;margin-top:2px"><button>生成充值密钥</button></div>
       </form>
       <table><thead><tr><th>序号</th><th>密钥</th><th>积分</th><th>备注</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${rkRows}</tbody></table>
     </section>
