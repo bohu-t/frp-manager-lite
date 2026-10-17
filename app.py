@@ -1496,6 +1496,23 @@ def node_dashboard_auth(row: sqlite3.Row | dict[str, Any] | None) -> tuple[str, 
     return user, password
 
 
+def node_month_traffic(conn: sqlite3.Connection, node_id: int) -> int:
+    """统计某节点本自然月流量（按当前绑定该节点的用户汇总）。"""
+    month = time.strftime("%Y-%m", time.localtime())
+    row = conn.execute(
+        "SELECT COALESCE(SUM(ts.bytes),0) FROM traffic_samples ts JOIN users u ON u.id=ts.user_id WHERE u.node_id=? AND ts.day LIKE ?",
+        (node_id, month + "%")).fetchone()
+    return int(row[0] or 0) if row else 0
+
+
+def node_traffic_exceeded(conn: sqlite3.Connection, node_id: int) -> bool:
+    row = conn.execute("SELECT monthly_traffic_bytes FROM nodes WHERE id=?", (node_id,)).fetchone()
+    limit = int(row["monthly_traffic_bytes"] or 0) if row else 0
+    if limit <= 0:
+        return False
+    return node_month_traffic(conn, node_id) >= limit
+
+
 def node_public(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
@@ -1504,8 +1521,8 @@ def node_public(row: sqlite3.Row) -> dict[str, Any]:
         "server_addr": row["server_addr"],
         "server_port": row["server_port"],
         "bandwidth_mbps": int(row_val(row, "bandwidth_mbps", 0) or 0),
-        "plan_name": row_val(row, "plan_name", "") or "",
-        "price_per_gb": float(row_val(row, "price_per_gb", 0) or 0),
+        "monthly_traffic_bytes": int(row_val(row, "monthly_traffic_bytes", 0) or 0),
+        "monthly_traffic_gb": round(int(row_val(row, "monthly_traffic_bytes", 0) or 0) / 1024 / 1024 / 1024, 2),
         "auth_token": row["auth_token"],
         "port_start": row["port_start"],
         "port_end": row["port_end"],
@@ -1548,6 +1565,8 @@ def ensure_default_node(conn: sqlite3.Connection) -> int | None:
         conn.execute("ALTER TABLE nodes ADD COLUMN dashboard_user TEXT NOT NULL DEFAULT ''")
     if "dashboard_password" not in cols:
         conn.execute("ALTER TABLE nodes ADD COLUMN dashboard_password TEXT NOT NULL DEFAULT ''")
+    if "monthly_traffic_bytes" not in cols:
+        conn.execute("ALTER TABLE nodes ADD COLUMN monthly_traffic_bytes INTEGER NOT NULL DEFAULT 0")
     if "plan_name" not in cols:
         conn.execute("ALTER TABLE nodes ADD COLUMN plan_name TEXT NOT NULL DEFAULT ''")
     if "price_per_gb" not in cols:
@@ -1666,6 +1685,16 @@ def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int | None) 
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tunnels_node_port_remote ON tunnels(node_id, remote_port) WHERE remote_port > 0")
 
 
+def attach_node_month_usage(conn: sqlite3.Connection, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for n in nodes:
+        used = node_month_traffic(conn, int(n["id"]))
+        limit = int(n.get("monthly_traffic_bytes") or 0)
+        n["month_used_bytes"] = used
+        n["month_used_gb"] = round(used / 1024 / 1024 / 1024, 2)
+        n["traffic_exceeded"] = bool(limit > 0 and used >= limit)
+    return nodes
+
+
 def list_public_nodes(conn: sqlite3.Connection, active_only: bool = True) -> list[dict[str, Any]]:
     where = "WHERE n.active=1" if active_only else ""
     rows = conn.execute(
@@ -1683,7 +1712,7 @@ def list_public_nodes(conn: sqlite3.Connection, active_only: bool = True) -> lis
         item["port_count"] = int(r["port_count"] or 0)
         item["free_count"] = int(r["free_count"] or 0)
         result.append(item)
-    return result
+    return attach_node_month_usage(conn, result)
 
 
 def split_node_host(server_addr: str) -> str:
@@ -2432,6 +2461,7 @@ def init_db() -> None:
                 dashboard_user TEXT NOT NULL DEFAULT '',
                 dashboard_password TEXT NOT NULL DEFAULT '',
                 bandwidth_mbps INTEGER NOT NULL DEFAULT 0,
+                monthly_traffic_bytes INTEGER NOT NULL DEFAULT 0,
                 active INTEGER NOT NULL DEFAULT 1,
                 note TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL
@@ -5564,6 +5594,8 @@ class Handler(BaseHTTPRequestHandler):
             if proxy_type in SECRET_KEY_PROXY_TYPES and not secret_key:
                 secret_key = secrets.token_urlsafe(16)
             with db() as conn:
+                if user["node_id"] and node_traffic_exceeded(conn, int(user["node_id"])):
+                    raise ValueError("当前节点本月流量已用尽，暂时无法创建新隧道")
                 if proxy_type in REMOTE_PORT_PROXY_TYPES:
                     if user["role"] != "admin":
                         owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (user["node_id"], user["id"], remote_port)).fetchone()
@@ -6196,11 +6228,11 @@ class Handler(BaseHTTPRequestHandler):
             dashboard_user = str(data.get("dashboard_user", "")).strip()[:80]
             dashboard_password = str(data.get("dashboard_password", "")).strip()[:200]
             bandwidth_mbps = max(0, int(data.get("bandwidth_mbps", 0) or 0))
-            plan_name = str(data.get("plan_name", "")).strip()[:60]
             try:
-                price_per_gb = max(0.0, float(data.get("price_per_gb", 0) or 0))
+                monthly_gb = max(0.0, float(data.get("monthly_traffic_gb", 0) or 0))
             except (TypeError, ValueError):
-                raise ValueError("单价（元/GB）不合法")
+                raise ValueError("月流量不合法")
+            monthly_traffic_bytes = int(monthly_gb * 1024 ** 3)
             if len(region) > 40:
                 raise ValueError("地区名称太长")
             if not name or len(name) > 40 or not name.replace("_", "").replace("-", "").isalnum():
@@ -6219,8 +6251,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("单节点端口池不要超过 20000 个")
             with db() as conn:
                 cur = conn.execute(
-                    "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, plan_name, price_per_gb, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, plan_name, price_per_gb, 1, note, now()),
+                    "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, monthly_traffic_bytes, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, monthly_traffic_bytes, 1, note, now()),
                 )
                 node_id = int(cur.lastrowid)
                 conn.executemany("INSERT OR IGNORE INTO ports(node_id, port, created_at) VALUES(?,?,?)", [(node_id, p, now()) for p in range(port_start, port_end + 1)])
@@ -6248,11 +6280,11 @@ class Handler(BaseHTTPRequestHandler):
             dashboard_user = str(data.get("dashboard_user", "")).strip()[:80]
             dashboard_password = str(data.get("dashboard_password", "")).strip()[:200]
             bandwidth_mbps = max(0, int(data.get("bandwidth_mbps", 0) or 0))
-            plan_name = str(data.get("plan_name", "")).strip()[:60]
             try:
-                price_per_gb = max(0.0, float(data.get("price_per_gb", 0) or 0))
+                monthly_gb = max(0.0, float(data.get("monthly_traffic_gb", 0) or 0))
             except (TypeError, ValueError):
-                raise ValueError("单价（元/GB）不合法")
+                raise ValueError("月流量不合法")
+            monthly_traffic_bytes = int(monthly_gb * 1024 ** 3)
             active = 1 if str(data.get("active", "1")) in ("1", "true", "True", "on", "yes") else 0
             if len(region) > 40:
                 raise ValueError("地区名称太长")
@@ -6272,8 +6304,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"ok": False, "error": "节点不存在"}, 404)
                     return
                 conn.execute(
-                    "UPDATE nodes SET region=?, name=?, server_addr=?, server_port=?, auth_token=?, web_port=?, dashboard_url=?, dashboard_user=?, dashboard_password=?, bandwidth_mbps=?, plan_name=?, price_per_gb=?, active=?, note=? WHERE id=?",
-                    (region, name, server_addr, server_port, auth_token, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, plan_name, price_per_gb, active, note, node_id),
+                    "UPDATE nodes SET region=?, name=?, server_addr=?, server_port=?, auth_token=?, web_port=?, dashboard_url=?, dashboard_user=?, dashboard_password=?, bandwidth_mbps=?, monthly_traffic_bytes=?, active=?, note=? WHERE id=?",
+                    (region, name, server_addr, server_port, auth_token, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, monthly_traffic_bytes, active, note, node_id),
                 )
             self.send_json({"ok": True, "message": f"节点 {region} / {name} 已更新"})
         except sqlite3.IntegrityError:

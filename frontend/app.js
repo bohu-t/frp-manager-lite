@@ -1611,24 +1611,24 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
       const usedPct = total > 0 ? Math.min(100, Math.round((total - free) / total * 100)) : 0;
       const online = !!n.auth_port_ok;
       const bw = Number(n.bandwidth_mbps || 0);
-      const price = Number(n.price_per_gb || 0);
-      const planText = n.plan_name ? esc(n.plan_name) : '按量计费';
-      const priceText = price > 0 ? ` · ¥${price}/GB` : '';
+      const monthLimit = Number(n.monthly_traffic_gb || 0);
+      const monthUsed = Number(n.month_used_gb || 0);
+      const trafficExceeded = !!n.traffic_exceeded;
       return `<article class="node-card${n.is_current ? ' is-current' : ''}">
         <div class="node-card-head">
           <div class="node-card-title"><span class="node-card-region">${esc(n.region || '-')}</span><strong>${esc(n.name || '-')}</strong>${n.is_current ? '<span class="node-current-tag">当前节点</span>' : ''}</div>
-          <span class="status-badge ${online ? 'ok' : 'bad'}"><i></i>${online ? '在线' : '不可达'}</span>
+          <span class="status-badge ${trafficExceeded ? 'bad' : (online ? 'ok' : 'bad')}"><i></i>${trafficExceeded ? '流量已用尽' : (online ? '在线' : '不可达')}</span>
         </div>
         <div class="node-card-rows">
           <div class="node-info-line"><span>接入地址</span><strong>${esc(n.server_addr || '-')}:${esc(n.server_port ?? '-')}</strong></div>
           <div class="node-info-line"><span>端口池</span><strong>空闲 ${free} / 共 ${total}</strong></div>
           <div class="node-info-line"><span>带宽上限</span><strong>${bw > 0 ? bw + ' Mbps' : '不限'}</strong></div>
           <div class="node-info-line"><span>实测延迟</span><strong data-latency-node="${esc(n.server_addr || '')}">测量中…</strong></div>
-          <div class="node-info-line"><span>流量套餐</span><strong>${planText}${priceText}</strong></div>
+          <div class="node-info-line"><span>本月流量</span><strong class="${trafficExceeded ? 'bad' : ''}">${monthUsed} GB / ${monthLimit > 0 ? monthLimit + ' GB' : '不限'}</strong></div>
           <div class="node-info-line"><span>线路备注</span><strong>${esc(n.note || '—')}</strong></div>
         </div>
         <div class="node-card-pool"><div class="node-pool-label"><span>端口占用</span><b>${usedPct}%</b></div><div class="node-pool-track"><span style="width:${usedPct}%"></span></div></div>
-        <div class="node-card-foot">${n.is_current ? '<button class="secondary" type="button" disabled>当前使用中</button>' : `<button type="button" onclick="switchDashboardNode(${Number(n.id)}, 'nodes')">切换到此节点</button>`}</div>
+        <div class="node-card-foot">${trafficExceeded ? '<button class="secondary" type="button" disabled>本月流量已用尽</button>' : (n.is_current ? '<button class="secondary" type="button" disabled>当前使用中</button>' : `<button type="button" onclick="switchDashboardNode(${Number(n.id)}, 'nodes')">切换到此节点</button>`)}</div>
       </article>`;
     }).join('') || '<div class="empty-state"><strong>暂无可用节点</strong><p class="muted small">管理员启用节点后会显示在这里。</p></div>';
     app.innerHTML = appLayoutHtml(`
@@ -1915,7 +1915,7 @@ async function loadAdmin(section=currentAdminSection){
       <td>${(nodesPage - 1) * ADMIN_PAGE_SIZE + i + 1}</td><td>${esc(n.region)}</td><td>${esc(n.name)}</td><td>${esc(n.server_addr)}:${n.server_port}</td>
       <td>${n.port_start}-${n.port_end}</td><td>${n.free_count}/${n.port_count}</td>
       <td>${n.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
-      <td>${esc(n.plan_name || '—')}${Number(n.price_per_gb || 0) > 0 ? ' · ¥' + Number(n.price_per_gb) + '/GB' : ''}</td>
+      <td>${Number(n.month_used_gb || 0)} / ${Number(n.monthly_traffic_gb || 0) > 0 ? Number(n.monthly_traffic_gb) + ' GB' : '不限'}${n.traffic_exceeded ? ' <span class="bad">已用尽</span>' : ''}</td>
       <td>${esc(n.note)}</td>
       <td class="actions node-actions"><button class="node-action" onclick='editNode(${JSON.stringify(n)})'>编辑</button><button class="node-action" onclick="nodeToggle(${n.id})">${n.active ? '停用' : '启用'}</button><a class="btn node-action" href="/config/frps.example.toml?node_id=${n.id}">frps配置</a><button class="node-action node-action-danger" onclick="nodeDelete(${n.id})">删除</button></td>
     </tr>`).join('') || emptyRow(9, '还没有节点');
@@ -1959,8 +1959,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>frps bindPort</label><input name="server_port" type="number" min="1" max="65535"></div>
       <div><label>frps token</label><input name="auth_token" required></div>
       <div><label>带宽（Mbps）</label><input name="bandwidth_mbps" type="number" min="0" step="1" placeholder="例如 100"><span class="muted small">填写节点带宽，0 表示不限</span></div>
-      <div><label>流量套餐名</label><input name="plan_name" placeholder="例如 标准流量包"><span class="muted small">展示给普通用户的套餐名，留空显示「按量计费」</span></div>
-      <div><label>单价（元/GB）</label><input name="price_per_gb" type="number" min="0" step="0.01" placeholder="0 表示不单独定价"></div>
+      <div><label>月流量上限（GB）</label><input name="monthly_traffic_gb" type="number" min="0" step="0.1" placeholder="例如 1000"><span class="muted small">0 表示不限；用完后该节点停止服务</span></div>
       <div><label>状态</label><select name="active"><option value="1">启用</option><option value="0">停用</option></select></div>
       <div><label>备注</label><input name="note"></div>
       <div style="align-self:end"><button>保存修改</button><button type="button" class="secondary" onclick="document.querySelector('#editNodeCard').classList.add('hidden')">取消</button></div>
@@ -1972,8 +1971,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>frps bindPort</label><input name="server_port" type="number" value="7000" min="1" max="65535"></div>
       <div><label>frps token</label><input name="auth_token" id="nodeAuthToken" value="${esc(genRandomToken())}" required><span class="muted small">已随机生成，可直接使用；<button type="button" class="link-btn" onclick="document.querySelector('#nodeAuthToken').value=genRandomToken()">重新生成</button></span></div>
       <div><label>带宽（Mbps）</label><input name="bandwidth_mbps" type="number" value="0" min="0" step="1"><span class="muted small">0 表示不限</span></div>
-      <div><label>流量套餐名</label><input name="plan_name" placeholder="例如 标准流量包"><span class="muted small">展示给普通用户，留空显示「按量计费」</span></div>
-      <div><label>单价（元/GB）</label><input name="price_per_gb" type="number" value="0" min="0" step="0.01"><span class="muted small">0 表示不单独定价</span></div>
+      <div><label>月流量上限（GB）</label><input name="monthly_traffic_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限；用完后该节点停止服务</span></div>
       <div><label>端口起始</label><input name="port_start" type="number" value="20000" min="1" max="65535"></div>
       <div><label>端口结束</label><input name="port_end" type="number" value="20199" min="1" max="65535"></div>
       <div><label>frp 版本</label><select name="frp_channel" id="nodeFrpChannel"><option value="stable">稳定版（推荐）</option><option value="latest">最新版</option><option value="custom">自定义版本</option></select></div>
@@ -1982,7 +1980,7 @@ async function loadAdmin(section=currentAdminSection){
       <div class="form-actions" style="grid-column:1/-1"><button>创建节点</button></div>
     </form>
     <div id="nodeDeployScriptBox" class="deploy-script-item hidden" style="margin-top:14px"><div class="label">一键部署脚本（复制到新节点机器上执行）</div><div class="copy-line"><code class="token deploy-token" id="nodeDeployScriptCmd"></code><button type="button" class="secondary" onclick="copyNodeDeployScript()">复制命令</button></div><p class="muted small">脚本从公开仓库拉取，不依赖本面板；执行时会把该节点注册到当前面板（地址、密钥与节点信息已按上方表单预填）。</p></div></section>
-    <section class="card" id="nodes"><div class="section-title"><h2>${stIcon('node')}节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>序号</th><th>地区</th><th>节点</th><th>frps</th><th>端口池</th><th>剩余</th><th>状态</th><th>套餐/单价</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table>${paginationHtml('nodes', nodesPage, (data.nodes || []).length, ADMIN_PAGE_SIZE)}</section>`;
+    <section class="card" id="nodes"><div class="section-title"><h2>${stIcon('node')}节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>序号</th><th>地区</th><th>节点</th><th>frps</th><th>端口池</th><th>剩余</th><th>状态</th><th>月流量</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table>${paginationHtml('nodes', nodesPage, (data.nodes || []).length, ADMIN_PAGE_SIZE)}</section>`;
   const plansList = data.plans || [];
   const orderList = data.orders || [];
   window.__fmlPlans = plansList;
@@ -2607,7 +2605,7 @@ function editNode(n){
   const card = document.querySelector('#editNodeCard');
   const f = document.querySelector('#editNodeForm');
   card.classList.remove('hidden');
-  for(const k of ['id','region','name','server_addr','server_port','auth_token','note','bandwidth_mbps','plan_name','price_per_gb']) f.elements[k].value = n[k] ?? '';
+  for(const k of ['id','region','name','server_addr','server_port','auth_token','note','bandwidth_mbps','monthly_traffic_gb']) f.elements[k].value = n[k] ?? '';
   f.elements.active.value = n.active ? '1' : '0';
   card.scrollIntoView({behavior:'smooth', block:'start'});
 }
