@@ -692,7 +692,7 @@ function appSidebarHtml(kind='dashboard'){
   const isAdmin = currentUser?.role === 'admin';
   const username = currentUser?.username || '用户';
   const items = isAdmin ? [
-    ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','plan','套餐','plans'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
+    ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
   ] : [
     ['dashboard','home','概览'],['dashboard-nodes','node','节点'],['dashboard-plans','license','套餐'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
   ];
