@@ -694,7 +694,7 @@ function appSidebarHtml(kind='dashboard'){
   const items = isAdmin ? [
     ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
   ] : [
-    ['dashboard','home','概览'],['dashboard-nodes','node','节点'],['dashboard-plans','license','套餐'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
+    ['dashboard','home','概览'],['dashboard-nodes','node','节点'],['dashboard-plans','license','套餐'],['dashboard-points','bolt','积分'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
   ];
   const links = items.map(([action, icon, label, section]) => {
     const active = kind === action || (section && kind === section) ? ' active' : '';
@@ -808,6 +808,7 @@ app.addEventListener('click', async (e) => {
     if(action === 'dashboard-editor') return loadDashboard('editor');
     if(action === 'dashboard-profile') return loadDashboard('profile');
     if(action === 'dashboard-plans') return loadPlans();
+    if(action === 'dashboard-points') return loadPoints();
     if(action === 'admin-dashboard') return loadAdminDashboard();
     if(action === 'admin-settings') return loadAdminSettings();
     if(action === 'admin-proxies') return loadAdminProxies();
@@ -939,19 +940,22 @@ async function loadPlans(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
   let data;
   try{
-    const [plansRes, ordersRes] = await Promise.all([api('/api/plans'), api('/api/user/orders').catch(() => ({orders:[], payment:{}}))]);
-    data = {plans: plansRes.plans || [], payment: plansRes.payment || {}, orders: ordersRes.orders || []};
+    const [plansRes, ordersRes, pointsRes] = await Promise.all([
+      api('/api/plans'),
+      api('/api/user/orders').catch(() => ({orders:[]})),
+      api('/api/user/points').catch(() => ({balance:0, payment:{}}))
+    ]);
+    data = {plans: plansRes.plans || [], payment: plansRes.payment || {}, orders: ordersRes.orders || [], balance: pointsRes.balance || 0};
   }catch(err){
     if(err.message === 'unauthorized') return renderLogin();
     show(err.message, true);
     return;
   }
-  const payment = data.payment || {};
-  const providerName = {alipay:'支付宝', wechat:'微信支付', mock:'测试支付'}[payment.provider] || '未配置';
-  const payReady = !!payment.ready;
-  const cards = (data.plans || []).map(p => `
+  const cards = (data.plans || []).map(p => {
+    const enough = Number(data.balance) >= Number(p.price_points);
+    return `
     <article class="plan-card">
-      <div class="plan-card-head"><h3>${esc(p.name)}</h3><span class="plan-price">¥${p.price_text}</span></div>
+      <div class="plan-card-head"><h3>${esc(p.name)}</h3><span class="plan-price">${p.price_points} <small>积分</small></span></div>
       <ul class="plan-meta">
         <li><span>端口数</span><b>${p.max_ports}</b></li>
         <li><span>有效期</span><b>${p.duration_days ? p.duration_days + ' 天' : '不限期'}</b></li>
@@ -959,31 +963,31 @@ async function loadPlans(){
         <li><span>速率上限</span><b>${p.bandwidth_limit_mbs ? p.bandwidth_limit_mbs + ' MB/s' : '不限'}</b></li>
       </ul>
       ${p.note ? `<p class="plan-note">${esc(p.note)}</p>` : ''}
-      <button type="button" class="plan-buy" onclick="buyPlan(${p.id})" ${payReady ? '' : 'disabled'}>${payReady ? '立即购买' : '支付未配置'}</button>
-    </article>`).join('') || '<p class="muted">管理员还没有上架套餐。</p>';
-  const statusText = {pending:'待支付', paid:'已支付', cancelled:'已取消', expired:'已过期', refunded:'已退款'};
+      <button type="button" class="plan-buy" onclick="buyPlan(${p.id})" ${enough ? '' : 'disabled'}>${enough ? '积分购买' : '积分不足'}</button>
+    </article>`;
+  }).join('') || '<p class="muted">管理员还没有上架套餐。</p>';
+  const statusText = {pending:'待支付', paid:'已完成', cancelled:'已取消', expired:'已过期', refunded:'已退款'};
   const orderRows = (data.orders || []).map(o => `<tr>
       <td>${esc(o.order_no)}</td>
       <td>${esc(o.plan_name)}</td>
-      <td>¥${o.amount_text}</td>
+      <td>${o.kind === 'points' ? '+' + o.points + ' 积分' : '-' + o.points + ' 积分'}</td>
       <td><span class="status-badge ${o.status === 'paid' ? 'ok' : (o.status === 'pending' ? '' : 'bad')}"><i></i>${statusText[o.status] || esc(o.status)}</span></td>
       <td>${fmtTs(o.created_at)}</td>
       <td>${o.status === 'pending' ? `<button type="button" class="secondary" onclick="resumePay('${esc(o.order_no)}')">继续支付</button>` : '-'}</td>
     </tr>`).join('') || '<tr><td colspan="6" class="muted">暂无订单</td></tr>';
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">PLANS</span><h1>套餐</h1><p>选择适合你的套餐，支付成功后自动开通端口与有效期。</p></div><div class="ov-head-badge"><span>支付方式</span><b>${esc(providerName)}</b></div></div>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}可选套餐</h2><p>共 ${(data.plans || []).length} 个套餐</p></div></div><div class="plan-grid">${cards}</div></section>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}我的订单</h2><p>最近 50 条</p></div></div><table><thead><tr><th>订单号</th><th>套餐</th><th>金额</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></section>
+    <div class="ov-page-head"><div><span class="section-kicker">PLANS</span><h1>套餐</h1><p>使用积分购买套餐，购买后自动开通端口与有效期。</p></div><div class="ov-head-badge"><span>我的积分</span><b>${data.balance}</b></div></div>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}可选套餐</h2><p>共 ${(data.plans || []).length} 个套餐</p></div><button type="button" class="secondary" onclick="loadPoints()">充值积分</button></div><div class="plan-grid">${cards}</div></section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}我的订单</h2><p>最近 50 条</p></div></div><table><thead><tr><th>订单号</th><th>套餐</th><th>积分</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></section>
   `, 'dashboard-plans', '套餐');
 }
 
 async function buyPlan(planId){
+  if(!confirm('确认使用积分购买该套餐？')) return;
   try{
     const r = await api('/api/user/orders', {method:'POST', body:{plan_id:planId}});
-    const order = r.order || {};
-    if(order.status === 'paid'){ show('已开通，套餐已生效'); return loadDashboard(); }
-    if(!order.pay_url){ show('下单失败：没有支付链接', true); return; }
-    window.location.href = order.pay_url;
+    show(r.message || '购买成功');
+    await loadPlans();
   }catch(err){ show(err.message, true); }
 }
 
@@ -995,6 +999,84 @@ async function resumePay(orderNo){
     if(!order.pay_url){ show('没有可用的支付链接，请联系管理员', true); return; }
     window.location.href = order.pay_url;
   }catch(err){ show(err.message, true); }
+}
+
+async function loadPoints(){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
+  let data;
+  try{ data = await api('/api/user/points'); }
+  catch(err){
+    if(err.message === 'unauthorized') return renderLogin();
+    show(err.message, true);
+    return;
+  }
+  const payment = data.payment || {};
+  const rate = Number(payment.points_per_yuan || 10);
+  const providerName = {alipay:'支付宝', wechat:'微信支付', mock:'测试支付'}[payment.provider] || '未配置';
+  const kindText = {recharge:'在线充值', key_recharge:'密钥充值', plan_purchase:'购买套餐', admin_adjust:'管理员调整'};
+  const rows = (data.logs || []).map(l => `<tr>
+      <td>${fmtTs(l.created_at)}</td>
+      <td>${kindText[l.kind] || esc(l.kind)}</td>
+      <td>${l.delta > 0 ? '+' : ''}${l.delta}</td>
+      <td>${l.balance_after}</td>
+      <td>${esc(l.note || l.ref || '-')}</td>
+    </tr>`).join('') || '<tr><td colspan="5" class="muted">暂无积分记录</td></tr>';
+  app.innerHTML = appLayoutHtml(`
+    <div class="ov-page-head"><div><span class="section-kicker">POINTS</span><h1>积分</h1><p>在线充值或使用充值密钥，积分可用于购买套餐。</p></div><div class="ov-head-badge"><span>当前余额</span><b>${data.balance}</b></div></div>
+    <div class="points-grid">
+      <section class="card">
+        <div class="section-title"><div><h2>${stIcon('license')}在线充值</h2><p>1 元 = ${rate} 积分 · 当前渠道：${esc(providerName)}</p></div></div>
+        <form id="pointsRechargeForm" class="grid">
+          <div><label>充值积分</label><input name="points" type="number" min="1" step="1" value="${rate * 10}" required><span class="muted small" id="pointsAmountHint">应付 ¥${(10).toFixed(2)}</span></div>
+          <div class="form-actions" style="grid-column:1/-1"><button ${payment.ready ? '' : 'disabled'}>${payment.ready ? '去支付' : '支付未配置'}</button></div>
+        </form>
+      </section>
+      <section class="card">
+        <div class="section-title"><div><h2>${stIcon('key')}充值密钥</h2><p>输入管理员发放的充值密钥，立即到账</p></div></div>
+        <form id="pointsKeyForm" class="grid">
+          <div><label>充值密钥</label><input name="key" placeholder="PT-..." required></div>
+          <div class="form-actions" style="grid-column:1/-1"><button>兑换积分</button></div>
+        </form>
+      </section>
+    </div>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}积分明细</h2><p>最近 100 条</p></div></div><table><thead><tr><th>时间</th><th>类型</th><th>变动</th><th>余额</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table></section>
+  `, 'dashboard-points', '积分');
+
+  const rf = document.querySelector('#pointsRechargeForm');
+  if(rf){
+    const pointsInput = rf.querySelector('input[name="points"]');
+    const amountHint = document.querySelector('#pointsAmountHint');
+    const refreshAmount = () => {
+      const pts = Number(pointsInput && pointsInput.value || 0);
+      if(amountHint) amountHint.textContent = pts > 0 ? `应付 ¥${(pts / rate).toFixed(2)}` : '请输入充值积分';
+    };
+    if(pointsInput) pointsInput.addEventListener('input', refreshAmount);
+    refreshAmount();
+    rf.onsubmit = async (e) => {
+      e.preventDefault();
+      const pts = Number(new FormData(e.target).get('points') || 0);
+      if(!pts || pts < 1){ show('请输入有效的充值积分', true); return; }
+      try{
+        const r = await api('/api/user/points/orders', {method:'POST', body:{points:pts}});
+        const order = r.order || {};
+        if(!order.pay_url){ show('下单失败：没有支付链接', true); return; }
+        window.location.href = order.pay_url;
+      }catch(err){ show(err.message, true); }
+    };
+  }
+  const kf = document.querySelector('#pointsKeyForm');
+  if(kf){
+    kf.onsubmit = async (e) => {
+      e.preventDefault();
+      const key = String(new FormData(e.target).get('key') || '').trim();
+      if(!key){ show('请输入充值密钥', true); return; }
+      try{
+        const r = await api('/api/user/points/redeem', {method:'POST', body:{key}});
+        show(r.message || '充值成功');
+        await loadPoints();
+      }catch(err){ show(err.message, true); }
+    };
+  }
 }
 
 async function renderForgotPassword(){
@@ -1786,7 +1868,7 @@ async function loadAdmin(section=currentAdminSection){
   const logsSlice = pageItems(data.logs || [], riskPage, ADMIN_PAGE_SIZE);
   const rows = usersSlice.map(u => `
     <tr>
-      <td>${u.id}</td><td>${esc(u.username)}</td><td>${u.email ? esc(u.email) : '—'}</td><td>${esc(u.role)}</td><td>${esc(u.node_region || '-')} / ${esc(u.node_name || '-')}</td><td>${u.port_count}/${u.max_ports}</td><td>${u.tunnel_count}</td>
+      <td>${u.id}</td><td>${esc(u.username)}</td><td>${u.email ? esc(u.email) : '—'}</td><td>${esc(u.role)}</td><td><b>${Number(u.points || 0)}</b></td><td>${esc(u.node_region || '-')} / ${esc(u.node_name || '-')}</td><td>${u.port_count}/${u.max_ports}</td><td>${u.tunnel_count}</td>
       <td>${fmtBytes(u.traffic_limit_bytes)} / ${u.bandwidth_limit_kbps ? `${(Number(u.bandwidth_limit_kbps) / 1024).toFixed(1)} MB/s` : '不限'}</td>
       <td>${esc(u.expires_text)} ${u.expired ? '<span class="bad">已到期</span>' : ''}</td>
       <td>${u.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
@@ -1797,6 +1879,7 @@ async function loadAdmin(section=currentAdminSection){
         <button class="node-action" onclick="openAdminLimits(${u.id}, ${Number(u.traffic_limit_bytes || 0)}, ${Number(u.bandwidth_limit_kbps || 0)}, '${esc(u.username)}')">流量限制</button>
         <button class="node-action" onclick="openAdminCred('password', ${u.id}, '${esc(u.username)}')">重置密码</button>
         <button class="node-action" onclick="openAdminCred('token', ${u.id}, '${esc(u.username)}')">重置令牌</button>
+        <button class="node-action" onclick="adminAdjustPoints(${u.id}, '${esc(u.username)}')">调积分</button>
         <button class="node-action" onclick="openAdminEmail(${u.id}, '${esc(u.email || '')}', '${esc(u.username)}')">设邮箱</button>
         <button class="node-action node-action-danger" onclick="adminDelete(${u.id})">删除</button>
       </td>
@@ -1884,7 +1967,7 @@ async function loadAdmin(section=currentAdminSection){
   const planRows = plansList.map(p => `<tr>
       <td>${p.id}</td>
       <td>${esc(p.name)}</td>
-      <td>¥${p.price_text}</td>
+      <td><b>${p.price_points}</b> 积分</td>
       <td>${p.max_ports}</td>
       <td>${p.duration_days ? p.duration_days + ' 天' : '不限期'}</td>
       <td>${p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '不限'} / ${p.bandwidth_limit_mbs ? p.bandwidth_limit_mbs + ' MB/s' : '不限'}</td>
@@ -1903,12 +1986,21 @@ async function loadAdmin(section=currentAdminSection){
       <td>${fmtTs(o.created_at)}</td>
       <td>${o.status === 'pending' ? `<button type="button" class="secondary" onclick="orderComplete('${esc(o.order_no)}')">手动开通</button>` : '-'}</td>
     </tr>`).join('') || '<tr><td colspan="8" class="muted">暂无订单</td></tr>';
+  const rkRows = (data.recharge_keys || []).map(k => `<tr>
+      <td>${k.id}</td>
+      <td><code class="token">${esc(k.key)}</code></td>
+      <td>${k.points}</td>
+      <td>${esc(k.note || '—')}</td>
+      <td>${k.used_by ? '<span class="bad">已使用</span>' : (k.active ? '<span class="ok">可用</span>' : '<span class="bad">停用</span>')}</td>
+      <td>${fmtTs(k.created_at)}</td>
+      <td class="row-actions">${k.used_by ? '-' : `<button type="button" class="secondary" onclick="rechargeKeyToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button type="button" class="danger" onclick="rechargeKeyDelete(${k.id})">删除</button>`}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">还没有充值密钥</td></tr>';
   const plansHtml = `
     <section class="card" id="plans"><div class="section-title"><h2>${stIcon('license')}套餐模板</h2><p>用户按套餐在线购买，支付成功后自动分配端口与有效期</p></div>
     <form id="planForm" class="grid">
       <input type="hidden" name="id" value="">
       <div><label>套餐名称</label><input name="name" placeholder="例如 入门版 / 专业版" required></div>
-      <div><label>价格（元）</label><input name="price" type="number" value="9.90" min="0" step="0.01"></div>
+      <div><label>积分价格</label><input name="price_points" type="number" value="100" min="0" step="1"><span class="muted small">用户购买时扣除的积分</span></div>
       <div><label>端口数</label><input name="max_ports" type="number" value="5" min="0" max="100"></div>
       <div><label>有效期（天）</label><input name="duration_days" type="number" value="30" min="0" max="3650"><span class="muted small">0 表示不限期</span></div>
       <div><label>流量上限 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
@@ -1919,7 +2011,17 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>状态</label><select name="active"><option value="1">上架</option><option value="0">下架</option></select></div>
       <div class="form-actions" style="grid-column:1/-1"><button>保存套餐</button><button type="button" class="secondary" onclick="resetPlanForm()">清空</button></div>
     </form></section>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>ID</th><th>名称</th><th>价格</th><th>端口</th><th>有效期</th><th>流量 / 速率</th><th>节点</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>ID</th><th>名称</th><th>积分价格</th><th>端口</th><th>有效期</th><th>流量 / 速率</th><th>节点</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
+    <section class="card" id="recharge-keys"><div class="section-title"><div><h2>${stIcon('key')}积分充值密钥</h2><p>生成后发给用户，用户在「积分」页兑换；每枚只能使用一次</p></div><span class="section-count">可用 ${(data.recharge_keys || []).filter(k => !k.used_by && k.active).length}</span></div>
+      <form id="rechargeKeyForm" class="grid">
+        <div><label>每枚积分</label><input name="points" type="number" value="100" min="1" step="1"></div>
+        <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
+        <div><label>有效期（天）</label><input name="duration_days" type="number" value="0" min="0" max="3650"><span class="muted small">0 表示长期有效</span></div>
+        <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
+        <div class="form-actions" style="grid-column:1/-1"><button>生成充值密钥</button></div>
+      </form>
+      <table><thead><tr><th>ID</th><th>密钥</th><th>积分</th><th>备注</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${rkRows}</tbody></table>
+    </section>
     <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}订单</h2><p>最近 100 条；待支付订单可手动开通</p></div><span class="section-count">已支付 ${orderList.filter(o => o.status === 'paid').length}</span></div><table><thead><tr><th>订单号</th><th>用户</th><th>套餐</th><th>金额</th><th>状态</th><th>支付方式</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></section>
     ${data.software_license_authority ? `<section class="card" id="software-licenses"><div class="section-title"><h2>${stIcon('license')}服务器软件授权码</h2><p>卖家后台使用：先批量生成授权码发给客户；客户输入授权码后自动绑定他的部署服务器。</p></div><form id="softwareLicenseForm" class="grid">
       <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
@@ -1948,7 +2050,7 @@ async function loadAdmin(section=currentAdminSection){
         <div><label for="adminUserStatus">账号状态</label><select id="adminUserStatus" name="status"><option value="all" ${adminUserStatus==='all'?'selected':''}>全部状态</option><option value="active" ${adminUserStatus==='active'?'selected':''}>正常启用</option><option value="disabled" ${adminUserStatus==='disabled'?'selected':''}>已停用</option><option value="expired" ${adminUserStatus==='expired'?'selected':''}>已到期</option></select></div>
         <div class="form-actions"><button type="submit">筛选</button><button type="button" class="secondary" id="adminUserFilterReset">重置</button></div>
       </form>
-      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>ID</th><th>用户</th><th>邮箱</th><th>角色</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>到期</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>
+      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>ID</th><th>用户</th><th>邮箱</th><th>角色</th><th>积分</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>到期</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>
     <div id="adminLimitsModal" class="modal-backdrop modal-center hidden" role="dialog" aria-modal="true" aria-labelledby="adminLimitsTitle" onclick="if(event.target===this)closeAdminLimits()">
       <section class="modal-page card admin-limits-modal">
         <div class="section-title modal-title">
@@ -2100,6 +2202,21 @@ async function loadAdmin(section=currentAdminSection){
         if(keys.length){ await copyText(keys.join('\n')); }
         await loadAdmin();
         show(r.message || '续期密钥已生成');
+      }catch(err){ show(err.message, true); }
+    };
+  }
+  const rechargeKeyForm = document.querySelector('#rechargeKeyForm');
+  if(rechargeKeyForm){
+    rechargeKeyForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const body = {points: fd.get('points'), count: fd.get('count'), note: fd.get('note'), expires_days: fd.get('duration_days')};
+      try{
+        const r = await api('/api/admin/recharge-keys/create', {method:'POST', body});
+        const keys = r.keys || [];
+        if(keys.length) await copyText(keys.join('\n'));
+        await loadAdmin();
+        show(r.message || '充值密钥已生成');
       }catch(err){ show(err.message, true); }
     };
   }
@@ -2409,7 +2526,7 @@ function resetPlanForm(){
   if(!f) return;
   f.reset();
   f.elements.id.value = '';
-  f.elements.price.value = '9.90';
+  f.elements.price_points.value = '100';
   f.elements.max_ports.value = '5';
   f.elements.duration_days.value = '30';
   f.elements.traffic_limit_gb.value = '0';
@@ -2423,7 +2540,7 @@ function editPlan(id){
   if(!f || !p) return;
   f.elements.id.value = p.id;
   f.elements.name.value = p.name;
-  f.elements.price.value = p.price_text;
+  f.elements.price_points.value = p.price_points;
   f.elements.max_ports.value = p.max_ports;
   f.elements.duration_days.value = p.duration_days;
   f.elements.traffic_limit_gb.value = p.traffic_limit_gb;
@@ -2434,6 +2551,20 @@ function editPlan(id){
   f.elements.active.value = p.active ? '1' : '0';
   f.scrollIntoView({behavior:'smooth', block:'center'});
 }
+async function adminAdjustPoints(id, username){
+  const raw = prompt(`调整 ${username} 的积分（正数增加，负数扣减）`, '100');
+  if(raw === null) return;
+  const delta = Number(raw);
+  if(!Number.isInteger(delta) || delta === 0){ show('请输入非零整数', true); return; }
+  try{
+    const r = await api('/api/admin/users/points', {method:'POST', body:{id, delta, note:'管理员调整'}});
+    await loadAdmin();
+    show(r.message || '积分已调整');
+  }catch(err){ show(err.message, true); }
+}
+
+async function rechargeKeyToggle(id){ await api('/api/admin/recharge-keys/toggle', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥状态已更新'))).catch(e=>show(e.message,true)); }
+async function rechargeKeyDelete(id){ if(confirm('删除这枚充值密钥？')) await api('/api/admin/recharge-keys/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥已删除'))).catch(e=>show(e.message,true)); }
 async function planToggle(id){ await api('/api/admin/plans/toggle', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('套餐状态已更新'))).catch(e=>show(e.message,true)); }
 async function planDelete(id){ if(confirm('删除这个套餐？已产生的订单不受影响。')) await api('/api/admin/plans/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('套餐已删除'))).catch(e=>show(e.message,true)); }
 async function orderComplete(orderNo){ if(confirm('确认手动开通该订单？将立即分配端口并延长有效期。')) await api('/api/admin/orders/complete', {method:'POST', body:{order_no:orderNo}}).then(r=>loadAdmin().then(()=>show(r.message || '已开通'))).catch(e=>show(e.message,true)); }
@@ -2703,6 +2834,7 @@ function adminPaymentCardHtml(pay){
     <form id="paymentForm" class="settings-form form-grid">
       <div><label>支付渠道</label><select name="provider">${opt('', '关闭在线支付')}${opt('alipay', '支付宝')}${opt('wechat', '微信支付')}${opt('mock', '测试模式（不收款）')}</select></div>
       <div><label>对外访问地址</label><input name="public_url" value="${esc(pay.public_url || '')}" placeholder="https://frp.example.com"></div>
+      <div><label>积分兑换比例</label><input name="points_per_yuan" type="number" value="${Number(pay.points_per_yuan || 10)}" min="1" max="10000"><span class="muted small">1 元 = N 积分</span></div>
       <div><label>支付宝 App ID</label><input name="alipay_app_id" value="${esc(pay.alipay_app_id || '')}" placeholder="2021000000000000"></div>
       <div><label>支付宝网关</label><input name="alipay_gateway" value="${esc(pay.alipay_gateway || 'https://openapi.alipay.com/gateway.do')}"></div>
       <div class="span-2"><label>支付宝应用私钥</label><textarea name="alipay_private_key" rows="2" placeholder="${pay.alipay_configured ? '已设置，留空不修改' : '-----BEGIN PRIVATE KEY-----'}"></textarea></div>

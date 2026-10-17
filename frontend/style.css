@@ -1621,3 +1621,7 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .app-shell.is-settings .settings-form textarea{min-height:72px;resize:vertical;font-family:var(--font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12px;line-height:1.5}
 .app-shell.is-settings .settings-form input[name="public_url"],
 .app-shell.is-settings .settings-form input[name="alipay_gateway"]{text-overflow:ellipsis}
+
+/* ---- 积分充值 ---- */
+.points-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:16px}
+.plan-price small{font-size:12px;font-weight:500;color:var(--muted)}

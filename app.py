@@ -1434,6 +1434,7 @@ def public_user(user: sqlite3.Row) -> dict[str, Any]:
         "invite_key_used": row_val(user, "invite_key_used"),
         "email": row_val(user, "email", "") or "",
         "max_ports": user["max_ports"],
+        "points": int(row_val(user, "points", 0) or 0),
         "traffic_limit_bytes": int(row_val(user, "traffic_limit_bytes", 0) or 0),
         "active": bool(user["active"]),
         "expires_at": user["expires_at"],
@@ -2606,6 +2607,30 @@ def init_db() -> None:
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS point_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                username TEXT NOT NULL DEFAULT '',
+                delta INTEGER NOT NULL,
+                balance_after INTEGER NOT NULL DEFAULT 0,
+                kind TEXT NOT NULL DEFAULT '',
+                ref TEXT NOT NULL DEFAULT '',
+                note TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_point_logs_user ON point_logs(user_id, id);
+            CREATE TABLE IF NOT EXISTS recharge_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key TEXT NOT NULL UNIQUE,
+                points INTEGER NOT NULL DEFAULT 0,
+                note TEXT NOT NULL DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1,
+                expires_at INTEGER NOT NULL DEFAULT 0,
+                used_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                used_at INTEGER NOT NULL DEFAULT 0,
+                created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at INTEGER NOT NULL
+            );
             CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status, created_at);
             """
@@ -2622,6 +2647,16 @@ def init_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN traffic_limit_bytes INTEGER NOT NULL DEFAULT 0")
         if "bandwidth_limit_kbps" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0")
+        if "points" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN points INTEGER NOT NULL DEFAULT 0")
+        plan_cols = {r["name"] for r in conn.execute("PRAGMA table_info(plans)").fetchall()}
+        if "price_points" not in plan_cols:
+            conn.execute("ALTER TABLE plans ADD COLUMN price_points INTEGER NOT NULL DEFAULT 0")
+        order_cols = {r["name"] for r in conn.execute("PRAGMA table_info(orders)").fetchall()}
+        if "kind" not in order_cols:
+            conn.execute("ALTER TABLE orders ADD COLUMN kind TEXT NOT NULL DEFAULT 'plan'")
+        if "points" not in order_cols:
+            conn.execute("ALTER TABLE orders ADD COLUMN points INTEGER NOT NULL DEFAULT 0")
         node_cols = {r["name"] for r in conn.execute("PRAGMA table_info(nodes)").fetchall()}
         if "bandwidth_mbps" not in node_cols:
             conn.execute("ALTER TABLE nodes ADD COLUMN bandwidth_mbps INTEGER NOT NULL DEFAULT 0")
@@ -3760,6 +3795,7 @@ def payment_config(conn: sqlite3.Connection) -> dict[str, Any]:
         "wechat_appid": setting_get(conn, "wechat_appid", ""),
         "wechat_mch_id": setting_get(conn, "wechat_mch_id", ""),
         "wechat_api_key": setting_get(conn, "wechat_api_key", ""),
+        "points_per_yuan": max(1, int(setting_get(conn, "points_per_yuan", "10") or 10)),
     }
 
 
@@ -3780,6 +3816,7 @@ def payment_public(cfg: dict[str, Any]) -> dict[str, Any]:
         "alipay_gateway": cfg.get("alipay_gateway", DEFAULT_ALIPAY_GATEWAY),
         "wechat_appid": cfg.get("wechat_appid", ""),
         "wechat_mch_id": cfg.get("wechat_mch_id", ""),
+        "points_per_yuan": int(cfg.get("points_per_yuan") or 10),
         "alipay_configured": bool(cfg.get("alipay_app_id") and cfg.get("alipay_private_key") and cfg.get("alipay_public_key")),
         "wechat_configured": bool(cfg.get("wechat_appid") and cfg.get("wechat_mch_id") and cfg.get("wechat_api_key")),
     }
@@ -3791,6 +3828,7 @@ def plan_public(row: sqlite3.Row) -> dict[str, Any]:
         "name": row["name"],
         "price_cents": int(row["price_cents"] or 0),
         "price_text": f"{int(row['price_cents'] or 0) / 100:.2f}",
+        "price_points": int(row_val(row, "price_points", 0) or 0),
         "max_ports": int(row["max_ports"] or 0),
         "traffic_limit_bytes": int(row["traffic_limit_bytes"] or 0),
         "traffic_limit_gb": round(int(row["traffic_limit_bytes"] or 0) / 1024 / 1024 / 1024, 2),
@@ -3815,7 +3853,7 @@ def list_plans(conn: sqlite3.Connection, active_only: bool = False) -> list[dict
 
 def save_plan(plan_id: int, name: str, price_cents: int, max_ports: int, traffic_limit_bytes: int,
               bandwidth_limit_kbps: int, duration_days: int, node_id: int, note: str,
-              active: bool, sort_order: int) -> tuple[bool, str]:
+              active: bool, sort_order: int, price_points: int = 0) -> tuple[bool, str]:
     name = str(name or "").strip()[:60]
     if not name:
         return False, "请填写套餐名称"
@@ -3827,21 +3865,23 @@ def save_plan(plan_id: int, name: str, price_cents: int, max_ports: int, traffic
         return False, "有效期必须在 0-3650 天之间"
     if traffic_limit_bytes < 0 or bandwidth_limit_kbps < 0:
         return False, "流量/速率限制不能小于 0"
+    if price_points < 0 or price_points > 100_000_000:
+        return False, "积分价格不合法"
     node_id = int(node_id or 0)
     with db() as conn:
         if node_id and not conn.execute("SELECT 1 FROM nodes WHERE id=?", (node_id,)).fetchone():
             return False, "所选节点不存在"
         if plan_id:
             cur = conn.execute(
-                "UPDATE plans SET name=?, price_cents=?, max_ports=?, traffic_limit_bytes=?, bandwidth_limit_kbps=?, duration_days=?, node_id=?, note=?, active=?, sort_order=? WHERE id=?",
-                (name, price_cents, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days,
+                "UPDATE plans SET name=?, price_cents=?, price_points=?, max_ports=?, traffic_limit_bytes=?, bandwidth_limit_kbps=?, duration_days=?, node_id=?, note=?, active=?, sort_order=? WHERE id=?",
+                (name, price_cents, price_points, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days,
                  node_id or None, str(note or "")[:200], 1 if active else 0, sort_order, plan_id))
             if cur.rowcount == 0:
                 return False, "套餐不存在"
         else:
             conn.execute(
-                "INSERT INTO plans(name, price_cents, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days, node_id, note, active, sort_order, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                (name, price_cents, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days,
+                "INSERT INTO plans(name, price_cents, price_points, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days, node_id, note, active, sort_order, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (name, price_cents, price_points, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days,
                  node_id or None, str(note or "")[:200], 1 if active else 0, sort_order, now()))
     return True, "套餐已保存"
 
@@ -3853,6 +3893,8 @@ def order_public(row: sqlite3.Row) -> dict[str, Any]:
         "username": row["username"],
         "plan_id": int(row["plan_id"] or 0),
         "plan_name": row["plan_name"],
+        "kind": row_val(row, "kind", "plan") or "plan",
+        "points": int(row_val(row, "points", 0) or 0),
         "amount_cents": int(row["amount_cents"] or 0),
         "amount_text": f"{int(row['amount_cents'] or 0) / 100:.2f}",
         "duration_days": int(row["duration_days"] or 0),
@@ -3868,6 +3910,69 @@ def order_public(row: sqlite3.Row) -> dict[str, Any]:
 
 def new_order_no() -> str:
     return time.strftime("%Y%m%d%H%M%S") + f"{secrets.randbelow(1000000):06d}"
+
+
+def points_change(conn: sqlite3.Connection, user_id: int, delta: int, kind: str, ref: str = "", note: str = "") -> int:
+    row = conn.execute("SELECT points, username FROM users WHERE id=?", (user_id,)).fetchone()
+    if not row:
+        raise ValueError("用户不存在")
+    balance = int(row["points"] or 0) + int(delta)
+    if balance < 0:
+        raise ValueError("积分不足")
+    conn.execute("UPDATE users SET points=? WHERE id=?", (balance, user_id))
+    conn.execute(
+        "INSERT INTO point_logs(user_id, username, delta, balance_after, kind, ref, note, created_at) VALUES(?,?,?,?,?,?,?,?)",
+        (user_id, row["username"], int(delta), balance, str(kind)[:32], str(ref)[:64], str(note)[:200], now()))
+    return balance
+
+
+def points_balance(user_id: int) -> int:
+    with db() as conn:
+        row = conn.execute("SELECT points FROM users WHERE id=?", (user_id,)).fetchone()
+    return int(row["points"] or 0) if row else 0
+
+
+def create_recharge_keys(points: int, count: int, note: str, expires_days: int, created_by: int) -> tuple[bool, str, list[str]]:
+    points = int(points)
+    count = int(count)
+    if points < 1 or points > 1_000_000:
+        return False, "单个密钥积分必须在 1-1000000 之间", []
+    if count < 1 or count > 500:
+        return False, "单次生成数量必须在 1-500 之间", []
+    if expires_days < 0 or expires_days > 3650:
+        return False, "有效期必须在 0-3650 天之间", []
+    expires_at = 0 if expires_days == 0 else now() + expires_days * 86400
+    keys: list[str] = []
+    with db() as conn:
+        for _ in range(count):
+            key = "PT-" + secrets.token_urlsafe(18).replace("-", "").replace("_", "")[:24].upper()
+            conn.execute(
+                "INSERT INTO recharge_keys(key, points, note, active, expires_at, created_by, created_at) VALUES(?,?,?,?,?,?,?)",
+                (key, points, str(note or "")[:120], 1, expires_at, created_by, now()))
+            keys.append(key)
+    return True, f"已生成 {len(keys)} 枚充值密钥", keys
+
+
+def redeem_recharge_key(user: sqlite3.Row, raw_key: str) -> tuple[bool, str, int]:
+    key = str(raw_key or "").strip().upper()
+    if not key:
+        return False, "请输入充值密钥", 0
+    with db() as conn:
+        row = conn.execute("SELECT * FROM recharge_keys WHERE key=?", (key,)).fetchone()
+        if not row:
+            return False, "充值密钥无效", 0
+        if int(row["used_by"] or 0):
+            return False, "充值密钥已被使用", 0
+        if not int(row["active"] or 0):
+            return False, "充值密钥已停用", 0
+        if int(row["expires_at"] or 0) and int(row["expires_at"]) <= now():
+            return False, "充值密钥已过期", 0
+        claimed = conn.execute("UPDATE recharge_keys SET used_by=?, used_at=? WHERE id=? AND used_by IS NULL AND active=1",
+                               (user["id"], now(), row["id"])).rowcount
+        if claimed != 1:
+            return False, "充值密钥已被使用", 0
+        balance = points_change(conn, user["id"], int(row["points"] or 0), "key_recharge", key[-8:], "充值密钥兑换")
+    return True, f"充值成功，获得 {int(row['points'])} 积分", balance
 
 
 def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool, str]:
@@ -3907,9 +4012,12 @@ def mark_order_paid(order_no: str, transaction_id: str = "", provider: str = "")
             return True, "订单已支付"
         if row["status"] != "pending":
             return False, "订单状态不可支付"
-        ok, msg = provision_order(conn, row)
-        if not ok:
-            return False, msg
+        if (row_val(row, "kind", "plan") or "plan") == "points":
+            points_change(conn, row["user_id"], int(row_val(row, "points", 0) or 0), "recharge", order_no, "在线充值")
+        else:
+            ok, msg = provision_order(conn, row)
+            if not ok:
+                return False, msg
         conn.execute(
             "UPDATE orders SET status='paid', transaction_id=?, provider=CASE WHEN ?='' THEN provider ELSE ? END, paid_at=?, updated_at=? WHERE id=?",
             (str(transaction_id or ""), provider, provider, now(), now(), row["id"]))
@@ -3917,34 +4025,65 @@ def mark_order_paid(order_no: str, transaction_id: str = "", provider: str = "")
     return True, "已开通"
 
 
-def create_order(user: sqlite3.Row, plan_id: int, provider: str) -> tuple[bool, str, dict[str, Any] | None]:
+def create_order(user: sqlite3.Row, plan_id: int, provider: str = "") -> tuple[bool, str, dict[str, Any] | None]:
+    """积分购买套餐：扣积分后立即开通，不再走在线支付。"""
     with db() as conn:
         plan = conn.execute("SELECT * FROM plans WHERE id=? AND active=1", (plan_id,)).fetchone()
         if not plan:
             return False, "套餐不存在或已下架", None
+        cost = int(row_val(plan, "price_points", 0) or 0)
+        balance = int(row_val(conn.execute("SELECT points FROM users WHERE id=?", (user["id"],)).fetchone(), "points", 0) or 0)
+        if cost > balance:
+            return False, f"积分不足，还需 {cost - balance} 积分", None
+        order_no = new_order_no()
+        conn.execute(
+            "INSERT INTO orders(order_no, user_id, username, plan_id, plan_name, kind, points, amount_cents, duration_days, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, node_id, provider, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (order_no, user["id"], user["username"], plan["id"], plan["name"], "plan", cost, 0,
+             int(plan["duration_days"] or 0), int(plan["max_ports"] or 0), int(plan["traffic_limit_bytes"] or 0),
+             int(plan["bandwidth_limit_kbps"] or 0), int(plan["node_id"] or 0), "points", "pending", now(), now()))
+        order = conn.execute("SELECT * FROM orders WHERE order_no=?", (order_no,)).fetchone()
+        try:
+            if cost:
+                points_change(conn, user["id"], -cost, "plan_purchase", order_no, plan["name"])
+        except ValueError:
+            conn.rollback()
+            return False, "积分不足", None
+        ok, msg = provision_order(conn, order)
+        if not ok:
+            conn.rollback()
+            return False, msg, None
+        conn.execute("UPDATE orders SET status='paid', paid_at=?, updated_at=? WHERE id=?", (now(), now(), order["id"]))
+    with db() as conn:
+        row = conn.execute("SELECT * FROM orders WHERE order_no=?", (order_no,)).fetchone()
+        balance = int(row_val(conn.execute("SELECT points FROM users WHERE id=?", (user["id"],)).fetchone(), "points", 0) or 0)
+    payload = order_public(row)
+    payload["balance"] = balance
+    return True, "购买成功，套餐已开通", payload
+
+
+def create_points_order(user: sqlite3.Row, points: int, provider: str = "") -> tuple[bool, str, dict[str, Any] | None]:
+    """在线充值积分：创建支付订单，支付成功后加积分。"""
+    try:
+        points = int(points)
+    except (TypeError, ValueError):
+        return False, "充值积分数量不合法", None
+    if points < 1 or points > 1_000_000:
+        return False, "充值积分必须在 1-1000000 之间", None
+    with db() as conn:
         cfg = payment_config(conn)
-    if provider not in ("mock", "alipay", "wechat"):
-        provider = cfg.get("provider") or ""
+        rate = max(1, int(setting_get(conn, "points_per_yuan", "10") or 10))
+    provider = provider or cfg.get("provider") or ""
     if provider not in ("mock", "alipay", "wechat"):
         return False, "在线支付未配置，请联系管理员", None
-    if provider == "mock" and not OPEN_REGISTRATION:
-        pass
+    amount_cents = max(1, int(round(points * 100.0 / rate)))
     order_no = new_order_no()
     with db() as conn:
         conn.execute(
-            "INSERT INTO orders(order_no, user_id, username, plan_id, plan_name, amount_cents, duration_days, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, node_id, provider, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (order_no, user["id"], user["username"], plan["id"], plan["name"], int(plan["price_cents"] or 0),
-             int(plan["duration_days"] or 0), int(plan["max_ports"] or 0), int(plan["traffic_limit_bytes"] or 0),
-             int(plan["bandwidth_limit_kbps"] or 0), int(plan["node_id"] or 0), provider, "pending", now(), now()))
+            "INSERT INTO orders(order_no, user_id, username, plan_id, plan_name, kind, points, amount_cents, duration_days, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, node_id, provider, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (order_no, user["id"], user["username"], None, f"积分充值 {points}", "points", points, amount_cents,
+             0, 0, 0, 0, None, provider, "pending", now(), now()))
         order = conn.execute("SELECT * FROM orders WHERE order_no=?", (order_no,)).fetchone()
     payload = order_public(order)
-    if int(payload["amount_cents"]) <= 0:
-        ok, msg = mark_order_paid(order_no, "", provider)
-        if not ok:
-            return False, msg, None
-        payload["status"] = "paid"
-        payload["pay_url"] = ""
-        return True, "已开通", payload
     ok, msg, pay_url = build_payment(provider, payload, cfg)
     if not ok:
         with db() as conn:
@@ -3954,6 +4093,7 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str) -> tuple[bool, 
         conn.execute("UPDATE orders SET pay_url=?, updated_at=? WHERE order_no=?", (pay_url, now(), order_no))
     payload["pay_url"] = pay_url
     return True, "订单已创建", payload
+
 
 
 def _notify_base(cfg: dict[str, Any], fallback: str) -> str:
@@ -4688,6 +4828,15 @@ class Handler(BaseHTTPRequestHandler):
                 node_payload["latency_ms"] = node_payload.get("auth_latency_ms")
             self.send_json({"ok": True, "version": APP_VERSION, "uptime_seconds": int(time.time() - SERVER_START_TS), "latest_version": panel_latest_version(), "update_link": PANEL_UPDATE_LINK, "user": public_user(user), "software_license": sw_license, "node": node_payload, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
             return
+        if path == "/api/user/points":
+            with db() as conn:
+                logs = []
+                for r in conn.execute("SELECT * FROM point_logs WHERE user_id=? ORDER BY id DESC LIMIT 100", (user["id"],)):
+                    logs.append({"id": r["id"], "delta": r["delta"], "balance_after": r["balance_after"],
+                                 "kind": r["kind"], "ref": r["ref"], "note": r["note"], "created_at": r["created_at"]})
+                cfg = payment_config(conn)
+            self.send_json({"ok": True, "balance": points_balance(user["id"]), "logs": logs, "payment": payment_public(cfg)})
+            return
         if path == "/api/user/orders":
             with db() as conn:
                 rows = conn.execute("SELECT * FROM orders WHERE user_id=? ORDER BY id DESC LIMIT 50", (user["id"],)).fetchall()
@@ -4709,6 +4858,22 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 limit = 8
             self.send_json(user_activity_feed(user, limit))
+            return
+        if path == "/api/admin/recharge-keys":
+            if not self.require_admin():
+                return
+            with db() as conn:
+                keys = []
+                for r in conn.execute("SELECT * FROM recharge_keys ORDER BY id DESC LIMIT 300"):
+                    keys.append({"id": r["id"], "key": r["key"], "points": r["points"], "note": r["note"],
+                                 "active": bool(r["active"]), "expires_at": r["expires_at"],
+                                 "used_by": r["used_by"], "used_at": r["used_at"], "created_at": r["created_at"]})
+                stats = {
+                    "total": conn.execute("SELECT COUNT(*) FROM recharge_keys").fetchone()[0],
+                    "unused": conn.execute("SELECT COUNT(*) FROM recharge_keys WHERE used_by IS NULL AND active=1").fetchone()[0],
+                    "points_total": conn.execute("SELECT COALESCE(SUM(points),0) FROM point_logs WHERE kind='key_recharge'").fetchone()[0],
+                }
+            self.send_json({"ok": True, "keys": keys, "stats": stats})
             return
         if path == "/api/admin/plans":
             if not self.require_admin():
@@ -4795,7 +4960,7 @@ class Handler(BaseHTTPRequestHandler):
                             "active": bool(k["active"]), "expires_at": k["expires_at"], "expires_text": fmt_time(k["expires_at"]),
                             "expired": bool(k["expires_at"] and k["expires_at"] <= now()), "activated_at": k["activated_at"], "last_check_at": k["last_check_at"], "created_at": k["created_at"],
                         })
-            self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "invite_keys": invite_keys, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": effective_setup_key(), "has_setup_key": bool(effective_setup_key()), "setup_key_source": setup_key_source(), "smtp": smtp_public(smtp_config(conn)), "payment": payment_public(payment_config(conn)), "plans": list_plans(conn, active_only=False), "orders": [order_public(r) for r in conn.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 100")]})
+            self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "invite_keys": invite_keys, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": effective_setup_key(), "has_setup_key": bool(effective_setup_key()), "setup_key_source": setup_key_source(), "smtp": smtp_public(smtp_config(conn)), "payment": payment_public(payment_config(conn)), "plans": list_plans(conn, active_only=False), "orders": [order_public(r) for r in conn.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 100")], "recharge_keys": [{"id": r["id"], "key": r["key"], "points": r["points"], "note": r["note"], "active": bool(r["active"]), "expires_at": r["expires_at"], "used_by": r["used_by"], "used_at": r["used_at"], "created_at": r["created_at"]} for r in conn.execute("SELECT * FROM recharge_keys ORDER BY id DESC LIMIT 200")]})
             return
         if path == "/api/admin/frps-proxies":
             if not self.require_admin():
@@ -5014,6 +5179,38 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": ok, "message": msg, "error": None if ok else msg}, 200 if ok else 400)
             return
 
+        if path == "/api/user/points/redeem":
+            user = self.require_user()
+            if not user:
+                return
+            ok_rate, retry_after = rate_limit_check(f"redeem:{user['id']}", 10)
+            if not ok_rate:
+                self.send_json({"ok": False, "error": f"操作过于频繁，请 {retry_after} 秒后再试"}, 429)
+                return
+            ok, msg, balance = redeem_recharge_key(user, str(data.get("key", "")))
+            if ok:
+                audit("points_redeem", user, None, None, "", msg)
+            self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "balance": balance}, 200 if ok else 400)
+            return
+
+        if path == "/api/user/points/orders":
+            user = self.require_user()
+            if not user:
+                return
+            ok_rate, retry_after = rate_limit_check(f"pointorder:{user['id']}", 10)
+            if not ok_rate:
+                self.send_json({"ok": False, "error": f"下单过于频繁，请 {retry_after} 秒后再试"}, 429)
+                return
+            try:
+                points = int(data.get("points", 0))
+            except (TypeError, ValueError):
+                points = 0
+            ok, msg, payload = create_points_order(user, points, str(data.get("provider", "")))
+            if ok:
+                audit("points_order_create", user, None, None, "", f"{payload['points']} 积分 订单 {payload['order_no']}")
+            self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "order": payload}, 200 if ok else 400)
+            return
+
         if path == "/api/user/orders":
             user = self.require_user()
             if not user:
@@ -5201,6 +5398,14 @@ class Handler(BaseHTTPRequestHandler):
             self.admin_r2_config_save(user, data)
         elif path == "/api/admin/setup-key":
             self.admin_setup_key(user, data)
+        elif path == "/api/admin/recharge-keys/create":
+            self.admin_recharge_keys_create(data)
+        elif path == "/api/admin/recharge-keys/toggle":
+            self.admin_recharge_key_toggle(data)
+        elif path == "/api/admin/recharge-keys/delete":
+            self.admin_recharge_key_delete(data)
+        elif path == "/api/admin/users/points":
+            self.admin_user_points(data)
         elif path == "/api/admin/plans/save":
             self.admin_plan_save(data)
         elif path == "/api/admin/plans/delete":
@@ -5593,6 +5798,68 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_body(b"success" if ok else b"fail", 200, "text/plain")
 
+    def admin_recharge_keys_create(self, data: dict[str, Any]) -> None:
+        admin = self.require_admin()
+        if not admin:
+            return
+        try:
+            points = int(data.get("points", 0) or 0)
+            count = int(data.get("count", 1) or 1)
+            expires_days = int(data.get("expires_days", 0) or 0)
+        except (TypeError, ValueError):
+            self.send_json({"ok": False, "error": "表单数值格式不正确"}, 400)
+            return
+        ok, msg, keys = create_recharge_keys(points, count, str(data.get("note", "")), expires_days, admin["id"])
+        if ok:
+            audit("recharge_keys_create", admin, None, None, "", f"{len(keys)} 枚 / {points} 积分")
+        self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "keys": keys}, 200 if ok else 400)
+
+    def admin_recharge_key_toggle(self, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        try:
+            kid = int(data.get("id", 0))
+        except (TypeError, ValueError):
+            self.send_json({"ok": False, "error": "参数错误"}, 400)
+            return
+        with db() as conn:
+            conn.execute("UPDATE recharge_keys SET active=CASE active WHEN 1 THEN 0 ELSE 1 END WHERE id=?", (kid,))
+        self.send_json({"ok": True, "message": "密钥状态已更新"})
+
+    def admin_recharge_key_delete(self, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        try:
+            kid = int(data.get("id", 0))
+        except (TypeError, ValueError):
+            self.send_json({"ok": False, "error": "参数错误"}, 400)
+            return
+        with db() as conn:
+            conn.execute("DELETE FROM recharge_keys WHERE id=? AND used_by IS NULL", (kid,))
+        self.send_json({"ok": True, "message": "密钥已删除"})
+
+    def admin_user_points(self, data: dict[str, Any]) -> None:
+        admin = self.require_admin()
+        if not admin:
+            return
+        try:
+            uid = int(data.get("id", 0))
+            delta = int(data.get("delta", 0))
+        except (TypeError, ValueError):
+            self.send_json({"ok": False, "error": "参数错误"}, 400)
+            return
+        if delta == 0:
+            self.send_json({"ok": False, "error": "调整数量不能为 0"}, 400)
+            return
+        try:
+            with db() as conn:
+                balance = points_change(conn, uid, delta, "admin_adjust", admin["username"], str(data.get("note", "")))
+        except ValueError as exc:
+            self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        audit("points_adjust", admin, None, None, "", f"user={uid} delta={delta} balance={balance}")
+        self.send_json({"ok": True, "message": f"已调整，当前余额 {balance} 积分", "balance": balance})
+
     def admin_plan_save(self, data: dict[str, Any]) -> None:
         admin = self.require_admin()
         if not admin:
@@ -5606,13 +5873,14 @@ class Handler(BaseHTTPRequestHandler):
             duration_days = int(data.get("duration_days", 30) or 0)
             node_id = int(data.get("node_id", 0) or 0)
             sort_order = int(data.get("sort_order", 0) or 0)
+            price_points = int(data.get("price_points", 0) or 0)
         except (TypeError, ValueError):
             self.send_json({"ok": False, "error": "表单数值格式不正确"}, 400)
             return
         ok, msg = save_plan(plan_id, str(data.get("name", "")), price_cents, max_ports,
                             int(traffic_gb * 1024 ** 3), int(bandwidth_mbs * 1024), duration_days,
                             node_id, str(data.get("note", "")),
-                            str(data.get("active", "1")) in ("1", "true", "on", "True"), sort_order)
+                            str(data.get("active", "1")) in ("1", "true", "on", "True"), sort_order, price_points)
         if ok:
             audit("plan_save", admin, None, None, "", f"套餐 {data.get('name','')} id={plan_id or 'new'}")
         self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg}, 200 if ok else 400)
@@ -5671,6 +5939,11 @@ class Handler(BaseHTTPRequestHandler):
                 setting_set(conn, "alipay_public_key", str(data.get("alipay_public_key", "")).strip())
             if str(data.get("wechat_api_key", "")).strip():
                 setting_set(conn, "wechat_api_key", str(data.get("wechat_api_key", "")).strip())
+            try:
+                rate = int(data.get("points_per_yuan", 10) or 10)
+            except (TypeError, ValueError):
+                rate = 10
+            setting_set(conn, "points_per_yuan", str(max(1, min(10000, rate))))
         self.send_json({"ok": True, "message": "支付设置已保存"})
 
     def admin_smtp_config_save(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
