@@ -4094,7 +4094,7 @@ def create_points_order(user: sqlite3.Row, points: int, provider: str = "") -> t
         return False, "充值积分必须在 1-1000000 之间", None
     with db() as conn:
         cfg = payment_config(conn)
-        rate = max(1, int(setting_get(conn, "points_per_yuan", "10") or 10))
+        rate = max(1, int(setting_get(conn, "points_per_yuan", "1") or 1))
     enabled = enabled_payment_providers(cfg)
     if not enabled:
         return False, "在线支付未配置，请联系管理员", None
@@ -5950,6 +5950,7 @@ class Handler(BaseHTTPRequestHandler):
     def admin_payment_config_save(self, data: dict[str, Any]) -> None:
         if not self.require_admin():
             return
+        has_channel_field = ("providers" in data) or ("provider" in data)
         raw = data.get("providers", data.get("provider", ""))
         if isinstance(raw, (list, tuple)):
             items = [str(x).strip() for x in raw]
@@ -5959,8 +5960,10 @@ class Handler(BaseHTTPRequestHandler):
         providers = list(dict.fromkeys(providers))
         provider = providers[0] if providers else ""
         with db() as conn:
-            setting_set(conn, "pay_providers", ",".join(providers))
-            setting_set(conn, "pay_provider", provider)
+            # 旧版页面可能不提交渠道字段，此时保持原有渠道不变，避免误清空
+            if has_channel_field:
+                setting_set(conn, "pay_providers", ",".join(providers))
+                setting_set(conn, "pay_provider", provider)
             setting_set(conn, "pay_public_url", str(data.get("public_url", "")).strip().rstrip("/"))
             setting_set(conn, "alipay_app_id", str(data.get("alipay_app_id", "")).strip())
             setting_set(conn, "alipay_gateway", str(data.get("alipay_gateway", "")).strip() or DEFAULT_ALIPAY_GATEWAY)

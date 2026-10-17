@@ -2846,7 +2846,7 @@ function adminPaymentCardHtml(pay){
         <label class="check"><input type="checkbox" name="providers" value="mock"${enabledChannels.includes('mock') ? ' checked' : ''}> 测试模式（不收款）</label>
       </div><span class="muted small">全部取消即关闭在线支付；只有已填好密钥的渠道才会对用户可用</span></div>
       <div><label>对外访问地址</label><input name="public_url" value="${esc(pay.public_url || '')}" placeholder="https://frp.example.com"></div>
-      <div><label>积分兑换比例</label><input name="points_per_yuan" type="number" value="${Number(pay.points_per_yuan || 10)}" min="1" max="10000"><span class="muted small">1 元 = N 积分</span></div>
+      <div><label>积分兑换比例</label><input name="points_per_yuan" type="number" value="${Number(pay.points_per_yuan || 1)}" min="1" max="10000"><span class="muted small">1 元 = N 积分</span></div>
       <div><label>支付宝 App ID</label><input name="alipay_app_id" value="${esc(pay.alipay_app_id || '')}" placeholder="2021000000000000"></div>
       <div><label>支付宝网关</label><input name="alipay_gateway" value="${esc(pay.alipay_gateway || 'https://openapi.alipay.com/gateway.do')}"></div>
       <div class="span-2"><label>支付宝应用私钥</label><textarea name="alipay_private_key" rows="2" placeholder="${pay.alipay_configured ? '已设置，留空不修改' : '-----BEGIN PRIVATE KEY-----'}"></textarea></div>
