@@ -976,7 +976,7 @@ async function loadPlans(){
       <td>${o.kind === 'points' ? '+' + o.points + ' 积分' : '-' + o.points + ' 积分'}</td>
       <td><span class="status-badge ${o.status === 'paid' ? 'ok' : (o.status === 'pending' ? '' : 'bad')}"><i></i>${statusText[o.status] || esc(o.status)}</span></td>
       <td>${fmtTs(o.created_at)}</td>
-      <td>${o.status === 'pending' ? `<button type="button" class="secondary" onclick="resumePay('${esc(o.order_no)}')">继续支付</button>` : '-'}</td>
+      <td class="actions node-actions">${o.status === 'pending' ? `<button type="button" class="node-action" onclick="resumePay('${esc(o.order_no)}')">继续支付</button>` : '<span class="muted small">—</span>'}</td>
     </tr>`).join('') || '<tr><td colspan="7" class="muted">暂无订单</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">PLANS</span><h1>购买套餐</h1><p>使用积分购买套餐，购买后自动开通端口与有效期。</p></div><div class="ov-head-badge"><span>我的积分</span><b>${data.balance}</b></div></div>
@@ -1935,7 +1935,7 @@ async function loadAdmin(section=currentAdminSection){
       <td>${kind === 'renew' ? `+${k.user_expires_days} 天` : (isRegister ? (k.user_expires_days === 0 ? '永不过期' : `${k.user_expires_days} 天`) : '-')}</td>
       <td>${esc(k.expires_text)} ${k.expired ? '<span class="bad">已过期</span>' : ''}</td>
       <td>${k.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
-      <td class="actions"><button onclick="copyText('${k.key}')">复制</button><button onclick="inviteToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button class="danger" onclick="inviteDelete(${k.id})">删除</button></td>
+      <td class="actions node-actions"><button class="node-action" onclick="copyText('${k.key}')">复制</button><button class="node-action" onclick="inviteToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button class="node-action node-action-danger" onclick="inviteDelete(${k.id})">删除</button></td>
     </tr>`;
   }).join('') || emptyRow(11, '还没有密钥');
   const logRows = logsSlice.map((l, i) => `
@@ -1947,7 +1947,7 @@ async function loadAdmin(section=currentAdminSection){
       <td>${k.machine_id ? `<code class="token">${esc(k.machine_id)}</code>` : '未绑定'}</td>
       <td>${esc(k.expires_text)} ${k.expired ? '<span class="bad">已过期</span>' : ''}</td>
       <td>${k.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
-      <td class="actions"><button onclick="copyText('${k.license_key}')">复制</button><button onclick="softwareLicenseToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button onclick="softwareLicenseUnbind(${k.id})">解绑</button></td>
+      <td class="actions node-actions"><button class="node-action" onclick="copyText('${k.license_key}')">复制</button><button class="node-action" onclick="softwareLicenseToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button class="node-action" onclick="softwareLicenseUnbind(${k.id})">解绑</button></td>
     </tr>`).join('') || emptyRow(8, '还没有软件授权码');
   const adminNodeOptions = nodeOptions((data.nodes || []).filter(n => n.active));
   const nodeHtml = `
@@ -1996,7 +1996,7 @@ async function loadAdmin(section=currentAdminSection){
       <td>${p.duration_days ? p.duration_days + ' 天' : '不限期'}</td>
       <td>${p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '不限'} / ${p.bandwidth_limit_mbs ? p.bandwidth_limit_mbs + ' MB/s' : '不限'}</td>
       <td><span class="status-badge ${p.active ? 'ok' : 'bad'}"><i></i>${p.active ? '上架' : '下架'}</span></td>
-      <td class="row-actions"><button type="button" class="secondary" onclick="editPlan(${p.id})">编辑</button><button type="button" class="secondary" onclick="planToggle(${p.id})">${p.active ? '下架' : '上架'}</button><button type="button" class="danger" onclick="planDelete(${p.id})">删除</button></td>
+      <td class="actions node-actions"><button type="button" class="node-action" onclick="editPlan(${p.id})">编辑</button><button type="button" class="node-action" onclick="planToggle(${p.id})">${p.active ? '下架' : '上架'}</button><button type="button" class="node-action node-action-danger" onclick="planDelete(${p.id})">删除</button></td>
     </tr>`).join('') || '<tr><td colspan="9" class="muted">还没有套餐，先在上方创建</td></tr>';
   const orderStatusText = {pending:'待支付', paid:'已支付', cancelled:'已取消', expired:'已过期', refunded:'已退款'};
   const orderRows = orderList.map((o, i) => `<tr>
@@ -2010,7 +2010,7 @@ async function loadAdmin(section=currentAdminSection){
       <td><span class="status-badge ${o.status === 'paid' ? 'ok' : (o.status === 'pending' ? '' : 'bad')}"><i></i>${orderStatusText[o.status] || esc(o.status)}</span></td>
       <td>${esc(o.provider || '-')}</td>
       <td>${fmtTs(o.created_at)}</td>
-      <td>${o.status === 'pending' ? `<button type="button" class="secondary" onclick="orderComplete('${esc(o.order_no)}')">手动开通</button>` : '-'}</td>
+      <td class="actions node-actions">${o.status === 'pending' ? `<button type="button" class="node-action" onclick="orderComplete('${esc(o.order_no)}')">手动开通</button>` : '<span class="muted small">—</span>'}</td>
     </tr>`).join('') || '<tr><td colspan="11" class="muted">暂无订单</td></tr>';
   const rkRows = (data.recharge_keys || []).map((k, i) => `<tr>
       <td>${i + 1}</td>
@@ -2019,7 +2019,7 @@ async function loadAdmin(section=currentAdminSection){
       <td>${esc(k.note || '—')}</td>
       <td>${k.used_by ? '<span class="bad">已使用</span>' : (k.active ? '<span class="ok">可用</span>' : '<span class="bad">停用</span>')}</td>
       <td>${fmtTs(k.created_at)}</td>
-      <td class="row-actions">${k.used_by ? '-' : `<button type="button" class="secondary" onclick="rechargeKeyToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button type="button" class="danger" onclick="rechargeKeyDelete(${k.id})">删除</button>`}</td>
+      <td class="actions node-actions">${k.used_by ? '<span class="muted small">已使用</span>' : `<button type="button" class="node-action" onclick="rechargeKeyToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button type="button" class="node-action node-action-danger" onclick="rechargeKeyDelete(${k.id})">删除</button>`}</td>
     </tr>`).join('') || '<tr><td colspan="7" class="muted">还没有充值密钥</td></tr>';
   const ordersHtml = `
     <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}订单</h2><p>最近 100 条；待支付订单可手动开通</p></div><span class="section-count">已支付 ${orderList.filter(o => o.status === 'paid').length} / 共 ${orderList.length}</span></div>
@@ -2309,7 +2309,7 @@ function renderRiskResult(data){
       <td>${esc(m.region || '-')} / ${esc(m.node_name || '-')}</td><td>${esc(m.port)}</td><td>${esc(m.username || '未分配')}</td>
       <td>${m.active === 1 ? '<span class="ok">启用</span>' : (m.username ? '<span class="bad">停用</span>' : '-')}</td>
       <td>${esc(m.tunnel_name || '-')}</td><td>${esc(m.proxy_type || '-')}</td><td>${m.local_ip ? `${esc(m.local_ip)}:${esc(m.local_port)}` : '-'}</td>
-      <td>${m.user_id ? `<button class="danger" onclick="banUser(${m.user_id})">封禁用户</button>` : '-'}</td>
+      <td class="actions node-actions">${m.user_id ? `<button class="node-action node-action-danger" onclick="banUser(${m.user_id})">封禁用户</button>` : '<span class="muted small">—</span>'}</td>
     </tr>`).join('') || emptyRow(8, '没有查到该端口');
   const logRows = logs.map(l => `<tr><td>${esc(l.event)}</td><td>${esc(l.username || '-')}</td><td>${esc(l.detail || '')}</td><td>${fmtTs(l.created_at)}</td></tr>`).join('') || emptyRow(4, '该端口暂无日志');
   box.innerHTML = `
