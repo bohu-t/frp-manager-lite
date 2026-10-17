@@ -1601,3 +1601,18 @@ html[data-theme="dark"] .node-card.is-current{background:#1b2b45;border-color:#3
 html[data-theme="dark"] .node-card-title strong,html[data-theme="dark"] .node-info-line strong{color:#f1f5f9}
 html[data-theme="dark"] .node-pool-track{background:#0f172a}
 @media(max-width:760px){.node-card{padding:14px}}
+
+/* ---- 套餐购买 ---- */
+.plan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
+.plan-card{position:relative;display:flex;flex-direction:column;gap:12px;padding:20px;border:1px solid var(--border);border-radius:16px;background:var(--card);transition:transform .18s ease,box-shadow .18s ease}
+.plan-card:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(15,35,70,.12)}
+.plan-card-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.plan-card-head h3{margin:0;font-size:17px;font-weight:600}
+.plan-price{font-size:22px;font-weight:700;color:var(--accent)}
+.plan-meta{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.plan-meta li{display:flex;justify-content:space-between;gap:12px;font-size:13px;color:var(--muted)}
+.plan-meta li b{color:var(--text-strong);font-weight:600}
+.plan-note{margin:0;font-size:12px;color:var(--muted);line-height:1.6}
+.plan-buy{margin-top:auto;width:100%;padding:10px 14px;border:0;border-radius:10px;background:var(--accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer}
+.plan-buy:disabled{opacity:.55;cursor:not-allowed}
+.plan-buy:not(:disabled):hover{filter:brightness(1.06)}

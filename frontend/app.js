@@ -692,9 +692,9 @@ function appSidebarHtml(kind='dashboard'){
   const isAdmin = currentUser?.role === 'admin';
   const username = currentUser?.username || '用户';
   const items = isAdmin ? [
-    ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','key','注册密钥','keys'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
+    ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','plan','套餐','plans'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
   ] : [
-    ['dashboard','home','概览'],['dashboard-nodes','node','节点'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
+    ['dashboard','home','概览'],['dashboard-nodes','node','节点'],['dashboard-plans','license','套餐'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
   ];
   const links = items.map(([action, icon, label, section]) => {
     const active = kind === action || (section && kind === section) ? ' active' : '';
@@ -738,7 +738,7 @@ function setNav(){
   const isAdmin = currentUser.role === 'admin';
   const adminNav = isAdmin && !licenseRequired ? [
     navButton('用户', 'admin', 'secondary', 'users'),
-    navButton('密钥', 'admin', 'secondary', 'keys'),
+    navButton('套餐', 'admin', 'secondary', 'plans'),
     navButton('新增节点', 'admin', 'secondary', 'nodes'),
     navButton('节点健康', 'admin-health', 'secondary', 'health'),
     navButton('映射监控', 'admin-proxies', 'secondary', 'proxies'),
@@ -807,6 +807,7 @@ app.addEventListener('click', async (e) => {
     if(action === 'dashboard-config') return loadDashboard('config');
     if(action === 'dashboard-editor') return loadDashboard('editor');
     if(action === 'dashboard-profile') return loadDashboard('profile');
+    if(action === 'dashboard-plans') return loadPlans();
     if(action === 'admin-dashboard') return loadAdminDashboard();
     if(action === 'admin-settings') return loadAdminSettings();
     if(action === 'admin-proxies') return loadAdminProxies();
@@ -933,6 +934,69 @@ async function renderRegister(){
   };
 }
 
+
+async function loadPlans(){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
+  let data;
+  try{
+    const [plansRes, ordersRes] = await Promise.all([api('/api/plans'), api('/api/user/orders').catch(() => ({orders:[], payment:{}}))]);
+    data = {plans: plansRes.plans || [], payment: plansRes.payment || {}, orders: ordersRes.orders || []};
+  }catch(err){
+    if(err.message === 'unauthorized') return renderLogin();
+    show(err.message, true);
+    return;
+  }
+  const payment = data.payment || {};
+  const providerName = {alipay:'支付宝', wechat:'微信支付', mock:'测试支付'}[payment.provider] || '未配置';
+  const payReady = !!payment.ready;
+  const cards = (data.plans || []).map(p => `
+    <article class="plan-card">
+      <div class="plan-card-head"><h3>${esc(p.name)}</h3><span class="plan-price">¥${p.price_text}</span></div>
+      <ul class="plan-meta">
+        <li><span>端口数</span><b>${p.max_ports}</b></li>
+        <li><span>有效期</span><b>${p.duration_days ? p.duration_days + ' 天' : '不限期'}</b></li>
+        <li><span>流量上限</span><b>${p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '不限'}</b></li>
+        <li><span>速率上限</span><b>${p.bandwidth_limit_mbs ? p.bandwidth_limit_mbs + ' MB/s' : '不限'}</b></li>
+      </ul>
+      ${p.note ? `<p class="plan-note">${esc(p.note)}</p>` : ''}
+      <button type="button" class="plan-buy" onclick="buyPlan(${p.id})" ${payReady ? '' : 'disabled'}>${payReady ? '立即购买' : '支付未配置'}</button>
+    </article>`).join('') || '<p class="muted">管理员还没有上架套餐。</p>';
+  const statusText = {pending:'待支付', paid:'已支付', cancelled:'已取消', expired:'已过期', refunded:'已退款'};
+  const orderRows = (data.orders || []).map(o => `<tr>
+      <td>${esc(o.order_no)}</td>
+      <td>${esc(o.plan_name)}</td>
+      <td>¥${o.amount_text}</td>
+      <td><span class="status-badge ${o.status === 'paid' ? 'ok' : (o.status === 'pending' ? '' : 'bad')}"><i></i>${statusText[o.status] || esc(o.status)}</span></td>
+      <td>${fmtTs(o.created_at)}</td>
+      <td>${o.status === 'pending' ? `<button type="button" class="secondary" onclick="resumePay('${esc(o.order_no)}')">继续支付</button>` : '-'}</td>
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">暂无订单</td></tr>';
+  app.innerHTML = appLayoutHtml(`
+    <div class="ov-page-head"><div><span class="section-kicker">PLANS</span><h1>套餐</h1><p>选择适合你的套餐，支付成功后自动开通端口与有效期。</p></div><div class="ov-head-badge"><span>支付方式</span><b>${esc(providerName)}</b></div></div>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}可选套餐</h2><p>共 ${(data.plans || []).length} 个套餐</p></div></div><div class="plan-grid">${cards}</div></section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}我的订单</h2><p>最近 50 条</p></div></div><table><thead><tr><th>订单号</th><th>套餐</th><th>金额</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></section>
+  `, 'dashboard-plans', '套餐');
+}
+
+async function buyPlan(planId){
+  try{
+    const r = await api('/api/user/orders', {method:'POST', body:{plan_id:planId}});
+    const order = r.order || {};
+    if(order.status === 'paid'){ show('已开通，套餐已生效'); return loadDashboard(); }
+    if(!order.pay_url){ show('下单失败：没有支付链接', true); return; }
+    window.location.href = order.pay_url;
+  }catch(err){ show(err.message, true); }
+}
+
+async function resumePay(orderNo){
+  try{
+    const r = await api('/api/orders/status?order_no=' + encodeURIComponent(orderNo));
+    const order = r.order || {};
+    if(order.status === 'paid'){ show('订单已支付'); return loadPlans(); }
+    if(!order.pay_url){ show('没有可用的支付链接，请联系管理员', true); return; }
+    window.location.href = order.pay_url;
+  }catch(err){ show(err.message, true); }
+}
+
 async function renderForgotPassword(){
   clearAdminDashboardTimer();
   currentUser = null; setNav(); hideFlash();
@@ -1019,7 +1083,29 @@ async function loadMe(){
       if(softwareLicense && softwareLicense.required && !softwareLicense.licensed && currentUser.role === 'admin') renderLicenseActivate();
       else await loadDashboard();
     }else renderLogin();
+    if(currentUser) await handlePayReturn();
   }catch{ renderLogin(); }
+}
+
+async function handlePayReturn(){
+  const qp = new URLSearchParams(location.search);
+  const pay = qp.get('pay');
+  if(!pay) return;
+  const orderNo = qp.get('order') || '';
+  history.replaceState(null, '', location.pathname);
+  if(currentUser && currentUser.role === 'admin') return;
+  if(pay === 'success'){
+    show('支付成功，套餐已开通');
+    return loadPlans();
+  }
+  if(orderNo){
+    try{
+      const r = await api('/api/orders/status?order_no=' + encodeURIComponent(orderNo));
+      if(r.order && r.order.status === 'paid'){ show('支付成功，套餐已开通'); return loadPlans(); }
+    }catch(e){}
+  }
+  show('支付结果确认中，如已扣款请稍后刷新订单', true);
+  return loadPlans();
 }
 
 function renderLicenseActivatePublic(){
@@ -1668,7 +1754,7 @@ async function loadAdminProxies(page=adminProxyPage){
 async function loadAdmin(section=currentAdminSection){
   clearAdminDashboardTimer();
   hideFlash();
-  currentAdminSection = ['users','keys','nodes','risk'].includes(section) ? section : currentAdminSection;
+  currentAdminSection = ['users','plans','nodes','risk'].includes(section) ? section : currentAdminSection;
   setNav();
   let data;
   try{ data = await api('/api/admin/overview'); }
@@ -1788,25 +1874,53 @@ async function loadAdmin(section=currentAdminSection){
     </form>
     <div id="nodeDeployScriptBox" class="deploy-script-item hidden" style="margin-top:14px"><div class="label">一键部署脚本（复制到新节点机器上执行）</div><div class="copy-line"><code class="token deploy-token" id="nodeDeployScriptCmd"></code><button type="button" class="secondary" onclick="copyNodeDeployScript()">复制命令</button></div><p class="muted small">脚本从公开仓库拉取，不依赖本面板；执行时会把该节点注册到当前面板（地址、密钥与节点信息已按上方表单预填）。</p></div></section>
     <section class="card" id="nodes"><div class="section-title"><h2>${stIcon('node')}节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>ID</th><th>地区</th><th>节点</th><th>frps</th><th>端口池</th><th>剩余</th><th>状态</th><th>套餐/单价</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table>${paginationHtml('nodes', nodesPage, (data.nodes || []).length, ADMIN_PAGE_SIZE)}</section>`;
-  const keysHtml = `
-    <section class="card" id="keys"><div class="section-title"><h2>${stIcon('key')}生成注册密钥</h2><p>注册密钥固定单次使用，适合批量发货</p></div><form id="inviteForm" class="grid">
-      <input type="hidden" name="kind" value="register">
-      <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
-      <div><label>备注</label><input name="note" placeholder="订单号/套餐名"></div>
-      <div><label>注册后端口数</label><input name="max_ports" type="number" value="5" min="1" max="100"></div>
-      <div><label>今日流量上限 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
-      <div><label>速率策略 MB/s</label><input name="bandwidth_limit_mbs" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限；仅后台可见</span></div>
-      <div><label>注册后账号有效期天数</label><input name="user_expires_days" type="number" value="30" min="0" max="3650"></div>
-      <div style="align-self:end"><button>生成密钥</button></div>
+  const plansList = data.plans || [];
+  const orderList = data.orders || [];
+  window.__fmlPlans = plansList;
+  const nodeName = (id) => {
+    const n = (data.nodes || []).find(x => Number(x.id) === Number(id));
+    return n ? `${n.region} / ${n.name}` : (id ? ('#' + id) : '自动分配');
+  };
+  const planRows = plansList.map(p => `<tr>
+      <td>${p.id}</td>
+      <td>${esc(p.name)}</td>
+      <td>¥${p.price_text}</td>
+      <td>${p.max_ports}</td>
+      <td>${p.duration_days ? p.duration_days + ' 天' : '不限期'}</td>
+      <td>${p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '不限'} / ${p.bandwidth_limit_mbs ? p.bandwidth_limit_mbs + ' MB/s' : '不限'}</td>
+      <td>${esc(nodeName(p.node_id))}</td>
+      <td><span class="status-badge ${p.active ? 'ok' : 'bad'}"><i></i>${p.active ? '上架' : '下架'}</span></td>
+      <td class="row-actions"><button type="button" class="secondary" onclick="editPlan(${p.id})">编辑</button><button type="button" class="secondary" onclick="planToggle(${p.id})">${p.active ? '下架' : '上架'}</button><button type="button" class="danger" onclick="planDelete(${p.id})">删除</button></td>
+    </tr>`).join('') || '<tr><td colspan="9" class="muted">还没有套餐，先在上方创建</td></tr>';
+  const orderStatusText = {pending:'待支付', paid:'已支付', cancelled:'已取消', expired:'已过期', refunded:'已退款'};
+  const orderRows = orderList.map(o => `<tr>
+      <td>${esc(o.order_no)}</td>
+      <td>${esc(o.username)}</td>
+      <td>${esc(o.plan_name)}</td>
+      <td>¥${o.amount_text}</td>
+      <td><span class="status-badge ${o.status === 'paid' ? 'ok' : (o.status === 'pending' ? '' : 'bad')}"><i></i>${orderStatusText[o.status] || esc(o.status)}</span></td>
+      <td>${esc(o.provider || '-')}</td>
+      <td>${fmtTs(o.created_at)}</td>
+      <td>${o.status === 'pending' ? `<button type="button" class="secondary" onclick="orderComplete('${esc(o.order_no)}')">手动开通</button>` : '-'}</td>
+    </tr>`).join('') || '<tr><td colspan="8" class="muted">暂无订单</td></tr>';
+  const plansHtml = `
+    <section class="card" id="plans"><div class="section-title"><h2>${stIcon('license')}套餐模板</h2><p>用户按套餐在线购买，支付成功后自动分配端口与有效期</p></div>
+    <form id="planForm" class="grid">
+      <input type="hidden" name="id" value="">
+      <div><label>套餐名称</label><input name="name" placeholder="例如 入门版 / 专业版" required></div>
+      <div><label>价格（元）</label><input name="price" type="number" value="9.90" min="0" step="0.01"></div>
+      <div><label>端口数</label><input name="max_ports" type="number" value="5" min="0" max="100"></div>
+      <div><label>有效期（天）</label><input name="duration_days" type="number" value="30" min="0" max="3650"><span class="muted small">0 表示不限期</span></div>
+      <div><label>流量上限 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
+      <div><label>速率 MB/s</label><input name="bandwidth_limit_mbs" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
+      <div><label>适用节点</label><select name="node_id"><option value="0">自动分配</option>${nodeOptions(data.nodes || [])}</select></div>
+      <div><label>排序</label><input name="sort_order" type="number" value="0"><span class="muted small">数字越小越靠前</span></div>
+      <div><label>备注</label><input name="note" placeholder="套餐说明，展示给用户"></div>
+      <div><label>状态</label><select name="active"><option value="1">上架</option><option value="0">下架</option></select></div>
+      <div class="form-actions" style="grid-column:1/-1"><button>保存套餐</button><button type="button" class="secondary" onclick="resetPlanForm()">清空</button></div>
     </form></section>
-    <section class="card" id="renew-keys"><div class="section-title"><h2>${stIcon('key')}生成续期密钥</h2><p>用户凭续期密钥在「个人中心 · 账号续期」自助延长账号有效期</p></div><form id="renewKeyForm" class="grid">
-      <input type="hidden" name="kind" value="renew">
-      <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
-      <div><label>备注</label><input name="note" placeholder="订单号/续期说明"></div>
-      <div><label>续期天数</label><input name="user_expires_days" type="number" value="30" min="1" max="3650"><span class="muted small">用户使用后延长这么多天</span></div>
-      <div style="grid-column:1/-1;display:flex;justify-content:flex-start"><button>生成续期密钥</button></div>
-    </form></section>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('key')}密钥列表</h2><p>注册 / 续期密钥，单次使用</p></div><a class="btn" href="/admin/export/invite-keys.csv">导出未使用密钥 CSV</a></div><table><thead><tr><th>ID</th><th>类型</th><th>密钥</th><th>备注</th><th>使用</th><th>端口</th><th>流量/速率策略</th><th>有效期/续期</th><th>密钥到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table>${paginationHtml('keys', keysPage, (data.invite_keys || []).length, ADMIN_PAGE_SIZE)}</section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>ID</th><th>名称</th><th>价格</th><th>端口</th><th>有效期</th><th>流量 / 速率</th><th>节点</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}订单</h2><p>最近 100 条；待支付订单可手动开通</p></div><span class="section-count">已支付 ${orderList.filter(o => o.status === 'paid').length}</span></div><table><thead><tr><th>订单号</th><th>用户</th><th>套餐</th><th>金额</th><th>状态</th><th>支付方式</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></section>
     ${data.software_license_authority ? `<section class="card" id="software-licenses"><div class="section-title"><h2>${stIcon('license')}服务器软件授权码</h2><p>卖家后台使用：先批量生成授权码发给客户；客户输入授权码后自动绑定他的部署服务器。</p></div><form id="softwareLicenseForm" class="grid">
       <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
       <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
@@ -1883,8 +1997,8 @@ async function loadAdmin(section=currentAdminSection){
       <div id="riskResult" class="risk-result"></div>
     </section>
     <section class="card"><div class="section-title"><h2>${stIcon('log')}审计日志</h2><p>最近 80 条关键操作和风控事件</p></div><table><thead><tr><th>ID</th><th>事件</th><th>用户</th><th>端口</th><th>协议</th><th>详情</th><th>时间</th></tr></thead><tbody>${logRows}</tbody></table>${paginationHtml('risk', riskPage, (data.logs || []).length, ADMIN_PAGE_SIZE)}</section>`;
-  const sectionHtml = {users: usersHtml, keys: keysHtml, nodes: nodeHtml, risk: riskHtml}[currentAdminSection] || usersHtml;
-  const sectionTitles = {users:'用户管理', keys:'注册密钥', nodes:'新增节点', risk:'风控审计'};
+  const sectionHtml = {users: usersHtml, plans: plansHtml, nodes: nodeHtml, risk: riskHtml}[currentAdminSection] || usersHtml;
+  const sectionTitles = {users:'用户管理', plans:'套餐管理', nodes:'新增节点', risk:'风控审计'};
   app.innerHTML = appLayoutHtml(sectionHtml, currentAdminSection, sectionTitles[currentAdminSection] || '管理台');
   const adminUserFilterForm = document.querySelector('#adminUserFilterForm');
   if(adminUserFilterForm){
@@ -1986,6 +2100,18 @@ async function loadAdmin(section=currentAdminSection){
         if(keys.length){ await copyText(keys.join('\n')); }
         await loadAdmin();
         show(r.message || '续期密钥已生成');
+      }catch(err){ show(err.message, true); }
+    };
+  }
+  const planForm = document.querySelector('#planForm');
+  if(planForm){
+    planForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(e.target));
+      try{
+        const r = await api('/api/admin/plans/save', {method:'POST', body});
+        await loadAdmin();
+        show(r.message || '套餐已保存');
       }catch(err){ show(err.message, true); }
     };
   }
@@ -2278,6 +2404,40 @@ async function submitAdminCred(e){
   }catch(err){ show(err.message, true); }
 }
 async function adminDelete(id){ if(confirm('删除用户会释放端口并删除隧道，确定？')) await api('/api/admin/users/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('用户已删除'))).catch(e=>show(e.message,true)); }
+function resetPlanForm(){
+  const f = document.querySelector('#planForm');
+  if(!f) return;
+  f.reset();
+  f.elements.id.value = '';
+  f.elements.price.value = '9.90';
+  f.elements.max_ports.value = '5';
+  f.elements.duration_days.value = '30';
+  f.elements.traffic_limit_gb.value = '0';
+  f.elements.bandwidth_limit_mbs.value = '0';
+  f.elements.sort_order.value = '0';
+  f.elements.active.value = '1';
+}
+function editPlan(id){
+  const f = document.querySelector('#planForm');
+  const p = (window.__fmlPlans || []).find(x => Number(x.id) === Number(id));
+  if(!f || !p) return;
+  f.elements.id.value = p.id;
+  f.elements.name.value = p.name;
+  f.elements.price.value = p.price_text;
+  f.elements.max_ports.value = p.max_ports;
+  f.elements.duration_days.value = p.duration_days;
+  f.elements.traffic_limit_gb.value = p.traffic_limit_gb;
+  f.elements.bandwidth_limit_mbs.value = p.bandwidth_limit_mbs;
+  f.elements.node_id.value = p.node_id || 0;
+  f.elements.sort_order.value = p.sort_order;
+  f.elements.note.value = p.note;
+  f.elements.active.value = p.active ? '1' : '0';
+  f.scrollIntoView({behavior:'smooth', block:'center'});
+}
+async function planToggle(id){ await api('/api/admin/plans/toggle', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('套餐状态已更新'))).catch(e=>show(e.message,true)); }
+async function planDelete(id){ if(confirm('删除这个套餐？已产生的订单不受影响。')) await api('/api/admin/plans/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('套餐已删除'))).catch(e=>show(e.message,true)); }
+async function orderComplete(orderNo){ if(confirm('确认手动开通该订单？将立即分配端口并延长有效期。')) await api('/api/admin/orders/complete', {method:'POST', body:{order_no:orderNo}}).then(r=>loadAdmin().then(()=>show(r.message || '已开通'))).catch(e=>show(e.message,true)); }
+
 async function inviteToggle(id){ await api('/api/admin/invite-keys/toggle', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥状态已更新'))).catch(e=>show(e.message,true)); }
 async function inviteDelete(id){ if(confirm('删除这个注册密钥？')) await api('/api/admin/invite-keys/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥已删除'))).catch(e=>show(e.message,true)); }
 async function softwareLicenseToggle(id){ await api('/api/admin/software-licenses/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
@@ -2533,6 +2693,28 @@ function adminOpsCardHtml(){
   </section>`;
 }
 
+function adminPaymentCardHtml(pay){
+  pay = pay || {};
+  const provider = pay.provider || '';
+  const opt = (v, label) => `<option value="${v}"${provider === v ? ' selected' : ''}>${label}</option>`;
+  const status = pay.ready ? '<span class="status-badge ok"><i></i>已就绪</span>' : '<span class="status-badge bad"><i></i>未就绪</span>';
+  return `<section class="card admin-payment-card">
+    <div class="settings-card-head"><span class="settings-card-icon icon-green">${stIcon('license')}</span><div><h2>支付设置</h2><p>配置在线支付渠道，用户购买套餐时使用。</p></div>${status}</div>
+    <form id="paymentForm" class="settings-form form-grid">
+      <div><label>支付渠道</label><select name="provider">${opt('', '关闭在线支付')}${opt('alipay', '支付宝')}${opt('wechat', '微信支付')}${opt('mock', '测试模式（不收款）')}</select></div>
+      <div><label>对外访问地址</label><input name="public_url" value="${esc(pay.public_url || '')}" placeholder="https://frp.example.com"><span class="muted small">用于支付回调，必须是公网可访问的 https 地址</span></div>
+      <div class="span-2"><label>支付宝 App ID</label><input name="alipay_app_id" value="${esc(pay.alipay_app_id || '')}" placeholder="2021000000000000"></div>
+      <div class="span-2"><label>支付宝应用私钥</label><textarea name="alipay_private_key" rows="3" placeholder="${pay.alipay_configured ? '已设置，留空不修改' : '-----BEGIN PRIVATE KEY-----'}"></textarea></div>
+      <div class="span-2"><label>支付宝公钥</label><textarea name="alipay_public_key" rows="3" placeholder="${pay.alipay_configured ? '已设置，留空不修改' : '-----BEGIN PUBLIC KEY-----'}"></textarea></div>
+      <div class="span-2"><label>支付宝网关</label><input name="alipay_gateway" value="${esc(pay.alipay_gateway || 'https://openapi.alipay.com/gateway.do')}"><span class="muted small">沙箱环境填 https://openapi-sandbox.dl.alipaydev.com/gateway.do</span></div>
+      <div><label>微信 AppID</label><input name="wechat_appid" value="${esc(pay.wechat_appid || '')}" placeholder="wx0000000000000000"></div>
+      <div><label>微信商户号</label><input name="wechat_mch_id" value="${esc(pay.wechat_mch_id || '')}" placeholder="1600000000"></div>
+      <div class="span-2"><label>微信支付 API 密钥</label><input name="wechat_api_key" type="password" placeholder="${pay.wechat_configured ? '已设置，留空不修改' : '32 位 API 密钥'}"></div>
+      <div class="form-actions span-2"><button type="submit">保存支付设置</button></div>
+    </form>
+  </section>`;
+}
+
 function adminSmtpCardHtml(smtp){
   return `<section class="card admin-smtp-card">
     <div class="settings-card-head"><span class="settings-card-icon icon-blue">${stIcon('mail')}</span><div><h2>邮件设置</h2><p>配置 SMTP 服务器信息，用于发送通知和邮件。</p></div><span class="status-badge ${smtp.configured ? 'ok' : 'bad'}"><i></i>${smtp.configured ? '已配置' : '未配置'}</span></div>
@@ -2726,6 +2908,17 @@ function wireAdminSettingsForms(){
       }catch(err){ show(err.message, true); }
     };
   }
+  const paymentForm = document.querySelector('#paymentForm');
+  if(paymentForm){
+    paymentForm.onsubmit = async (e) => {
+      e.preventDefault();
+      try{
+        const r = await api('/api/admin/payment-config', {method:'POST', body:Object.fromEntries(new FormData(e.target))});
+        await reloadAdminCurrentPage();
+        show(r.message || '支付设置已保存');
+      }catch(err){ show(err.message, true); }
+    };
+  }
   const notifyForm = document.querySelector('#notifyForm');
   if(notifyForm){
     const typeSel = document.querySelector('#notifyTypeSelect');
@@ -2785,7 +2978,7 @@ async function loadAdminSettings(){
   app.innerHTML = appLayoutHtml(`
     <div class="admin-settings-grid">
       <div class="admin-settings-col">${adminNotifyCardHtml(notify)}${adminBackupCardHtml(r2, r2Status, r2Source)}</div>
-      <div class="admin-settings-col">${adminSmtpCardHtml(smtp)}${adminOpsCardHtml()}${adminR2CardHtml(r2, r2Status, r2Source)}</div>
+      <div class="admin-settings-col">${adminPaymentCardHtml(data.payment)}${adminSmtpCardHtml(smtp)}${adminOpsCardHtml()}${adminR2CardHtml(r2, r2Status, r2Source)}</div>
     </div>
     ${adminFrpcModalHtml(frpcUserOptions)}
     ${adminPwdModalHtml()}
@@ -2873,7 +3066,7 @@ async function loadAdminDashboard(auto=false){
         <div class="section-title"><div><div class="section-kicker">QUICK ACTIONS</div><h2>${stIcon('bolt')}快捷操作</h2></div></div>
         <div class="quick-actions-grid">
           <button class="quick-action" onclick="loadAdmin('users')"><span class="quick-action-icon">${QICON_USER}</span><b>用户管理</b><small>账号与到期</small></button>
-          <button class="quick-action" onclick="loadAdmin('keys')"><span class="quick-action-icon">${QICON_KEY}</span><b>注册密钥</b><small>邀请注册</small></button>
+          <button class="quick-action" onclick="loadAdmin('plans')"><span class="quick-action-icon">${QICON_KEY}</span><b>套餐管理</b><small>模板与订单</small></button>
           <button class="quick-action" onclick="loadAdmin('nodes')"><span class="quick-action-icon">${QICON_NODE}</span><b>节点管理</b><small>frps 接入</small></button>
           <button class="quick-action" onclick="loadAdmin('health')"><span class="quick-action-icon">${QICON_SERVER}</span><b>节点健康</b><small>连通性检查</small></button>
           <button class="quick-action" onclick="loadAdminProxies()"><span class="quick-action-icon">${QICON_TUNNEL}</span><b>映射监控</b><small>隧道状态</small></button>
@@ -2892,7 +3085,7 @@ async function loadAdminDashboard(auto=false){
         <div class="admin-biz-list">
           <div><span>隧道总数</span><b>${data.tunnel_count || 0}</b></div>
           <div><span>普通用户</span><b>${userStats.total || 0}</b></div>
-          <div><span>注册密钥</span><b>${data.invite_key_count || 0}</b></div>
+          <div><span>套餐订单</span><b>${data.order_count || 0}</b></div>
           <div><span>封禁记录</span><b>${data.ban_count || 0}</b></div>
         </div>
       </section>

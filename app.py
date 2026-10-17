@@ -2571,6 +2571,43 @@ def init_db() -> None:
                 value TEXT NOT NULL DEFAULT '',
                 updated_at INTEGER NOT NULL DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                price_cents INTEGER NOT NULL DEFAULT 0,
+                max_ports INTEGER NOT NULL DEFAULT 5,
+                traffic_limit_bytes INTEGER NOT NULL DEFAULT 0,
+                bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0,
+                duration_days INTEGER NOT NULL DEFAULT 30,
+                node_id INTEGER REFERENCES nodes(id) ON DELETE SET NULL,
+                note TEXT NOT NULL DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_no TEXT NOT NULL UNIQUE,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                username TEXT NOT NULL DEFAULT '',
+                plan_id INTEGER REFERENCES plans(id) ON DELETE SET NULL,
+                plan_name TEXT NOT NULL DEFAULT '',
+                amount_cents INTEGER NOT NULL DEFAULT 0,
+                duration_days INTEGER NOT NULL DEFAULT 30,
+                max_ports INTEGER NOT NULL DEFAULT 0,
+                traffic_limit_bytes INTEGER NOT NULL DEFAULT 0,
+                bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0,
+                node_id INTEGER,
+                provider TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                pay_url TEXT NOT NULL DEFAULT '',
+                transaction_id TEXT NOT NULL DEFAULT '',
+                paid_at INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status, created_at);
             """
         )
         default_node_id = ensure_default_node(conn)
@@ -3621,6 +3658,441 @@ def upload_to_r2(object_key: str, body: bytes, content_type: str = "application/
     return object_key
 
 
+
+# ---------------------------------------------------------------------------
+# 套餐 / 订单 / 在线支付
+# ---------------------------------------------------------------------------
+
+SHA256_DIGEST_INFO = bytes.fromhex("3031300d060960864801650304020105000420")
+DEFAULT_ALIPAY_GATEWAY = "https://openapi.alipay.com/gateway.do"
+DEFAULT_WECHAT_GATEWAY = "https://api.mch.weixin.qq.com/pay/unifiedorder"
+
+
+def _pem_to_der(pem: str) -> bytes:
+    lines = [ln.strip() for ln in str(pem or "").strip().splitlines()
+             if ln.strip() and not ln.strip().startswith("-----")]
+    return base64.b64decode("".join(lines))
+
+
+def _der_item(data: bytes, i: int):
+    tag = data[i]
+    i += 1
+    ln = data[i]
+    i += 1
+    if ln & 0x80:
+        n = ln & 0x7F
+        ln = int.from_bytes(data[i:i + n], "big")
+        i += n
+    return tag, data[i:i + ln], i + ln
+
+
+def _der_seq(data: bytes):
+    out = []
+    i = 0
+    while i < len(data):
+        tag, val, i = _der_item(data, i)
+        out.append((tag, val))
+    return out
+
+
+def rsa_private_numbers(pem: str):
+    der = _pem_to_der(pem)
+    _, body, _ = _der_item(der, 0)
+    items = _der_seq(body)
+    # PKCS#8: INTEGER version, SEQUENCE algorithm, OCTET STRING privateKey
+    if len(items) >= 3 and items[1][0] == 0x30 and items[2][0] == 0x04:
+        inner = items[2][1]
+        _, ibody, _ = _der_item(inner, 0)
+        items = _der_seq(ibody)
+    items = items[1:]
+    return (int.from_bytes(items[0][1], "big"),
+            int.from_bytes(items[1][1], "big"),
+            int.from_bytes(items[2][1], "big"))
+
+
+def rsa_public_numbers(pem: str):
+    der = _pem_to_der(pem)
+    _, body, _ = _der_item(der, 0)
+    items = _der_seq(body)
+    if len(items) >= 2 and items[0][0] == 0x30 and items[1][0] == 0x03:
+        bits = items[1][1][1:]
+        _, ibody, _ = _der_item(bits, 0)
+        seq = _der_seq(ibody)
+    else:
+        seq = items
+    return int.from_bytes(seq[0][1], "big"), int.from_bytes(seq[1][1], "big")
+
+
+def rsa_sign_sha256(message: bytes, private_pem: str) -> str:
+    n, _e, d = rsa_private_numbers(private_pem)
+    k = (n.bit_length() + 7) // 8
+    t = SHA256_DIGEST_INFO + hashlib.sha256(message).digest()
+    if k < len(t) + 11:
+        raise ValueError("RSA 私钥长度不足")
+    em = b"\x00\x01" + b"\xff" * (k - len(t) - 3) + b"\x00" + t
+    s = pow(int.from_bytes(em, "big"), d, n)
+    return base64.b64encode(s.to_bytes(k, "big")).decode()
+
+
+def rsa_verify_sha256(message: bytes, signature_b64: str, public_pem: str) -> bool:
+    try:
+        n, e = rsa_public_numbers(public_pem)
+        k = (n.bit_length() + 7) // 8
+        sig = base64.b64decode(signature_b64)
+        if len(sig) > k:
+            return False
+        em = pow(int.from_bytes(sig, "big"), e, n).to_bytes(k, "big")
+        t = SHA256_DIGEST_INFO + hashlib.sha256(message).digest()
+        expected = b"\x00\x01" + b"\xff" * (k - len(t) - 3) + b"\x00" + t
+        return hmac.compare_digest(em, expected)
+    except Exception:
+        return False
+
+
+def payment_config(conn: sqlite3.Connection) -> dict[str, Any]:
+    return {
+        "provider": setting_get(conn, "pay_provider", ""),
+        "public_url": setting_get(conn, "pay_public_url", "").rstrip("/"),
+        "alipay_app_id": setting_get(conn, "alipay_app_id", ""),
+        "alipay_private_key": setting_get(conn, "alipay_private_key", ""),
+        "alipay_public_key": setting_get(conn, "alipay_public_key", ""),
+        "alipay_gateway": setting_get(conn, "alipay_gateway", DEFAULT_ALIPAY_GATEWAY),
+        "wechat_appid": setting_get(conn, "wechat_appid", ""),
+        "wechat_mch_id": setting_get(conn, "wechat_mch_id", ""),
+        "wechat_api_key": setting_get(conn, "wechat_api_key", ""),
+    }
+
+
+def payment_public(cfg: dict[str, Any]) -> dict[str, Any]:
+    provider = cfg.get("provider") or ""
+    ready = False
+    if provider == "mock":
+        ready = True
+    elif provider == "alipay":
+        ready = bool(cfg.get("alipay_app_id") and cfg.get("alipay_private_key") and cfg.get("alipay_public_key"))
+    elif provider == "wechat":
+        ready = bool(cfg.get("wechat_appid") and cfg.get("wechat_mch_id") and cfg.get("wechat_api_key"))
+    return {
+        "provider": provider,
+        "ready": ready,
+        "public_url": cfg.get("public_url", ""),
+        "alipay_app_id": cfg.get("alipay_app_id", ""),
+        "alipay_gateway": cfg.get("alipay_gateway", DEFAULT_ALIPAY_GATEWAY),
+        "wechat_appid": cfg.get("wechat_appid", ""),
+        "wechat_mch_id": cfg.get("wechat_mch_id", ""),
+        "alipay_configured": bool(cfg.get("alipay_app_id") and cfg.get("alipay_private_key") and cfg.get("alipay_public_key")),
+        "wechat_configured": bool(cfg.get("wechat_appid") and cfg.get("wechat_mch_id") and cfg.get("wechat_api_key")),
+    }
+
+
+def plan_public(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": int(row["id"]),
+        "name": row["name"],
+        "price_cents": int(row["price_cents"] or 0),
+        "price_text": f"{int(row['price_cents'] or 0) / 100:.2f}",
+        "max_ports": int(row["max_ports"] or 0),
+        "traffic_limit_bytes": int(row["traffic_limit_bytes"] or 0),
+        "traffic_limit_gb": round(int(row["traffic_limit_bytes"] or 0) / 1024 / 1024 / 1024, 2),
+        "bandwidth_limit_kbps": int(row["bandwidth_limit_kbps"] or 0),
+        "bandwidth_limit_mbs": round(int(row["bandwidth_limit_kbps"] or 0) / 1024, 2),
+        "duration_days": int(row["duration_days"] or 0),
+        "node_id": int(row["node_id"] or 0),
+        "note": row["note"] or "",
+        "active": bool(row["active"]),
+        "sort_order": int(row["sort_order"] or 0),
+        "created_at": int(row["created_at"] or 0),
+    }
+
+
+def list_plans(conn: sqlite3.Connection, active_only: bool = False) -> list[dict[str, Any]]:
+    sql = "SELECT * FROM plans"
+    if active_only:
+        sql += " WHERE active=1"
+    sql += " ORDER BY sort_order, id"
+    return [plan_public(r) for r in conn.execute(sql)]
+
+
+def save_plan(plan_id: int, name: str, price_cents: int, max_ports: int, traffic_limit_bytes: int,
+              bandwidth_limit_kbps: int, duration_days: int, node_id: int, note: str,
+              active: bool, sort_order: int) -> tuple[bool, str]:
+    name = str(name or "").strip()[:60]
+    if not name:
+        return False, "请填写套餐名称"
+    if price_cents < 0 or price_cents > 100_000_000:
+        return False, "价格不合法"
+    if max_ports < 0 or max_ports > 100:
+        return False, "端口数量必须在 0-100 之间"
+    if duration_days < 0 or duration_days > 3650:
+        return False, "有效期必须在 0-3650 天之间"
+    if traffic_limit_bytes < 0 or bandwidth_limit_kbps < 0:
+        return False, "流量/速率限制不能小于 0"
+    node_id = int(node_id or 0)
+    with db() as conn:
+        if node_id and not conn.execute("SELECT 1 FROM nodes WHERE id=?", (node_id,)).fetchone():
+            return False, "所选节点不存在"
+        if plan_id:
+            cur = conn.execute(
+                "UPDATE plans SET name=?, price_cents=?, max_ports=?, traffic_limit_bytes=?, bandwidth_limit_kbps=?, duration_days=?, node_id=?, note=?, active=?, sort_order=? WHERE id=?",
+                (name, price_cents, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days,
+                 node_id or None, str(note or "")[:200], 1 if active else 0, sort_order, plan_id))
+            if cur.rowcount == 0:
+                return False, "套餐不存在"
+        else:
+            conn.execute(
+                "INSERT INTO plans(name, price_cents, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days, node_id, note, active, sort_order, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (name, price_cents, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days,
+                 node_id or None, str(note or "")[:200], 1 if active else 0, sort_order, now()))
+    return True, "套餐已保存"
+
+
+def order_public(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": int(row["id"]),
+        "order_no": row["order_no"],
+        "username": row["username"],
+        "plan_id": int(row["plan_id"] or 0),
+        "plan_name": row["plan_name"],
+        "amount_cents": int(row["amount_cents"] or 0),
+        "amount_text": f"{int(row['amount_cents'] or 0) / 100:.2f}",
+        "duration_days": int(row["duration_days"] or 0),
+        "max_ports": int(row["max_ports"] or 0),
+        "node_id": int(row["node_id"] or 0),
+        "provider": row["provider"] or "",
+        "status": row["status"],
+        "pay_url": row["pay_url"] or "",
+        "paid_at": int(row["paid_at"] or 0),
+        "created_at": int(row["created_at"] or 0),
+    }
+
+
+def new_order_no() -> str:
+    return time.strftime("%Y%m%d%H%M%S") + f"{secrets.randbelow(1000000):06d}"
+
+
+def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool, str]:
+    user = conn.execute("SELECT * FROM users WHERE id=?", (order["user_id"],)).fetchone()
+    if not user:
+        return False, "用户不存在"
+    node_id = int(order["node_id"] or 0) or int(user["node_id"] or 0)
+    if not node_id:
+        row = conn.execute("SELECT id FROM nodes WHERE active=1 ORDER BY id LIMIT 1").fetchone()
+        node_id = int(row["id"]) if row else 0
+    if not node_id:
+        return False, "没有可用节点，请联系管理员"
+    max_ports = int(order["max_ports"] or 0)
+    free_ports = available_ports_for_assignment(conn, node_id, max_ports) if max_ports else []
+    if max_ports and len(free_ports) < max_ports:
+        return False, f"节点端口不足，只剩 {len(free_ports)} 个可用端口"
+    if free_ports:
+        conn.executemany("UPDATE ports SET user_id=? WHERE node_id=? AND port=?",
+                         [(user["id"], node_id, r["port"]) for r in free_ports])
+    duration_days = int(order["duration_days"] or 0)
+    base = int(user["expires_at"] or 0)
+    if base and base < now():
+        base = now()
+    new_expiry = 0 if duration_days <= 0 else (base or now()) + duration_days * 86400
+    conn.execute(
+        "UPDATE users SET node_id=?, max_ports=MAX(max_ports, ?), traffic_limit_bytes=?, bandwidth_limit_kbps=?, expires_at=? WHERE id=?",
+        (node_id, max_ports, int(order["traffic_limit_bytes"] or 0), int(order["bandwidth_limit_kbps"] or 0), new_expiry, user["id"]))
+    return True, "已开通"
+
+
+def mark_order_paid(order_no: str, transaction_id: str = "", provider: str = "") -> tuple[bool, str]:
+    with db() as conn:
+        row = conn.execute("SELECT * FROM orders WHERE order_no=?", (order_no,)).fetchone()
+        if not row:
+            return False, "订单不存在"
+        if row["status"] == "paid":
+            return True, "订单已支付"
+        if row["status"] != "pending":
+            return False, "订单状态不可支付"
+        ok, msg = provision_order(conn, row)
+        if not ok:
+            return False, msg
+        conn.execute(
+            "UPDATE orders SET status='paid', transaction_id=?, provider=CASE WHEN ?='' THEN provider ELSE ? END, paid_at=?, updated_at=? WHERE id=?",
+            (str(transaction_id or ""), provider, provider, now(), now(), row["id"]))
+    audit("order_paid", None, None, None, "", f"订单 {order_no} 支付成功 {transaction_id}")
+    return True, "已开通"
+
+
+def create_order(user: sqlite3.Row, plan_id: int, provider: str) -> tuple[bool, str, dict[str, Any] | None]:
+    with db() as conn:
+        plan = conn.execute("SELECT * FROM plans WHERE id=? AND active=1", (plan_id,)).fetchone()
+        if not plan:
+            return False, "套餐不存在或已下架", None
+        cfg = payment_config(conn)
+    if provider not in ("mock", "alipay", "wechat"):
+        provider = cfg.get("provider") or ""
+    if provider not in ("mock", "alipay", "wechat"):
+        return False, "在线支付未配置，请联系管理员", None
+    if provider == "mock" and not OPEN_REGISTRATION:
+        pass
+    order_no = new_order_no()
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO orders(order_no, user_id, username, plan_id, plan_name, amount_cents, duration_days, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, node_id, provider, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (order_no, user["id"], user["username"], plan["id"], plan["name"], int(plan["price_cents"] or 0),
+             int(plan["duration_days"] or 0), int(plan["max_ports"] or 0), int(plan["traffic_limit_bytes"] or 0),
+             int(plan["bandwidth_limit_kbps"] or 0), int(plan["node_id"] or 0), provider, "pending", now(), now()))
+        order = conn.execute("SELECT * FROM orders WHERE order_no=?", (order_no,)).fetchone()
+    payload = order_public(order)
+    if int(payload["amount_cents"]) <= 0:
+        ok, msg = mark_order_paid(order_no, "", provider)
+        if not ok:
+            return False, msg, None
+        payload["status"] = "paid"
+        payload["pay_url"] = ""
+        return True, "已开通", payload
+    ok, msg, pay_url = build_payment(provider, payload, cfg)
+    if not ok:
+        with db() as conn:
+            conn.execute("UPDATE orders SET status='cancelled', updated_at=? WHERE order_no=?", (now(), order_no))
+        return False, msg, None
+    with db() as conn:
+        conn.execute("UPDATE orders SET pay_url=?, updated_at=? WHERE order_no=?", (pay_url, now(), order_no))
+    payload["pay_url"] = pay_url
+    return True, "订单已创建", payload
+
+
+def _notify_base(cfg: dict[str, Any], fallback: str) -> str:
+    base = (cfg.get("public_url") or fallback or "").rstrip("/")
+    return base
+
+
+def build_payment(provider: str, order: dict[str, Any], cfg: dict[str, Any]) -> tuple[bool, str, str]:
+    if provider == "mock":
+        return True, "ok", f"/api/pay/mock/{order['order_no']}"
+    if provider == "alipay":
+        return alipay_page_pay(order, cfg)
+    if provider == "wechat":
+        return wechat_h5_pay(order, cfg)
+    return False, "不支持的支付方式", ""
+
+
+def alipay_page_pay(order: dict[str, Any], cfg: dict[str, Any]) -> tuple[bool, str, str]:
+    if not (cfg.get("alipay_app_id") and cfg.get("alipay_private_key") and cfg.get("alipay_public_key")):
+        return False, "支付宝支付未配置", ""
+    base = _notify_base(cfg, "")
+    if not base:
+        return False, "请先在设置中填写对外访问地址", ""
+    biz = json.dumps({
+        "out_trade_no": order["order_no"],
+        "total_amount": f"{int(order['amount_cents']) / 100:.2f}",
+        "subject": f"Frp 管理台 - {order['plan_name']}",
+        "product_code": "FAST_INSTANT_TRADE_PAY",
+    }, ensure_ascii=False, separators=(",", ":"))
+    params = {
+        "app_id": cfg["alipay_app_id"],
+        "method": "alipay.trade.page.pay",
+        "format": "JSON",
+        "charset": "utf-8",
+        "sign_type": "RSA2",
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "version": "1.0",
+        "notify_url": f"{base}/api/pay/notify/alipay",
+        "return_url": f"{base}/api/pay/return/alipay",
+        "biz_content": biz,
+    }
+    sign_content = "&".join(f"{k}={v}" for k, v in sorted(params.items()) if k != "sign" and str(v) != "")
+    try:
+        params["sign"] = rsa_sign_sha256(sign_content.encode("utf-8"), cfg["alipay_private_key"])
+    except Exception as exc:
+        return False, f"支付宝签名失败：{exc}", ""
+    gateway = cfg.get("alipay_gateway") or DEFAULT_ALIPAY_GATEWAY
+    return True, "ok", gateway + "?" + urllib.parse.urlencode(params)
+
+
+def _xml_to_dict(raw: str) -> dict[str, str]:
+    import xml.etree.ElementTree as ET
+    out: dict[str, str] = {}
+    try:
+        root = ET.fromstring(raw)
+        for child in root:
+            out[child.tag] = child.text or ""
+    except Exception:
+        return {}
+    return out
+
+
+def _dict_to_xml(payload: dict[str, str]) -> str:
+    body = "".join(f"<{k}><![CDATA[{v}]]></{k}>" for k, v in payload.items())
+    return f"<xml>{body}</xml>"
+
+
+def wechat_sign(params: dict[str, str], api_key: str) -> str:
+    raw = "&".join(f"{k}={v}" for k, v in sorted(params.items()) if k != "sign" and str(v) != "")
+    raw += "&key=" + api_key
+    return hashlib.md5(raw.encode("utf-8")).hexdigest().upper()
+
+
+def wechat_h5_pay(order: dict[str, Any], cfg: dict[str, Any]) -> tuple[bool, str, str]:
+    if not (cfg.get("wechat_appid") and cfg.get("wechat_mch_id") and cfg.get("wechat_api_key")):
+        return False, "微信支付未配置", ""
+    base = _notify_base(cfg, "")
+    if not base:
+        return False, "请先在设置中填写对外访问地址", ""
+    payload = {
+        "appid": cfg["wechat_appid"],
+        "mch_id": cfg["wechat_mch_id"],
+        "nonce_str": secrets.token_hex(16),
+        "body": f"Frp管理台-{order['plan_name']}",
+        "out_trade_no": order["order_no"],
+        "total_fee": str(int(order["amount_cents"])),
+        "spbill_create_ip": "127.0.0.1",
+        "notify_url": f"{base}/api/pay/notify/wechat",
+        "trade_type": "MWEB",
+        "scene_info": json.dumps({"h5_info": {"type": "Wap", "wap_url": base, "wap_name": "Frp管理台"}}),
+    }
+    payload["sign"] = wechat_sign(payload, cfg["wechat_api_key"])
+    try:
+        req = urllib.request.Request(DEFAULT_WECHAT_GATEWAY, data=_dict_to_xml(payload).encode("utf-8"),
+                                     headers={"Content-Type": "text/xml"}, method="POST")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = _xml_to_dict(resp.read().decode("utf-8", "replace"))
+    except Exception as exc:
+        return False, f"微信下单失败：{exc}", ""
+    if data.get("return_code") != "SUCCESS" or data.get("result_code") != "SUCCESS":
+        return False, data.get("err_code_des") or data.get("return_msg") or "微信下单失败", ""
+    return True, "ok", data.get("mweb_url", "")
+
+
+def alipay_verify_notify(form: dict[str, str], cfg: dict[str, Any]) -> bool:
+    public_key = cfg.get("alipay_public_key") or ""
+    if not public_key:
+        return False
+    sign = form.get("sign", "")
+    if not sign:
+        return False
+    content = "&".join(f"{k}={v}" for k, v in sorted(form.items()) if k not in ("sign", "sign_type") and v != "")
+    return rsa_verify_sha256(content.encode("utf-8"), sign, public_key)
+
+
+def wechat_verify_notify(form: dict[str, str], cfg: dict[str, Any]) -> bool:
+    api_key = cfg.get("wechat_api_key") or ""
+    if not api_key or not form.get("sign"):
+        return False
+    return hmac.compare_digest(wechat_sign(form, api_key), form["sign"].upper())
+
+
+def handle_payment_notify(provider: str, raw_body: bytes, form: dict[str, str], cfg: dict[str, Any]) -> tuple[bool, str]:
+    if provider == "alipay":
+        if not alipay_verify_notify(form, cfg):
+            return False, "签名校验失败"
+        if form.get("trade_status") not in ("TRADE_SUCCESS", "TRADE_FINISHED"):
+            return True, "忽略"
+        return mark_order_paid(form.get("out_trade_no", ""), form.get("trade_no", ""), "alipay")
+    if provider == "wechat":
+        data = _xml_to_dict(raw_body.decode("utf-8", "replace")) if raw_body else dict(form)
+        if not wechat_verify_notify(data, cfg):
+            return False, "签名校验失败"
+        if data.get("return_code") != "SUCCESS" or data.get("result_code") != "SUCCESS":
+            return True, "忽略"
+        return mark_order_paid(data.get("out_trade_no", ""), data.get("transaction_id", ""), "wechat")
+    return False, "未知支付方式"
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "frp-manager-lite-api/2.0.0"
 
@@ -3647,11 +4119,14 @@ class Handler(BaseHTTPRequestHandler):
     def send_json(self, data: Any, status: int = 200, headers: dict[str, str] | None = None) -> None:
         self.send_body(json.dumps(data, ensure_ascii=False).encode(), status, "application/json; charset=utf-8", headers)
 
-    def read_json(self) -> dict[str, Any]:
+    def read_body_raw(self) -> bytes:
         length = int(self.headers.get("Content-Length", "0") or "0")
         if length > MAX_BODY:
             raise ValueError("请求体过大")
-        raw = self.rfile.read(length).decode("utf-8")
+        return self.rfile.read(length) if length else b""
+
+    def read_json(self) -> dict[str, Any]:
+        raw = self.read_body_raw().decode("utf-8")
         return json.loads(raw) if raw else {}
 
     def require_user(self) -> sqlite3.Row | None:
@@ -3722,6 +4197,8 @@ class Handler(BaseHTTPRequestHandler):
             self.license_authority_activate()
         elif path == "/api/license/activate" and SOFTWARE_LICENSE_REQUIRED and not software_license_ok():
             self.api_license_activate_public()
+        elif path.startswith("/api/pay/notify/"):
+            self.pay_notify(path)
         elif path.startswith("/api/"):
             self.api_post(path)
         else:
@@ -4097,6 +4574,47 @@ class Handler(BaseHTTPRequestHandler):
             # Lightweight client-side latency probe (no DB / no auth work).
             self.send_json({"ok": True, "t": now()}, headers={"Cache-Control": "no-store"})
             return
+        if path == "/api/plans":
+            with db() as conn:
+                cfg = payment_config(conn)
+                self.send_json({"ok": True, "plans": list_plans(conn, active_only=True), "payment": payment_public(cfg)})
+            return
+        if path == "/api/orders/status":
+            q = urllib.parse.parse_qs(urlparse(self.path).query)
+            order_no = (q.get("order_no") or [""])[0]
+            user = self.current_user
+            if not user:
+                self.send_json({"ok": False, "error": "unauthorized"}, 401)
+                return
+            with db() as conn:
+                row = conn.execute("SELECT * FROM orders WHERE order_no=?", (order_no,)).fetchone()
+            if not row or (int(row["user_id"]) != int(user["id"]) and user["role"] != "admin"):
+                self.send_json({"ok": False, "error": "订单不存在"}, 404)
+                return
+            self.send_json({"ok": True, "order": order_public(row)})
+            return
+        if path.startswith("/api/pay/mock/"):
+            order_no = path.rsplit("/", 1)[-1]
+            with db() as conn:
+                cfg = payment_config(conn)
+            if (cfg.get("provider") or "") != "mock":
+                self.send_json({"ok": False, "error": "mock 支付未启用"}, 404)
+                return
+            ok, msg = mark_order_paid(order_no, "MOCK-" + order_no, "mock")
+            target = f"/?pay={'success' if ok else 'fail'}&order={urllib.parse.quote(order_no)}"
+            self.send_response(302)
+            self.send_header("Location", target)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if path == "/api/pay/return/alipay":
+            q = urllib.parse.parse_qs(urlparse(self.path).query)
+            order_no = (q.get("out_trade_no") or [""])[0]
+            self.send_response(302)
+            self.send_header("Location", f"/?pay=return&order={urllib.parse.quote(order_no)}")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if path == "/api/registration-status":
             self.send_json({"ok": True, "open_registration": OPEN_REGISTRATION, "max_ports": OPEN_REGISTRATION_MAX_PORTS, "expires_days": OPEN_REGISTRATION_EXPIRES_DAYS})
             return
@@ -4170,6 +4688,12 @@ class Handler(BaseHTTPRequestHandler):
                 node_payload["latency_ms"] = node_payload.get("auth_latency_ms")
             self.send_json({"ok": True, "version": APP_VERSION, "uptime_seconds": int(time.time() - SERVER_START_TS), "latest_version": panel_latest_version(), "update_link": PANEL_UPDATE_LINK, "user": public_user(user), "software_license": sw_license, "node": node_payload, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
             return
+        if path == "/api/user/orders":
+            with db() as conn:
+                rows = conn.execute("SELECT * FROM orders WHERE user_id=? ORDER BY id DESC LIMIT 50", (user["id"],)).fetchall()
+                cfg = payment_config(conn)
+            self.send_json({"ok": True, "orders": [order_public(r) for r in rows], "payment": payment_public(cfg)})
+            return
         if path == "/api/user/traffic":
             q = urllib.parse.parse_qs(urlparse(self.path).query)
             self.send_json(traffic_stats_for_user(user, (q.get("range") or ["30d"])[0]))
@@ -4185,6 +4709,25 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 limit = 8
             self.send_json(user_activity_feed(user, limit))
+            return
+        if path == "/api/admin/plans":
+            if not self.require_admin():
+                return
+            with db() as conn:
+                self.send_json({"ok": True, "plans": list_plans(conn, active_only=False), "payment": payment_public(payment_config(conn))})
+            return
+        if path == "/api/admin/orders":
+            if not self.require_admin():
+                return
+            with db() as conn:
+                rows = conn.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 200").fetchall()
+                stats = {
+                    "total": conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
+                    "paid": conn.execute("SELECT COUNT(*) FROM orders WHERE status='paid'").fetchone()[0],
+                    "pending": conn.execute("SELECT COUNT(*) FROM orders WHERE status='pending'").fetchone()[0],
+                    "revenue_cents": conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM orders WHERE status='paid'").fetchone()[0],
+                }
+            self.send_json({"ok": True, "orders": [order_public(r) for r in rows], "stats": stats})
             return
         if path == "/api/admin/overview":
             if not self.require_admin():
@@ -4239,6 +4782,9 @@ class Handler(BaseHTTPRequestHandler):
                     "tunnel_count": conn.execute("SELECT COUNT(*) c FROM tunnels").fetchone()["c"],
                     "invite_key_count": conn.execute("SELECT COUNT(*) c FROM invite_keys").fetchone()["c"],
                     "ban_count": conn.execute("SELECT COUNT(*) c FROM user_bans").fetchone()["c"],
+                    "plan_count": conn.execute("SELECT COUNT(*) c FROM plans WHERE active=1").fetchone()["c"],
+                    "order_count": conn.execute("SELECT COUNT(*) c FROM orders WHERE status='paid'").fetchone()["c"],
+                    "revenue_cents": conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM orders WHERE status='paid'").fetchone()[0],
                 }
                 sw_license = current_software_license(conn)
                 software_keys = []
@@ -4249,7 +4795,7 @@ class Handler(BaseHTTPRequestHandler):
                             "active": bool(k["active"]), "expires_at": k["expires_at"], "expires_text": fmt_time(k["expires_at"]),
                             "expired": bool(k["expires_at"] and k["expires_at"] <= now()), "activated_at": k["activated_at"], "last_check_at": k["last_check_at"], "created_at": k["created_at"],
                         })
-            self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "invite_keys": invite_keys, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": effective_setup_key(), "has_setup_key": bool(effective_setup_key()), "setup_key_source": setup_key_source(), "smtp": smtp_public(smtp_config(conn))})
+            self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "invite_keys": invite_keys, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": effective_setup_key(), "has_setup_key": bool(effective_setup_key()), "setup_key_source": setup_key_source(), "smtp": smtp_public(smtp_config(conn)), "payment": payment_public(payment_config(conn)), "plans": list_plans(conn, active_only=False), "orders": [order_public(r) for r in conn.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 100")]})
             return
         if path == "/api/admin/frps-proxies":
             if not self.require_admin():
@@ -4354,6 +4900,8 @@ class Handler(BaseHTTPRequestHandler):
                 "has_setup_key": bool(effective_setup_key()),
                 "setup_key_source": setup_key_source(),
                 "smtp": smtp_public(smtp_config(conn)),
+                "payment": payment_public(payment_config(conn)),
+                "plans": list_plans(conn, active_only=False),
                 "notify": notify_public(notify_config(conn)),
                 "r2": r2_public,
                 "r2_configured": r2_public["configured"],
@@ -4464,6 +5012,24 @@ class Handler(BaseHTTPRequestHandler):
                 return
             ok, msg = register_with_invite(str(data.get("username", "")), str(data.get("password", "")), str(data.get("invite_key", "")), int(data.get("node_id", 0)), str(data.get("email", "")), str(data.get("code", "")))
             self.send_json({"ok": ok, "message": msg, "error": None if ok else msg}, 200 if ok else 400)
+            return
+
+        if path == "/api/user/orders":
+            user = self.require_user()
+            if not user:
+                return
+            ok_rate, retry_after = rate_limit_check(f"order:{user['id']}", 10)
+            if not ok_rate:
+                self.send_json({"ok": False, "error": f"下单过于频繁，请 {retry_after} 秒后再试", "retry_after": retry_after}, 429)
+                return
+            try:
+                plan_id = int(data.get("plan_id", 0))
+            except Exception:
+                plan_id = 0
+            ok, msg, payload = create_order(user, plan_id, str(data.get("provider", "")))
+            if ok:
+                audit("order_create", user, None, None, "", f"套餐 {payload['plan_name']} 订单 {payload['order_no']}")
+            self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "order": payload}, 200 if ok else 400)
             return
 
         if path == "/api/logout":
@@ -4635,6 +5201,16 @@ class Handler(BaseHTTPRequestHandler):
             self.admin_r2_config_save(user, data)
         elif path == "/api/admin/setup-key":
             self.admin_setup_key(user, data)
+        elif path == "/api/admin/plans/save":
+            self.admin_plan_save(data)
+        elif path == "/api/admin/plans/delete":
+            self.admin_plan_delete(data)
+        elif path == "/api/admin/plans/toggle":
+            self.admin_plan_toggle(data)
+        elif path == "/api/admin/orders/complete":
+            self.admin_order_complete(data)
+        elif path == "/api/admin/payment-config":
+            self.admin_payment_config_save(data)
         elif path == "/api/admin/smtp-config":
             self.admin_smtp_config_save(user, data)
         elif path == "/api/admin/smtp-test":
@@ -4994,6 +5570,108 @@ class Handler(BaseHTTPRequestHandler):
             setting_set(conn, "setup_key", key)
         audit("setup_key_update", admin, None, None, "", "设置一键添加节点密钥" if key else "清除一键添加节点密钥")
         self.send_json({"ok": True, "message": "已保存自定义密钥" if key else "已清除（回退到环境变量 FML_SETUP_KEY）", "setup_key": effective_setup_key(), "has_setup_key": bool(effective_setup_key()), "setup_key_source": setup_key_source()})
+
+    def pay_notify(self, path: str) -> None:
+        provider = path.rsplit("/", 1)[-1]
+        raw = self.read_body_raw()
+        form: dict[str, str] = {}
+        ctype = (self.headers.get("Content-Type") or "").lower()
+        try:
+            if "json" in ctype:
+                payload = json.loads(raw.decode("utf-8", "replace") or "{}")
+                form = {str(k): str(v) for k, v in payload.items()}
+            elif raw:
+                form = {k: v[0] for k, v in urllib.parse.parse_qs(raw.decode("utf-8", "replace")).items()}
+        except Exception:
+            form = {}
+        with db() as conn:
+            cfg = payment_config(conn)
+        ok, msg = handle_payment_notify(provider, raw, form, cfg)
+        if provider == "wechat":
+            body = "<xml><return_code><![CDATA[%s]]></return_code><return_msg><![CDATA[%s]]></return_msg></xml>" % ("SUCCESS" if ok else "FAIL", msg)
+            self.send_body(body.encode("utf-8"), 200, "application/xml")
+            return
+        self.send_body(b"success" if ok else b"fail", 200, "text/plain")
+
+    def admin_plan_save(self, data: dict[str, Any]) -> None:
+        admin = self.require_admin()
+        if not admin:
+            return
+        try:
+            plan_id = int(data.get("id", 0) or 0)
+            price_cents = int(round(float(data.get("price", 0) or 0) * 100))
+            max_ports = int(data.get("max_ports", 0) or 0)
+            traffic_gb = float(data.get("traffic_limit_gb", 0) or 0)
+            bandwidth_mbs = float(data.get("bandwidth_limit_mbs", 0) or 0)
+            duration_days = int(data.get("duration_days", 30) or 0)
+            node_id = int(data.get("node_id", 0) or 0)
+            sort_order = int(data.get("sort_order", 0) or 0)
+        except (TypeError, ValueError):
+            self.send_json({"ok": False, "error": "表单数值格式不正确"}, 400)
+            return
+        ok, msg = save_plan(plan_id, str(data.get("name", "")), price_cents, max_ports,
+                            int(traffic_gb * 1024 ** 3), int(bandwidth_mbs * 1024), duration_days,
+                            node_id, str(data.get("note", "")),
+                            str(data.get("active", "1")) in ("1", "true", "on", "True"), sort_order)
+        if ok:
+            audit("plan_save", admin, None, None, "", f"套餐 {data.get('name','')} id={plan_id or 'new'}")
+        self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg}, 200 if ok else 400)
+
+    def admin_plan_delete(self, data: dict[str, Any]) -> None:
+        admin = self.require_admin()
+        if not admin:
+            return
+        try:
+            plan_id = int(data.get("id", 0))
+        except (TypeError, ValueError):
+            self.send_json({"ok": False, "error": "参数错误"}, 400)
+            return
+        with db() as conn:
+            conn.execute("DELETE FROM plans WHERE id=?", (plan_id,))
+        audit("plan_delete", admin, None, None, "", f"删除套餐 id={plan_id}")
+        self.send_json({"ok": True, "message": "套餐已删除"})
+
+    def admin_plan_toggle(self, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        try:
+            plan_id = int(data.get("id", 0))
+        except (TypeError, ValueError):
+            self.send_json({"ok": False, "error": "参数错误"}, 400)
+            return
+        with db() as conn:
+            conn.execute("UPDATE plans SET active=CASE active WHEN 1 THEN 0 ELSE 1 END WHERE id=?", (plan_id,))
+        self.send_json({"ok": True, "message": "套餐状态已更新"})
+
+    def admin_order_complete(self, data: dict[str, Any]) -> None:
+        admin = self.require_admin()
+        if not admin:
+            return
+        order_no = str(data.get("order_no", "")).strip()
+        ok, msg = mark_order_paid(order_no, "MANUAL-" + admin["username"], "manual")
+        self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg}, 200 if ok else 400)
+
+    def admin_payment_config_save(self, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        provider = str(data.get("provider", "")).strip()
+        if provider not in ("", "mock", "alipay", "wechat"):
+            self.send_json({"ok": False, "error": "不支持的支付方式"}, 400)
+            return
+        with db() as conn:
+            setting_set(conn, "pay_provider", provider)
+            setting_set(conn, "pay_public_url", str(data.get("public_url", "")).strip().rstrip("/"))
+            setting_set(conn, "alipay_app_id", str(data.get("alipay_app_id", "")).strip())
+            setting_set(conn, "alipay_gateway", str(data.get("alipay_gateway", "")).strip() or DEFAULT_ALIPAY_GATEWAY)
+            setting_set(conn, "wechat_appid", str(data.get("wechat_appid", "")).strip())
+            setting_set(conn, "wechat_mch_id", str(data.get("wechat_mch_id", "")).strip())
+            if str(data.get("alipay_private_key", "")).strip():
+                setting_set(conn, "alipay_private_key", str(data.get("alipay_private_key", "")).strip())
+            if str(data.get("alipay_public_key", "")).strip():
+                setting_set(conn, "alipay_public_key", str(data.get("alipay_public_key", "")).strip())
+            if str(data.get("wechat_api_key", "")).strip():
+                setting_set(conn, "wechat_api_key", str(data.get("wechat_api_key", "")).strip())
+        self.send_json({"ok": True, "message": "支付设置已保存"})
 
     def admin_smtp_config_save(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
         if not self.require_admin():
