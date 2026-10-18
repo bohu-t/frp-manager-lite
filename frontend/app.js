@@ -1645,7 +1645,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         <section class="card profile-card">
           <div class="profile-head"><span class="profile-avatar">${avatarSvg(data.user.username||'U', data.user.role, 56)}</span><div class="profile-id"><strong>${esc(data.user.username||'-')}</strong><small>${data.user.role === 'admin' ? '系统管理员' : '普通用户'}</small></div></div>
           <div class="profile-rows">
-            <div class="info-line"><span>套餐到期</span><strong>${esc(data.user.expires_text || '永不过期')}</strong></div>
+            <div class="info-line"><span>套餐到期</span><strong>${Number(data.user.expires_at || 0) ? `${esc(data.user.expires_text)}${Number(data.user.expires_at) <= Date.now() / 1000 ? ' <span class="bad">已到期</span>' : ''}` : '<span class="muted">未购买套餐</span>'}</strong></div>
             <div class="info-line"><span>今日流量</span><strong>${fmtBytes(todayTraffic)}${trafficLimit ? ' / ' + fmtBytes(trafficLimit) : ' / 不限'}</strong></div>
             <div class="info-line"><span>隧道数量</span><strong>${data.tunnels.length} 条</strong></div>
             <div class="info-line"><span>端口上限</span><strong>${esc(data.user.max_ports ?? '-')}</strong></div>
