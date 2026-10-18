@@ -746,7 +746,7 @@ function appSidebarHtml(kind='dashboard'){
   const items = isAdmin ? [
     ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','chart','订单','orders'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
   ] : [
-    ['dashboard','home','概览'],['dashboard-nodes','node','可用节点'],['dashboard-plans','license','购买套餐'],['dashboard-points','bolt','积分充值'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
+    ['dashboard','home','概览'],['dashboard-nodes','node','可用节点'],['dashboard-plans','license','购买套餐'],['dashboard-myplans','license','我的套餐'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
   ];
   const links = items.map(([action, icon, label, section]) => {
     const active = kind === action || (section && kind === section) ? ' active' : '';
@@ -862,6 +862,7 @@ app.addEventListener('click', async (e) => {
     if(action === 'dashboard-profile') return loadDashboard('profile');
     if(action === 'dashboard-plans') return loadPlans();
     if(action === 'dashboard-points') return loadPoints();
+    if(action === 'dashboard-myplans') return loadMyPlans();
     if(action === 'admin-dashboard') return loadAdminDashboard();
     if(action === 'admin-settings') return loadAdminSettings();
     if(action === 'admin-proxies') return loadAdminProxies();
@@ -1096,6 +1097,73 @@ async function resumePay(orderNo){
     if(!order.pay_url){ show('没有可用的支付链接，请联系管理员', true); return; }
     window.location.href = order.pay_url;
   }catch(err){ show(err.message, true); }
+}
+
+
+async function loadMyPlans(){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
+  let data;
+  try{ data = await api('/api/dashboard'); }
+  catch(err){
+    if(err.message === 'unauthorized') return renderLogin();
+    show(err.message, true);
+    return;
+  }
+  const myPlans = data.my_plans || [];
+  const active = myPlans.filter(p => !p.expired);
+  const rows = myPlans.map((p, i) => `<tr>
+      <td>${i + 1}</td>
+      <td>${esc(p.plan_name || '-')}</td>
+      <td>${p.max_ports}</td>
+      <td>${p.billing_mode === 'traffic' ? '流量' : '时间'}</td>
+      <td>${p.quota_gb > 0 ? `${p.used_gb} / ${p.quota_gb} GB` : '不限量'}${p.billing_mode !== 'traffic' && p.expires_at ? `<br><span class="muted small">到期 ${esc(p.expires_text)}</span>` : ''}</td>
+      <td>${p.status === 'exhausted' ? '<span class="bad">流量用尽</span>' : (p.status === 'cancelled' ? '<span class="muted">已退订</span>' : (p.expired ? '<span class="bad">已到期</span>' : '<span class="ok">生效中</span>'))}${p.grace_until && p.status !== 'active' ? `<br><span class="muted small">端口保留至 ${fmtTs(p.grace_until)}</span>` : ''}</td>
+      <td class="actions node-actions">${p.status === 'active' ? `<button type="button" class="node-action node-action-danger" onclick="cancelPlan(${p.id}, '${esc(p.plan_name)}', ${Number(p.refund_points || 0)})">退订</button>` : '<span class="muted small">—</span>'}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">还没有购买过套餐</td></tr>';
+  app.innerHTML = appLayoutHtml(`
+    <section class="card">
+      <div class="section-title"><div><div class="section-kicker">MY PLANS</div><h2>${stIcon('license')}我的套餐</h2><p>流量套餐只统计该套餐分配端口产生的流量；时间套餐按到期时间失效。</p></div><div class="row" style="gap:10px"><span class="section-count">${active.length} 个生效中</span><button type="button" class="secondary" onclick="loadPlans()">购买套餐</button></div></div>
+      <table><thead><tr><th>序号</th><th>套餐</th><th>端口</th><th>计费</th><th>额度 / 到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>
+    </section>`, 'dashboard-myplans', '我的套餐');
+}
+
+function initProfilePoints(){
+  const rate = Number(window.__pointsRate || 1);
+  const rf = document.querySelector('#profileRechargeForm');
+  if(rf){
+    const inp = rf.querySelector('input[name="points"]');
+    const hint = document.querySelector('#profileAmountHint');
+    const refresh = () => {
+      const pts = Number(inp && inp.value || 0);
+      if(hint) hint.textContent = pts > 0 ? `应付 ¥${(pts / rate).toFixed(2)}` : '请输入充值积分';
+    };
+    if(inp) inp.addEventListener('input', refresh);
+    refresh();
+    rf.onsubmit = async (e) => {
+      e.preventDefault();
+      const pts = Number(new FormData(e.target).get('points') || 0);
+      if(!pts || pts < 1){ await appAlert('请输入有效的充值积分', {title:'提示'}); return; }
+      try{
+        const r = await api('/api/user/points/orders', {method:'POST', body:{points:pts}});
+        const order = r.order || {};
+        if(!order.pay_url){ await appAlert('下单失败：没有支付链接', {title:'提示'}); return; }
+        window.location.href = order.pay_url;
+      }catch(err){ await appAlert(err.message, {title:'充值失败'}); }
+    };
+  }
+  const kf = document.querySelector('#profileKeyForm');
+  if(kf){
+    kf.onsubmit = async (e) => {
+      e.preventDefault();
+      const key = String(new FormData(e.target).get('key') || '').trim();
+      if(!key){ await appAlert('请输入充值密钥', {title:'提示'}); return; }
+      try{
+        const r = await api('/api/user/points/redeem', {method:'POST', body:{key}});
+        await appAlert(r.message || '充值成功', {title:'充值成功'});
+        await loadDashboard('profile');
+      }catch(err){ await appAlert(err.message, {title:'充值失败'}); }
+    };
+  }
 }
 
 async function loadPoints(){
@@ -1706,6 +1774,9 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
   if(view === 'profile'){
     const myPlans = data.my_plans || [];
     const activePlans = myPlans.filter(p => !p.expired);
+    const payment = data.payment || {};
+    const rate = Number(payment.points_per_yuan || 1);
+    window.__pointsRate = rate;
     const planRows = myPlans.map((p, i) => `<tr>
         <td>${i + 1}</td>
         <td>${esc(p.plan_name || '-')}</td>
@@ -1741,9 +1812,16 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
             <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存邮箱</button></div>
           </form>
         </section>
-        <section class="card profile-plans">
-          <div class="section-title"><div><div class="section-kicker">MY PLANS</div><h2>${stIcon('license')}我的套餐</h2><p>流量套餐只统计该套餐分配端口产生的流量；时间套餐生效期间流量套餐暂停扣量。</p></div><span class="section-count">${activePlans.length} 个生效中</span></div>
-          <table><thead><tr><th>序号</th><th>套餐</th><th>端口</th><th>计费</th><th>额度 / 到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table>
+        <section class="card profile-points">
+          <div class="section-title"><div><div class="section-kicker">POINTS</div><h2>${stIcon('bolt')}积分充值</h2><p>当前余额 ${Number(data.user.points || 0)} 积分 · 1 元 = ${rate} 积分</p></div><button type="button" class="secondary" onclick="loadPoints()">积分明细</button></div>
+          <form id="profileRechargeForm" class="grid">
+            <div><label>充值积分</label><input name="points" type="number" min="1" step="1" value="${rate * 10}" required><span class="muted small" id="profileAmountHint">应付 ¥10.00</span></div>
+            <div class="form-actions" style="grid-column:1/-1"><button>去支付</button></div>
+          </form>
+          <form id="profileKeyForm" class="grid" style="margin-top:12px">
+            <div><label>充值密钥</label><input name="key" placeholder="PT-..." required></div>
+            <div class="form-actions" style="grid-column:1/-1"><button>兑换积分</button></div>
+          </form>
         </section>
         <section class="card profile-pwd">
           <div class="section-title"><div><div class="section-kicker">SECURITY</div><h2>${stIcon('key')}修改登录密码</h2><p>修改当前账号的登录密码，下次登录请使用新密码。</p></div></div>
@@ -1752,6 +1830,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
       </div>`, 'dashboard-profile', '个人中心');
     initUserEmailForm();
     initPasswordForm();
+    initProfilePoints();
     return;
   }
   const sideNav = `<aside class="app-sidebar">
