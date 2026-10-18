@@ -2286,6 +2286,9 @@ def start_plan_usage_loop() -> None:
                         _abuse_last_check = time.time()
                         check_bandwidth_abuse(conn)
                 with db() as conn:
+                    for r in conn.execute("SELECT DISTINCT user_id FROM user_plans").fetchall():
+                        sync_user_plan_ports(conn, int(r["user_id"]))
+                        recalc_user_entitlements(conn, int(r["user_id"]))
                     ids = [int(r["user_id"]) for r in conn.execute(
                         "SELECT DISTINCT user_id FROM user_plans WHERE quota_bytes>0 AND status='active'")]
                     for uid in ids:
@@ -4237,12 +4240,34 @@ def redeem_recharge_key(user: sqlite3.Row, raw_key: str) -> tuple[bool, str, int
     return True, f"充值成功，获得 {int(row['points'])} 积分", balance
 
 
+def sync_user_plan_ports(conn: sqlite3.Connection, user_id: int) -> int:
+    """把账号名下端口收敛到「套餐端口」范围；无套餐记录的账号不动。"""
+    has_plans = conn.execute("SELECT 1 FROM user_plans WHERE user_id=? LIMIT 1", (user_id,)).fetchone()
+    if not has_plans:
+        return 0
+    plan_port_rows = conn.execute(
+        "SELECT node_id, port FROM user_plan_ports WHERE user_id=? AND (release_at=0 OR release_at>?)",
+        (user_id, now())).fetchall()
+    if not plan_port_rows:
+        # 有套餐但没有任何端口记录：视为历史数据异常，不主动回收
+        return 0
+    allowed = {(int(r["node_id"]), int(r["port"])) for r in plan_port_rows}
+    extra = [(int(r["node_id"]), int(r["port"])) for r in conn.execute(
+        "SELECT node_id, port FROM ports WHERE user_id=?", (user_id,))
+        if (int(r["node_id"]), int(r["port"])) not in allowed]
+    for node_id, port in extra:
+        conn.execute("UPDATE tunnels SET enabled=0 WHERE user_id=? AND node_id=? AND remote_port=?", (user_id, node_id, port))
+        conn.execute("UPDATE ports SET user_id=NULL WHERE node_id=? AND port=?", (node_id, port))
+    return len(extra)
+
+
 def recalc_user_entitlements(conn: sqlite3.Connection, user_id: int) -> None:
     """按当前有效套餐汇总用户权益；没有套餐记录时保持原值。"""
     rows = conn.execute(
         "SELECT * FROM user_plans WHERE user_id=? AND status='active' AND (expires_at=0 OR expires_at>?) ORDER BY id",
         (user_id, now())).fetchall()
     if not rows:
+        conn.execute("UPDATE users SET max_ports=0, expires_at=0 WHERE id=?", (user_id,))
         return
     total_ports = sum(int(r["max_ports"] or 0) for r in rows)
     traffic_vals = [int(r["traffic_limit_bytes"] or 0) for r in rows]
@@ -4252,7 +4277,7 @@ def recalc_user_entitlements(conn: sqlite3.Connection, user_id: int) -> None:
     bandwidth = 0 if any(v == 0 for v in bw_vals) else max(bw_vals)
     expires_at = 0 if any(v == 0 for v in expiry_vals) else max(expiry_vals)
     conn.execute(
-        "UPDATE users SET max_ports=MAX(max_ports, ?), traffic_limit_bytes=?, bandwidth_limit_kbps=?, expires_at=? WHERE id=?",
+        "UPDATE users SET max_ports=?, traffic_limit_bytes=?, bandwidth_limit_kbps=?, expires_at=? WHERE id=?",
         (min(100, total_ports), traffic, bandwidth, expires_at, user_id))
 
 
