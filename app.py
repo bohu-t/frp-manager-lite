@@ -4288,10 +4288,27 @@ def refund_fee_percent(conn: sqlite3.Connection) -> int:
         return 10
 
 
+def plan_traffic_since(conn: sqlite3.Connection, plan_row: sqlite3.Row) -> int:
+    since = int(plan_row["starts_at"] or 0)
+    total = 0
+    for pr in conn.execute("SELECT node_id, port FROM user_plan_ports WHERE user_plan_id=?", (plan_row["id"],)).fetchall():
+        row = conn.execute(
+            "SELECT COALESCE(SUM(bytes),0) FROM traffic_samples WHERE user_id=? AND node_id=? AND remote_port=? AND ts>?",
+            (plan_row["user_id"], int(pr["node_id"]), int(pr["port"]), since)).fetchone()
+        total += int(row[0] or 0) if row else 0
+    return total
+
+
+FULL_REFUND_WINDOW = int(os.getenv("FML_FULL_REFUND_MINUTES", "10") or 10) * 60
+
+
 def compute_plan_refund(conn: sqlite3.Connection, plan_row: sqlite3.Row) -> dict[str, Any]:
     price = int(plan_row["price_points"] or 0)
     if (plan_row["status"] or "active") != "active":
         return {"eligible": False, "points": 0, "ratio": 0.0, "fee_percent": refund_fee_percent(conn), "gross": 0}
+    within = (now() - int(plan_row["starts_at"] or 0)) <= FULL_REFUND_WINDOW
+    if within and plan_traffic_since(conn, plan_row) == 0:
+        return {"eligible": True, "points": price, "ratio": 1.0, "fee_percent": 0, "gross": price, "full_refund": True}
     ratios: list[float] = []
     if int(plan_row["expires_at"] or 0):
         total = max(1, int(plan_row["duration_days"] or 0) * 86400)
@@ -4315,26 +4332,34 @@ def cancel_user_plan(user: sqlite3.Row, user_plan_id: int) -> tuple[bool, str, d
             return False, "该套餐已失效，无法退订", {}
         info = compute_plan_refund(conn, p)
         conn.execute("UPDATE user_plans SET status='cancelled', expires_at=? WHERE id=?", (now(), p["id"]))
-        release_plan_resources(conn, p)
+        release_plan_resources(conn, p, keep_ports=False)
         if int(info["points"]) > 0:
             points_change(conn, int(user["id"]), int(info["points"]), "plan_refund", p["plan_name"], "套餐退订退款")
         recalc_user_entitlements(conn, int(user["id"]))
-    msg = f"退订成功，退回 {info['points']} 积分（剩余比例 {int(info['ratio']*100)}%，手续费 {info['fee_percent']}%）"
+    if info.get("full_refund"):
+        msg = f"退订成功，10 分钟内未产生流量，全额退回 {info['points']} 积分"
+    else:
+        msg = f"退订成功，退回 {info['points']} 积分（剩余比例 {int(info['ratio']*100)}%，手续费 {info['fee_percent']}%）"
     return True, msg, info
 
 
 PLAN_GRACE_SECONDS = int(os.getenv("FML_PLAN_GRACE_HOURS", "72") or 72) * 3600
 
 
-def release_plan_resources(conn: sqlite3.Connection, plan_row: sqlite3.Row) -> None:
-    """套餐失效：停用隧道，端口保留 3 天供续期，到期由后台回收。"""
+def release_plan_resources(conn: sqlite3.Connection, plan_row: sqlite3.Row, keep_ports: bool = True) -> None:
+    """停用隧道。到期/用尽保留端口 3 天供续期；主动退订则立即回收端口。"""
     ports = conn.execute("SELECT node_id, port FROM user_plan_ports WHERE user_plan_id=?", (plan_row["id"],)).fetchall()
     for pr in ports:
         node_id, port = int(pr["node_id"]), int(pr["port"])
         conn.execute("UPDATE tunnels SET enabled=0 WHERE user_id=? AND node_id=? AND remote_port=?",
                      (plan_row["user_id"], node_id, port))
-    conn.execute("UPDATE user_plan_ports SET release_at=? WHERE user_plan_id=? AND release_at=0",
-                 (now() + PLAN_GRACE_SECONDS, plan_row["id"]))
+        if not keep_ports:
+            conn.execute("UPDATE ports SET user_id=NULL WHERE node_id=? AND port=?", (node_id, port))
+    if keep_ports:
+        conn.execute("UPDATE user_plan_ports SET release_at=? WHERE user_plan_id=? AND release_at=0",
+                     (now() + PLAN_GRACE_SECONDS, plan_row["id"]))
+    else:
+        conn.execute("DELETE FROM user_plan_ports WHERE user_plan_id=?", (plan_row["id"],))
 
 
 def reclaim_expired_plan_ports(conn: sqlite3.Connection) -> int:

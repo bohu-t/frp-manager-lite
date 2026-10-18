@@ -1054,6 +1054,7 @@ async function buyPlan(planId){
     <section class="modal-page card">
       <div class="section-title modal-title"><div><h2>选择接入节点</h2><p>套餐：${esc(plan.name || '')} · ${Number(plan.price_points || 0)} 积分</p></div><button type="button" class="secondary modal-close" onclick="closeBuyPlan()">关闭 ×</button></div>
       <div class="node-pick-list">${options}</div>
+      <p class="muted small">购买后 10 分钟内、且套餐端口未产生流量，可全额退订；超过 10 分钟按剩余比例退款并扣除手续费。</p>
       <p class="muted small">购买后仍可在「可用节点」页更换节点（套餐有效期内，且需先清空该账号的隧道）。</p>
       <div class="form-actions"><button type="button" onclick="confirmBuyPlan(${Number(planId)})">确认购买</button></div>
     </section>
@@ -1073,13 +1074,13 @@ async function confirmBuyPlan(planId){
   closeBuyPlan();
   try{
     const r = await api('/api/user/orders', {method:'POST', body:{plan_id:planId, node_id:nodeId}});
-    await appAlert(r.message || '购买成功', {title:'购买成功'});
+    await appAlert((r.message || '购买成功') + '\n\n10 分钟内且端口未产生流量，可全额退订。', {title:'购买成功'});
     await loadPlans();
   }catch(err){ show(err.message, true); }
 }
 
 async function cancelPlan(id, name, refund){
-  if(!await appConfirm(`确认退订「${name}」？\n按剩余比例预计退回 ${refund} 积分（已扣除手续费）。\n退订后相关隧道会停用，端口保留 3 天可续期。`, {title:'退订套餐', okText:'确认退订', danger:true})) return;
+  if(!await appConfirm(`确认退订「${name}」？\n预计退回 ${refund} 积分。\n退订后相关隧道会停用，套餐端口立即回收（不保留）。`, {title:'退订套餐', okText:'确认退订', danger:true})) return;
   try{
     const r = await api('/api/user/plans/cancel', {method:'POST', body:{id}});
     await appAlert(r.message || '退订成功', {title:'退订成功'});
