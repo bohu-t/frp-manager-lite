@@ -2183,24 +2183,30 @@ def sample_traffic_once() -> int:
         proxies = frps_all_proxies(nodes)
         if not proxies:
             return 0
-        buckets: dict[tuple[str, str], int] = {}
+        buckets: dict[tuple[str, str, int, int], int] = {}
         for p in proxies:
             uname = str(p.get("username") or "")
             if uname not in id_by_name:
                 continue
             typ = str(p.get("type") or "tcp")
-            key = (uname, typ)
+            node_id = int(p.get("node_id") or 0)
+            remote_port = int(p.get("remote_port") or 0)
+            key = (uname, typ, node_id, remote_port)
             buckets[key] = buckets.get(key, 0) + int(p.get("today_traffic_in") or 0) + int(p.get("today_traffic_out") or 0)
         day = local_day_str()
         ts = now()
         inserted = 0
         with db() as conn:
-            for (uname, typ), value in buckets.items():
+            for (uname, typ, node_id, remote_port), value in buckets.items():
                 uid = id_by_name[uname]
-                last = conn.execute("SELECT bytes FROM traffic_samples WHERE user_id=? AND day=? AND proxy_type=? ORDER BY ts DESC LIMIT 1", (uid, day, typ)).fetchone()
+                last = conn.execute(
+                    "SELECT bytes FROM traffic_samples WHERE user_id=? AND day=? AND proxy_type=? AND node_id=? AND remote_port=? ORDER BY ts DESC LIMIT 1",
+                    (uid, day, typ, node_id, remote_port)).fetchone()
                 if last is not None and int(last["bytes"] or 0) == value:
                     continue
-                conn.execute("INSERT INTO traffic_samples(user_id, username, day, proxy_type, bytes, ts) VALUES(?,?,?,?,?,?)", (uid, uname, day, typ, value, ts))
+                conn.execute(
+                    "INSERT INTO traffic_samples(user_id, username, day, proxy_type, node_id, remote_port, bytes, ts) VALUES(?,?,?,?,?,?,?,?)",
+                    (uid, uname, day, typ, node_id, remote_port, value, ts))
                 inserted += 1
             conn.execute("DELETE FROM traffic_samples WHERE ts < ?", (now() - TRAFFIC_RETAIN_DAYS * 86400,))
         return inserted
@@ -2538,6 +2544,8 @@ def init_db() -> None:
                 username TEXT NOT NULL DEFAULT '',
                 day TEXT NOT NULL,
                 proxy_type TEXT NOT NULL DEFAULT '',
+                node_id INTEGER NOT NULL DEFAULT 0,
+                remote_port INTEGER NOT NULL DEFAULT 0,
                 bytes INTEGER NOT NULL DEFAULT 0,
                 ts INTEGER NOT NULL
             );
@@ -2704,6 +2712,15 @@ def init_db() -> None:
                 created_at INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_user_plans_user ON user_plans(user_id, id);
+            CREATE TABLE IF NOT EXISTS user_plan_ports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_plan_id INTEGER NOT NULL REFERENCES user_plans(id) ON DELETE CASCADE,
+                user_id INTEGER NOT NULL,
+                node_id INTEGER NOT NULL,
+                port INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                UNIQUE(node_id, port)
+            );
             CREATE TABLE IF NOT EXISTS recharge_keys (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 seq_no INTEGER NOT NULL DEFAULT 0,
@@ -2766,6 +2783,11 @@ def init_db() -> None:
             base = conn.execute("SELECT COALESCE(MAX(seq_no),0) FROM plans").fetchone()[0]
             for offset, r in enumerate(missing, start=1):
                 conn.execute("UPDATE plans SET seq_no=? WHERE id=?", (int(base) + offset, r["id"]))
+        ts_cols = {r["name"] for r in conn.execute("PRAGMA table_info(traffic_samples)").fetchall()}
+        if "node_id" not in ts_cols:
+            conn.execute("ALTER TABLE traffic_samples ADD COLUMN node_id INTEGER NOT NULL DEFAULT 0")
+        if "remote_port" not in ts_cols:
+            conn.execute("ALTER TABLE traffic_samples ADD COLUMN remote_port INTEGER NOT NULL DEFAULT 0")
         for table in ("invite_keys", "recharge_keys", "software_license_keys"):
             tcols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
             if "seq_no" not in tcols:
@@ -4155,7 +4177,7 @@ def recalc_user_entitlements(conn: sqlite3.Connection, user_id: int) -> None:
 
 
 def refresh_user_plan_usage(conn: sqlite3.Connection, user_id: int) -> None:
-    """流量型套餐按购买顺序先进先出扣减；存在不限流量的时间套餐时暂停累计。"""
+    """流量型套餐只统计该套餐分配端口产生的流量，用尽即失效。"""
     traffic_plans = conn.execute(
         "SELECT * FROM user_plans WHERE user_id=? AND billing_mode='traffic' AND status='active' ORDER BY id",
         (user_id,)).fetchall()
@@ -4165,27 +4187,27 @@ def refresh_user_plan_usage(conn: sqlite3.Connection, user_id: int) -> None:
         "SELECT COUNT(*) FROM user_plans WHERE user_id=? AND billing_mode='time' AND status='active' AND (expires_at=0 OR expires_at>?)",
         (user_id, now())).fetchone()[0]
     if unlimited:
-        # 时间套餐（不限流量）生效期间：冻结流量套餐的计数起点，不扣额度
         conn.execute(
             "UPDATE user_plans SET usage_started_at=? WHERE user_id=? AND billing_mode='traffic' AND status='active'",
             (now(), user_id))
         return
-    baseline = min(int(p["usage_started_at"] or p["starts_at"] or 0) for p in traffic_plans)
-    row = conn.execute("SELECT COALESCE(SUM(bytes),0) FROM traffic_samples WHERE user_id=? AND ts>=?", (user_id, baseline)).fetchone()
-    remaining = int(row[0] or 0) if row else 0
     changed = False
     for p in traffic_plans:
         quota = int(p["quota_bytes"] or 0)
-        used = int(p["used_bytes"] or 0)
         if quota <= 0:
             conn.execute("UPDATE user_plans SET usage_started_at=? WHERE id=?", (now(), p["id"]))
             continue
-        room = max(0, quota - used)
-        add = min(remaining, room)
-        remaining -= add
-        new_used = used + add
-        conn.execute("UPDATE user_plans SET used_bytes=?, usage_started_at=? WHERE id=?", (new_used, now(), p["id"]))
-        if new_used >= quota:
+        since = int(p["usage_started_at"] or p["starts_at"] or 0)
+        ports = conn.execute("SELECT node_id, port FROM user_plan_ports WHERE user_plan_id=?", (p["id"],)).fetchall()
+        total = 0
+        for pr in ports:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(bytes),0) FROM traffic_samples WHERE user_id=? AND node_id=? AND remote_port=? AND ts>=?",
+                (user_id, int(pr["node_id"]), int(pr["port"]), since)).fetchone()
+            total += int(row[0] or 0) if row else 0
+        used = int(p["used_bytes"] or 0) + total
+        conn.execute("UPDATE user_plans SET used_bytes=?, usage_started_at=? WHERE id=?", (used, now(), p["id"]))
+        if used >= quota:
             conn.execute("UPDATE user_plans SET status='exhausted', expires_at=? WHERE id=?", (now(), p["id"]))
             changed = True
     if changed:
@@ -4223,6 +4245,11 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
          billing_mode, quota_bytes, 0, now(), "active",
          max_ports, int(order["traffic_limit_bytes"] or 0), int(order["bandwidth_limit_kbps"] or 0),
          duration_days, node_id, now(), expires_at, now()))
+    plan_id_new = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+    if billing_mode == "traffic" and free_ports:
+        conn.executemany(
+            "INSERT OR IGNORE INTO user_plan_ports(user_plan_id, user_id, node_id, port, created_at) VALUES(?,?,?,?,?)",
+            [(plan_id_new, user["id"], node_id, r["port"], now()) for r in free_ports])
     recalc_user_entitlements(conn, int(user["id"]))
     return True, "已开通"
 

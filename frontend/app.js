@@ -1677,7 +1677,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
           </form>
         </section>
         <section class="card profile-plans">
-          <div class="section-title"><div><div class="section-kicker">MY PLANS</div><h2>${stIcon('license')}我的套餐</h2><p>每个套餐独立计算；时间套餐生效期间，流量套餐暂停计时与扣量。</p></div><span class="section-count">${activePlans.length} 个生效中</span></div>
+          <div class="section-title"><div><div class="section-kicker">MY PLANS</div><h2>${stIcon('license')}我的套餐</h2><p>流量套餐只统计该套餐分配端口产生的流量；时间套餐生效期间流量套餐暂停扣量。</p></div><span class="section-count">${activePlans.length} 个生效中</span></div>
           <table><thead><tr><th>序号</th><th>套餐</th><th>端口</th><th>计费</th><th>额度 / 到期</th><th>状态</th></tr></thead><tbody>${planRows}</tbody></table>
         </section>
         <section class="card profile-pwd">
