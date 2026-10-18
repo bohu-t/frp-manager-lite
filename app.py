@@ -6404,31 +6404,35 @@ class Handler(BaseHTTPRequestHandler):
         providers = list(dict.fromkeys(providers))
         provider = providers[0] if providers else ""
         with db() as conn:
-            # 旧版页面可能不提交渠道字段，此时保持原有渠道不变，避免误清空
             if has_channel_field:
                 setting_set(conn, "pay_providers", ",".join(providers))
                 setting_set(conn, "pay_provider", provider)
-            setting_set(conn, "pay_public_url", str(data.get("public_url", "")).strip().rstrip("/"))
-            setting_set(conn, "alipay_app_id", str(data.get("alipay_app_id", "")).strip())
-            setting_set(conn, "alipay_gateway", str(data.get("alipay_gateway", "")).strip() or DEFAULT_ALIPAY_GATEWAY)
-            setting_set(conn, "wechat_appid", str(data.get("wechat_appid", "")).strip())
-            setting_set(conn, "wechat_mch_id", str(data.get("wechat_mch_id", "")).strip())
-            if str(data.get("alipay_private_key", "")).strip():
-                setting_set(conn, "alipay_private_key", str(data.get("alipay_private_key", "")).strip())
-            if str(data.get("alipay_public_key", "")).strip():
-                setting_set(conn, "alipay_public_key", str(data.get("alipay_public_key", "")).strip())
-            if str(data.get("wechat_api_key", "")).strip():
-                setting_set(conn, "wechat_api_key", str(data.get("wechat_api_key", "")).strip())
-            try:
-                rate = int(data.get("points_per_yuan", 1) or 1)
-            except (TypeError, ValueError):
-                rate = 1
-            setting_set(conn, "points_per_yuan", str(max(1, min(10000, rate))))
-            try:
-                fee = int(data.get("refund_fee_percent", 10) or 0)
-            except (TypeError, ValueError):
-                fee = 10
-            setting_set(conn, "refund_fee_percent", str(max(0, min(100, fee))))
+            # 只更新本次提交的字段，避免弹窗单独保存时清空其他配置
+            if "public_url" in data:
+                setting_set(conn, "pay_public_url", str(data.get("public_url", "")).strip().rstrip("/"))
+            if "alipay_app_id" in data:
+                setting_set(conn, "alipay_app_id", str(data.get("alipay_app_id", "")).strip())
+            if "alipay_gateway" in data:
+                setting_set(conn, "alipay_gateway", str(data.get("alipay_gateway", "")).strip() or DEFAULT_ALIPAY_GATEWAY)
+            if "wechat_appid" in data:
+                setting_set(conn, "wechat_appid", str(data.get("wechat_appid", "")).strip())
+            if "wechat_mch_id" in data:
+                setting_set(conn, "wechat_mch_id", str(data.get("wechat_mch_id", "")).strip())
+            for key in ("alipay_private_key", "alipay_public_key", "wechat_api_key"):
+                if str(data.get(key, "")).strip():
+                    setting_set(conn, key, str(data.get(key, "")).strip())
+            if "points_per_yuan" in data:
+                try:
+                    rate = int(data.get("points_per_yuan", 1) or 1)
+                except (TypeError, ValueError):
+                    rate = 1
+                setting_set(conn, "points_per_yuan", str(max(1, min(10000, rate))))
+            if "refund_fee_percent" in data:
+                try:
+                    fee = int(data.get("refund_fee_percent", 10) or 0)
+                except (TypeError, ValueError):
+                    fee = 10
+                setting_set(conn, "refund_fee_percent", str(max(0, min(100, fee))))
         self.send_json({"ok": True, "message": "支付设置已保存"})
 
     def admin_smtp_config_save(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:

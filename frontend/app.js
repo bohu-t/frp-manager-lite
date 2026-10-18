@@ -2895,31 +2895,59 @@ function adminOpsCardHtml(){
 
 function adminPaymentCardHtml(pay){
   pay = pay || {};
-  const provider = pay.provider || '';
   const enabledChannels = (pay.providers || []).map(x => x.key);
-  const opt = (v, label) => `<option value="${v}"${provider === v ? ' selected' : ''}>${label}</option>`;
   const status = pay.ready ? '<span class="status-badge ok"><i></i>已就绪</span>' : '<span class="status-badge bad"><i></i>未就绪</span>';
+  const badge = (ok) => ok ? '<span class="status-badge ok"><i></i>已配置</span>' : '<span class="status-badge bad"><i></i>未配置</span>';
   return `<section class="card admin-payment-card">
     <div class="settings-card-head"><span class="settings-card-icon icon-green">${stIcon('license')}</span><div><h2>支付设置</h2><p>配置在线支付渠道，用户购买套餐时使用。</p></div>${status}</div>
     <form id="paymentForm" class="settings-form form-grid">
       <div class="span-2"><label>支付渠道（可多选，用户下单时自行选择）</label><div class="pay-channels">
         <label class="check"><input type="checkbox" name="providers" value="alipay"${enabledChannels.includes('alipay') ? ' checked' : ''}> 支付宝</label>
         <label class="check"><input type="checkbox" name="providers" value="wechat"${enabledChannels.includes('wechat') ? ' checked' : ''}> 微信支付</label>
-
-      </div><span class="muted small">全部取消即关闭在线支付；只有已填好密钥的渠道才会对用户可用</span></div>
-      <div><label>对外访问地址</label><input name="public_url" value="${esc(pay.public_url || '')}" placeholder="https://frp.example.com"></div>
+      </div><span class="muted small">全部取消即关闭在线支付；只有已配置完成的渠道才会对用户可用</span></div>
+      <div class="span-2"><label>对外访问地址</label><input name="public_url" value="${esc(pay.public_url || '')}" placeholder="https://frp.example.com"><span class="muted small">支付回调地址，必须是公网可访问的 https</span></div>
       <div><label>积分兑换比例</label><input name="points_per_yuan" type="number" value="${Number(pay.points_per_yuan || 1)}" min="1" max="10000"><span class="muted small">1 元 = N 积分</span></div>
       <div><label>退订手续费（%）</label><input name="refund_fee_percent" type="number" value="${Number(pay.refund_fee_percent ?? 10)}" min="0" max="100"><span class="muted small">按剩余比例退款后再扣</span></div>
-      <div><label>支付宝 App ID</label><input name="alipay_app_id" value="${esc(pay.alipay_app_id || '')}" placeholder="2021000000000000"></div>
-      <div><label>支付宝网关</label><input name="alipay_gateway" value="${esc(pay.alipay_gateway || 'https://openapi.alipay.com/gateway.do')}"></div>
-      <div class="span-2"><label>支付宝应用私钥</label><textarea name="alipay_private_key" rows="2" placeholder="${pay.alipay_configured ? '已设置，留空不修改' : '-----BEGIN PRIVATE KEY-----'}"></textarea></div>
-      <div class="span-2"><label>支付宝公钥</label><textarea name="alipay_public_key" rows="2" placeholder="${pay.alipay_configured ? '已设置，留空不修改' : '-----BEGIN PUBLIC KEY-----'}"></textarea></div>
-      <div><label>微信 AppID</label><input name="wechat_appid" value="${esc(pay.wechat_appid || '')}" placeholder="wx0000000000000000"></div>
-      <div><label>微信商户号</label><input name="wechat_mch_id" value="${esc(pay.wechat_mch_id || '')}" placeholder="1600000000"></div>
-      <div class="span-2"><label>微信支付 API 密钥</label><input name="wechat_api_key" type="password" placeholder="${pay.wechat_configured ? '已设置，留空不修改' : '32 位 API 密钥'}"></div>
-      <div class="form-actions span-2"><button type="submit">保存支付设置</button><span class="muted small">回调地址需公网 https，沙箱网关填 https://openapi-sandbox.dl.alipaydev.com/gateway.do</span></div>
+      <div class="span-2 pay-config-row">
+        <div class="pay-config-item"><div><b>支付宝</b>${badge(pay.alipay_configured)}</div><button type="button" class="secondary" onclick="openPayConfig('alipay')">配置支付宝</button></div>
+        <div class="pay-config-item"><div><b>微信支付</b>${badge(pay.wechat_configured)}</div><button type="button" class="secondary" onclick="openPayConfig('wechat')">配置微信支付</button></div>
+      </div>
+      <div class="form-actions span-2"><button type="submit">保存设置</button></div>
     </form>
+    <div id="alipayConfigModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" onclick="if(event.target===this)closePayConfig('alipay')">
+      <section class="modal-page card">
+        <div class="section-title modal-title"><div><h2>支付宝配置</h2><p>电脑网站支付，需应用私钥与支付宝公钥。</p></div><button type="button" class="secondary modal-close" onclick="closePayConfig('alipay')">关闭 ×</button></div>
+        <form id="alipayConfigForm" class="settings-form form-grid">
+          <div class="span-2"><label>App ID</label><input name="alipay_app_id" value="${esc(pay.alipay_app_id || '')}" placeholder="2021000000000000"></div>
+          <div class="span-2"><label>网关</label><input name="alipay_gateway" value="${esc(pay.alipay_gateway || 'https://openapi.alipay.com/gateway.do')}"><span class="muted small">沙箱：https://openapi-sandbox.dl.alipaydev.com/gateway.do</span></div>
+          <div class="span-2"><label>应用私钥</label><textarea name="alipay_private_key" rows="3" placeholder="${pay.alipay_configured ? '已设置，留空不修改' : '-----BEGIN PRIVATE KEY-----'}"></textarea></div>
+          <div class="span-2"><label>支付宝公钥</label><textarea name="alipay_public_key" rows="3" placeholder="${pay.alipay_configured ? '已设置，留空不修改' : '-----BEGIN PUBLIC KEY-----'}"></textarea></div>
+          <div class="form-actions span-2"><button type="submit">保存支付宝配置</button></div>
+        </form>
+      </section>
+    </div>
+    <div id="wechatConfigModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" onclick="if(event.target===this)closePayConfig('wechat')">
+      <section class="modal-page card">
+        <div class="section-title modal-title"><div><h2>微信支付配置</h2><p>H5 支付，需要商户号与 API 密钥。</p></div><button type="button" class="secondary modal-close" onclick="closePayConfig('wechat')">关闭 ×</button></div>
+        <form id="wechatConfigForm" class="settings-form form-grid">
+          <div class="span-2"><label>AppID</label><input name="wechat_appid" value="${esc(pay.wechat_appid || '')}" placeholder="wx0000000000000000"></div>
+          <div class="span-2"><label>商户号</label><input name="wechat_mch_id" value="${esc(pay.wechat_mch_id || '')}" placeholder="1600000000"></div>
+          <div class="span-2"><label>API 密钥</label><input name="wechat_api_key" type="password" placeholder="${pay.wechat_configured ? '已设置，留空不修改' : '32 位 API 密钥'}"></div>
+          <div class="form-actions span-2"><button type="submit">保存微信配置</button></div>
+        </form>
+      </section>
+    </div>
   </section>`;
+}
+
+function openPayConfig(kind){
+  const el = document.querySelector(kind === 'alipay' ? '#alipayConfigModal' : '#wechatConfigModal');
+  if(el) el.classList.remove('hidden');
+}
+
+function closePayConfig(kind){
+  const el = document.querySelector(kind === 'alipay' ? '#alipayConfigModal' : '#wechatConfigModal');
+  if(el) el.classList.add('hidden');
 }
 
 function adminSmtpCardHtml(smtp){
@@ -3126,6 +3154,37 @@ function wireAdminSettingsForms(){
         const r = await api('/api/admin/payment-config', {method:'POST', body});
         await reloadAdminCurrentPage();
         show(r.message || '支付设置已保存');
+      }catch(err){ show(err.message, true); }
+    };
+  }
+  const alipayForm = document.querySelector('#alipayConfigForm');
+  if(alipayForm){
+    alipayForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const body = {alipay_app_id: f.alipay_app_id.value, alipay_gateway: f.alipay_gateway.value};
+      if(f.alipay_private_key.value.trim()) body.alipay_private_key = f.alipay_private_key.value.trim();
+      if(f.alipay_public_key.value.trim()) body.alipay_public_key = f.alipay_public_key.value.trim();
+      try{
+        const r = await api('/api/admin/payment-config', {method:'POST', body});
+        closePayConfig('alipay');
+        await reloadAdminCurrentPage();
+        show(r.message || '支付宝配置已保存');
+      }catch(err){ show(err.message, true); }
+    };
+  }
+  const wechatForm = document.querySelector('#wechatConfigForm');
+  if(wechatForm){
+    wechatForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const body = {wechat_appid: f.wechat_appid.value, wechat_mch_id: f.wechat_mch_id.value};
+      if(f.wechat_api_key.value.trim()) body.wechat_api_key = f.wechat_api_key.value.trim();
+      try{
+        const r = await api('/api/admin/payment-config', {method:'POST', body});
+        closePayConfig('wechat');
+        await reloadAdminCurrentPage();
+        show(r.message || '微信支付配置已保存');
       }catch(err){ show(err.message, true); }
     };
   }

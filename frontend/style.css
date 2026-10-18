@@ -1644,3 +1644,8 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .node-pick-body small{color:var(--muted);font-size:12px}
 
 .plan-fair{color:var(--muted);border-left:2px solid var(--border-strong);padding-left:8px}
+
+/* ---- 支付渠道配置入口 ---- */
+.pay-config-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.pay-config-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:rgba(148,163,184,.06)}
+.pay-config-item>div{display:flex;align-items:center;gap:10px;font-size:13px}
