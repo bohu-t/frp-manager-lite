@@ -2277,6 +2277,8 @@ def start_plan_usage_loop() -> None:
         while True:
             try:
                 expire_plans_once()
+                with db() as conn:
+                    reclaim_expired_plan_ports(conn)
                 global _abuse_last_check
                 with db() as conn:
                     auto_unban(conn)
@@ -2778,7 +2780,8 @@ def init_db() -> None:
                 user_id INTEGER NOT NULL,
                 node_id INTEGER NOT NULL,
                 port INTEGER NOT NULL,
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                release_at INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_user_plan_ports_port ON user_plan_ports(node_id, port);
             CREATE TABLE IF NOT EXISTS recharge_keys (
@@ -2837,6 +2840,9 @@ def init_db() -> None:
             conn.execute("ALTER TABLE user_plans ADD COLUMN used_bytes INTEGER NOT NULL DEFAULT 0")
         if "usage_started_at" not in up_cols:
             conn.execute("ALTER TABLE user_plans ADD COLUMN usage_started_at INTEGER NOT NULL DEFAULT 0")
+        upp_cols = {r["name"] for r in conn.execute("PRAGMA table_info(user_plan_ports)").fetchall()}
+        if "release_at" not in upp_cols:
+            conn.execute("ALTER TABLE user_plan_ports ADD COLUMN release_at INTEGER NOT NULL DEFAULT 0")
         if "status" not in up_cols:
             conn.execute("ALTER TABLE user_plans ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
         if "price_points" not in plan_cols:
@@ -4292,15 +4298,39 @@ def cancel_user_plan(user: sqlite3.Row, user_plan_id: int) -> tuple[bool, str, d
     return True, msg, info
 
 
+PLAN_GRACE_SECONDS = int(os.getenv("FML_PLAN_GRACE_HOURS", "72") or 72) * 3600
+
+
 def release_plan_resources(conn: sqlite3.Connection, plan_row: sqlite3.Row) -> None:
-    """套餐失效：停用该套餐端口上的隧道并回收端口。"""
+    """套餐失效：停用隧道，端口保留 3 天供续期，到期由后台回收。"""
     ports = conn.execute("SELECT node_id, port FROM user_plan_ports WHERE user_plan_id=?", (plan_row["id"],)).fetchall()
     for pr in ports:
         node_id, port = int(pr["node_id"]), int(pr["port"])
         conn.execute("UPDATE tunnels SET enabled=0 WHERE user_id=? AND node_id=? AND remote_port=?",
                      (plan_row["user_id"], node_id, port))
-        conn.execute("UPDATE ports SET user_id=NULL WHERE node_id=? AND port=?", (node_id, port))
-    conn.execute("DELETE FROM user_plan_ports WHERE user_plan_id=?", (plan_row["id"],))
+    conn.execute("UPDATE user_plan_ports SET release_at=? WHERE user_plan_id=? AND release_at=0",
+                 (now() + PLAN_GRACE_SECONDS, plan_row["id"]))
+
+
+def reclaim_expired_plan_ports(conn: sqlite3.Connection) -> int:
+    """回收保留期已过的套餐端口。"""
+    rows = conn.execute("SELECT id, node_id, port FROM user_plan_ports WHERE release_at>0 AND release_at<=?", (now(),)).fetchall()
+    for r in rows:
+        conn.execute("UPDATE ports SET user_id=NULL WHERE node_id=? AND port=?", (int(r["node_id"]), int(r["port"])))
+        conn.execute("DELETE FROM user_plan_ports WHERE id=?", (r["id"],))
+    return len(rows)
+
+
+def claim_retained_ports(conn: sqlite3.Connection, user_id: int, new_plan_id: int, wanted: int) -> list[sqlite3.Row]:
+    """续期时优先接管保留中的端口，并恢复对应隧道。"""
+    rows = conn.execute(
+        "SELECT id, node_id, port FROM user_plan_ports WHERE user_id=? AND release_at>0 ORDER BY release_at, id LIMIT ?",
+        (user_id, wanted)).fetchall()
+    for r in rows:
+        conn.execute("UPDATE user_plan_ports SET user_plan_id=?, release_at=0 WHERE id=?", (new_plan_id, r["id"]))
+        conn.execute("UPDATE tunnels SET enabled=1 WHERE user_id=? AND node_id=? AND remote_port=?",
+                     (user_id, int(r["node_id"]), int(r["port"])))
+    return rows
 
 
 def expire_plans_once() -> int:
@@ -4347,7 +4377,7 @@ def refresh_user_plan_usage(conn: sqlite3.Connection, user_id: int) -> None:
         total = 0
         for pr in ports:
             row = conn.execute(
-                "SELECT COALESCE(SUM(bytes),0) FROM traffic_samples WHERE user_id=? AND node_id=? AND remote_port=? AND ts>=?",
+                "SELECT COALESCE(SUM(bytes),0) FROM traffic_samples WHERE user_id=? AND node_id=? AND remote_port=? AND ts>?",
                 (user_id, int(pr["node_id"]), int(pr["port"]), since)).fetchone()
             total += int(row[0] or 0) if row else 0
         used = int(p["used_bytes"] or 0) + total
@@ -4371,12 +4401,6 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
     if not node_id:
         return False, "没有可用节点，请联系管理员"
     max_ports = int(order["max_ports"] or 0)
-    free_ports = available_ports_for_assignment(conn, node_id, max_ports) if max_ports else []
-    if max_ports and len(free_ports) < max_ports:
-        return False, f"节点端口不足，只剩 {len(free_ports)} 个可用端口"
-    if free_ports:
-        conn.executemany("UPDATE ports SET user_id=? WHERE node_id=? AND port=?",
-                         [(user["id"], node_id, r["port"]) for r in free_ports])
     duration_days = int(order["duration_days"] or 0)
     plan_row = conn.execute("SELECT billing_mode FROM plans WHERE id=?", (order["plan_id"],)).fetchone() if order["plan_id"] else None
     billing_mode = (row_val(plan_row, "billing_mode", "time") if plan_row else "time") or "time"
@@ -4393,14 +4417,21 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
          duration_days, node_id, now(), expires_at, now()))
     conn.execute("UPDATE users SET node_id=? WHERE id=?", (node_id, user["id"]))
     plan_id_new = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+    # 续期优先接管保留中的端口（三天宽限期内），恢复原隧道
+    claimed = claim_retained_ports(conn, int(user["id"]), plan_id_new, max_ports) if max_ports else []
+    need = max(0, max_ports - len(claimed))
+    free_ports = available_ports_for_assignment(conn, node_id, need) if need else []
+    if need and len(free_ports) < need:
+        conn.rollback()
+        return False, f"节点端口不足，只剩 {len(free_ports)} 个可用端口"
     if free_ports:
+        conn.executemany("UPDATE ports SET user_id=? WHERE node_id=? AND port=?",
+                         [(user["id"], node_id, r["port"]) for r in free_ports])
         conn.executemany(
             "INSERT OR IGNORE INTO user_plan_ports(user_plan_id, user_id, node_id, port, created_at) VALUES(?,?,?,?,?)",
             [(plan_id_new, user["id"], node_id, r["port"], now()) for r in free_ports])
     recalc_user_entitlements(conn, int(user["id"]))
     return True, "已开通"
-
-
 
 
 def mark_order_paid(order_no: str, transaction_id: str = "", provider: str = "") -> tuple[bool, str]:
@@ -5258,6 +5289,8 @@ class Handler(BaseHTTPRequestHandler):
                         "status": status, "expired": status != "active", "created_at": r["created_at"],
                         "price_points": int(r["price_points"] or 0),
                         "refund_points": (compute_plan_refund(conn, r)["points"] if status == "active" else 0),
+                        "grace_until": int(conn.execute(
+                            "SELECT COALESCE(MAX(release_at),0) FROM user_plan_ports WHERE user_plan_id=?", (r["id"],)).fetchone()[0] or 0),
                         "paused": bool(int(r["quota_bytes"] or 0) > 0 and unlimited_active),
                     })
             node_payload = node_public(node) if node else None

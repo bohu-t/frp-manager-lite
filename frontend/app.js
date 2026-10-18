@@ -1661,7 +1661,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         <td>${p.max_ports}</td>
         <td>${p.billing_mode === 'traffic' ? '流量' : '时间'}</td>
         <td>${p.quota_gb > 0 ? `${p.used_gb} / ${p.quota_gb} GB` : '不限量'}${p.billing_mode !== 'traffic' && p.expires_at ? `<br><span class="muted small">到期 ${esc(p.expires_text)}</span>` : ''}</td>
-        <td>${p.status === 'exhausted' ? '<span class="bad">流量用尽</span>' : (p.status === 'cancelled' ? '<span class="muted">已退订</span>' : (p.expired ? '<span class="bad">已到期</span>' : (p.paused ? '<span class="muted">已暂停</span>' : '<span class="ok">生效中</span>')))}</td>
+        <td>${p.status === 'exhausted' ? '<span class="bad">流量用尽</span>' : (p.status === 'cancelled' ? '<span class="muted">已退订</span>' : (p.expired ? '<span class="bad">已到期</span>' : (p.paused ? '<span class="muted">已暂停</span>' : '<span class="ok">生效中</span>')))}${p.grace_until && p.status !== 'active' ? `<br><span class="muted small">端口保留至 ${fmtTs(p.grace_until)}</span>` : ''}</td>
         <td class="actions node-actions">${p.status === 'active' ? `<button type="button" class="node-action node-action-danger" onclick="cancelPlan(${p.id}, '${esc(p.plan_name)}', ${Number(p.refund_points || 0)})">退订</button>` : '<span class="muted small">—</span>'}</td>
       </tr>`).join('') || '<tr><td colspan="7" class="muted">还没有购买过套餐</td></tr>';
     const latestExpiry = activePlans.length
