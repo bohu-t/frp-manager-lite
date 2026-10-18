@@ -744,9 +744,9 @@ function appSidebarHtml(kind='dashboard'){
   const isAdmin = currentUser?.role === 'admin';
   const username = currentUser?.username || '用户';
   const items = isAdmin ? [
-    ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','chart','订单','orders'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
+    ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','chart','订单','orders'],['admin-hosts','cloud','托管中心'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
   ] : [
-    ['dashboard','home','概览'],['dashboard-nodes','node','新建节点'],['dashboard-myplans','license','我的节点'],['dashboard-points','bolt','账单与充值'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
+    ['dashboard','home','概览'],['dashboard-nodes','node','新建节点'],['dashboard-myplans','license','我的节点'],['dashboard-hosts','cloud','托管中心'],['dashboard-points','bolt','账单与充值'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
   ];
   const links = items.map(([action, icon, label, section]) => {
     const active = kind === action || (section && kind === section) ? ' active' : '';
@@ -792,6 +792,7 @@ function setNav(){
     navButton('用户', 'admin', 'secondary', 'users'),
     navButton('套餐', 'admin', 'secondary', 'plans'),
     navButton('订单', 'admin', 'secondary', 'orders'),
+    navButton('托管', 'admin-hosts', 'secondary'),
     navButton('新增节点', 'admin', 'secondary', 'nodes'),
     navButton('节点健康', 'admin-health', 'secondary', 'health'),
     navButton('映射监控', 'admin-proxies', 'secondary', 'proxies'),
@@ -863,6 +864,8 @@ app.addEventListener('click', async (e) => {
     if(action === 'dashboard-plans') return loadPlans();
     if(action === 'dashboard-points') return loadPoints();
     if(action === 'dashboard-myplans') return loadMyPlans();
+    if(action === 'dashboard-hosts') return loadHosts();
+    if(action === 'admin-hosts') return loadAdminHosts();
     if(action === 'admin-dashboard') return loadAdminDashboard();
     if(action === 'admin-settings') return loadAdminSettings();
     if(action === 'admin-proxies') return loadAdminProxies();
@@ -1102,6 +1105,114 @@ async function resumePay(orderNo){
 
 
 let nnState = { region: '', nodeId: 0, planId: 0 };
+
+
+const HOST_STATUS_CLASS = {pending:'', approved:'ok', rejected:'bad', blacklisted:'bad'};
+const HOST_RULES = [
+  '托管的母鸡仅用于本平台业务，禁止超售、转租或挪作他用。',
+  '母鸡连续离线超过 24 小时，平台将自动下架，并按规则双倍计费。',
+  '收到工单后需在 12 小时内响应，超时计入考核。',
+  '发现违规用途或虚标配置，直接拉黑并停止结算。'
+];
+
+function hostRowsHtml(hosts, admin){
+  return hosts.map((h, i) => `<tr>
+      <td>${i + 1}</td>
+      <td>${esc(h.name)}</td>
+      <td>${esc(h.region)}</td>
+      <td>${esc(h.server_addr)}:${h.server_port}</td>
+      <td>${esc(h.cpu || '-')} / ${esc(h.memory || '-')} / ${esc(h.disk || '-')}</td>
+      <td>${h.bandwidth_mbps ? h.bandwidth_mbps + ' Mbps' : '不限'} / ${h.monthly_traffic_gb ? h.monthly_traffic_gb + ' GB' : '不限'}</td>
+      ${admin ? `<td>${esc(h.username)}</td>` : ''}
+      <td><span class="status-badge ${HOST_STATUS_CLASS[h.status] || ''}"><i></i>${esc(h.status_text)}</span></td>
+      <td>${fmtTs(h.created_at)}</td>
+      <td class="actions node-actions">${admin ? `
+        ${h.status === 'pending' ? `<button class="node-action" onclick="hostReview(${h.id}, 'approve')">通过</button><button class="node-action node-action-danger" onclick="hostReview(${h.id}, 'reject')">拒绝</button>` : ''}
+        ${h.status !== 'blacklisted' ? `<button class="node-action node-action-danger" onclick="hostReview(${h.id}, 'blacklist')">拉黑</button>` : '<span class="muted small">已拉黑</span>'}
+      ` : '<span class="muted small">—</span>'}</td>
+    </tr>`).join('') || `<tr><td colspan="${admin ? 11 : 10}" class="muted">暂无托管记录</td></tr>`;
+}
+
+function hostFormModal(){
+  document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="hostFormModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeHostForm()">
+    <section class="modal-page card">
+      <div class="section-title modal-title"><div><h2>添加母鸡</h2><p>提交后由管理员审核，通过后自动创建节点。</p></div><button type="button" class="secondary modal-close" onclick="closeHostForm()">关闭 ×</button></div>
+      <form id="hostForm" class="grid">
+        <div><label>母鸡名称</label><input name="name" required placeholder="例如 wh-01"></div>
+        <div><label>地区</label><input name="region" placeholder="例如 武汉" required></div>
+        <div><label>公网 IP / 域名</label><input name="server_addr" required placeholder="frp.example.com"></div>
+        <div><label>frps 端口</label><input name="server_port" type="number" value="7000" min="1" max="65535"></div>
+        <div><label>端口起始</label><input name="port_start" type="number" value="20000" min="1" max="65535"></div>
+        <div><label>端口结束</label><input name="port_end" type="number" value="20199" min="1" max="65535"></div>
+        <div><label>带宽 Mbps</label><input name="bandwidth_mbps" type="number" value="0" min="0"></div>
+        <div><label>月流量 GB</label><input name="monthly_traffic_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
+        <div><label>CPU</label><input name="cpu" placeholder="例如 4 核"></div>
+        <div><label>内存</label><input name="memory" placeholder="例如 8G"></div>
+        <div><label>硬盘</label><input name="disk" placeholder="例如 100G SSD"></div>
+        <div class="span-2"><label>备注</label><input name="note" placeholder="线路 / 机房 / 联系方式"></div>
+        <div class="form-actions span-2"><button>提交审核</button></div>
+      </form>
+    </section>
+  </div>`);
+  const form = document.querySelector('#hostForm');
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    try{
+      const r = await api('/api/user/hosts', {method:'POST', body:Object.fromEntries(new FormData(e.target))});
+      closeHostForm();
+      await appAlert(r.message || '已提交', {title:'提交成功'});
+      loadHosts();
+    }catch(err){ await appAlert(err.message, {title:'提交失败'}); }
+  };
+}
+function closeHostForm(){ const el = document.querySelector('#hostFormModal'); if(el) el.remove(); }
+
+async function loadHosts(){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
+  let data;
+  try{ data = await api('/api/user/hosts'); }
+  catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
+  const hosts = data.hosts || [];
+  app.innerHTML = appLayoutHtml(`
+    <div class="ov-page-head"><div><span class="section-kicker">HOSTING</span><h1>托管中心</h1><p>登记并管理你的母鸡，审核通过后自动成为可用节点。</p></div>
+      <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadHosts()">刷新</button><button type="button" onclick="hostFormModal()">＋ 添加母鸡</button></div></div>
+    <section class="card host-rules">
+      <div class="section-title"><div><h2>${stIcon('shield')}托管规则与准则</h2><p>提交前请确认可以遵守以下约定</p></div></div>
+      <ol class="host-rule-list">${HOST_RULES.map(r => `<li>${esc(r)}</li>`).join('')}</ol>
+    </section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('cloud')}我的托管</h2><p>共 ${hosts.length} 条记录</p></div></div>
+      <table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>配置</th><th>带宽 / 流量</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${hostRowsHtml(hosts, false)}</tbody></table>
+    </section>`, 'dashboard-hosts', '托管中心');
+}
+
+async function loadAdminHosts(){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
+  let data;
+  try{ data = await api('/api/admin/hosts'); }
+  catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
+  const hosts = data.hosts || [];
+  const pending = hosts.filter(h => h.status === 'pending').length;
+  app.innerHTML = appLayoutHtml(`
+    <div class="ov-page-head"><div><span class="section-kicker">HOSTING</span><h1>托管中心</h1><p>审核用户提交的母鸡，通过后自动创建节点。</p></div>
+      <div class="row" style="gap:10px"><span class="section-count">待审核 ${pending}</span><button type="button" class="secondary" onclick="loadAdminHosts()">刷新</button></div></div>
+    <section class="card host-rules">
+      <div class="section-title"><div><h2>${stIcon('shield')}托管规则与准则</h2><p>审核时请对照以下约定</p></div></div>
+      <ol class="host-rule-list">${HOST_RULES.map(r => `<li>${esc(r)}</li>`).join('')}</ol>
+    </section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('cloud')}托管列表</h2><p>共 ${hosts.length} 条</p></div></div>
+      <table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>配置</th><th>带宽 / 流量</th><th>提交人</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${hostRowsHtml(hosts, true)}</tbody></table>
+    </section>`, 'admin-hosts', '托管中心');
+}
+
+async function hostReview(id, action){
+  const labels = {approve:'通过', reject:'拒绝', blacklist:'拉黑'};
+  if(!await appConfirm(`确认${labels[action]}该托管申请？`, {title:'托管审核', okText:labels[action], danger: action !== 'approve'})) return;
+  try{
+    const r = await api('/api/admin/hosts/review', {method:'POST', body:{id, action}});
+    await appAlert(r.message || '已处理', {title:'审核完成'});
+    loadAdminHosts();
+  }catch(err){ await appAlert(err.message, {title:'操作失败'}); }
+}
 
 async function loadNewNode(){
   hideFlash(); clearAdminDashboardTimer(); setNav();

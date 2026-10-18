@@ -2754,6 +2754,31 @@ def init_db() -> None:
                 created_at INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_point_logs_user ON point_logs(user_id, id);
+            CREATE TABLE IF NOT EXISTS hosts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                username TEXT NOT NULL DEFAULT '',
+                name TEXT NOT NULL,
+                region TEXT NOT NULL DEFAULT '默认地区',
+                server_addr TEXT NOT NULL,
+                server_port INTEGER NOT NULL DEFAULT 7000,
+                auth_token TEXT NOT NULL DEFAULT '',
+                port_start INTEGER NOT NULL DEFAULT 20000,
+                port_end INTEGER NOT NULL DEFAULT 20199,
+                bandwidth_mbps INTEGER NOT NULL DEFAULT 0,
+                monthly_traffic_gb REAL NOT NULL DEFAULT 0,
+                cpu TEXT NOT NULL DEFAULT '',
+                memory TEXT NOT NULL DEFAULT '',
+                disk TEXT NOT NULL DEFAULT '',
+                note TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                node_id INTEGER,
+                reviewed_by INTEGER,
+                reviewed_at INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_hosts_user ON hosts(user_id, id);
             CREATE TABLE IF NOT EXISTS user_plans (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -4721,6 +4746,127 @@ def handle_payment_notify(provider: str, raw_body: bytes, form: dict[str, str], 
     return False, "未知支付方式"
 
 
+
+# ---------------------------------------------------------------------------
+# 托管中心（用户提交母鸡，管理员审核后自动建节点）
+# ---------------------------------------------------------------------------
+
+HOST_STATUS_TEXT = {"pending": "待审核", "approved": "已通过", "rejected": "已拒绝", "blacklisted": "已拉黑"}
+
+
+def host_public(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": int(row["id"]),
+        "user_id": int(row["user_id"]),
+        "username": row["username"] or "",
+        "name": row["name"] or "",
+        "region": row["region"] or "",
+        "server_addr": row["server_addr"] or "",
+        "server_port": int(row["server_port"] or 0),
+        "port_start": int(row["port_start"] or 0),
+        "port_end": int(row["port_end"] or 0),
+        "bandwidth_mbps": int(row["bandwidth_mbps"] or 0),
+        "monthly_traffic_gb": float(row["monthly_traffic_gb"] or 0),
+        "cpu": row["cpu"] or "",
+        "memory": row["memory"] or "",
+        "disk": row["disk"] or "",
+        "note": row["note"] or "",
+        "status": row["status"] or "pending",
+        "status_text": HOST_STATUS_TEXT.get(row["status"] or "pending", row["status"] or ""),
+        "node_id": int(row["node_id"] or 0),
+        "reviewed_at": int(row["reviewed_at"] or 0),
+        "created_at": int(row["created_at"] or 0),
+    }
+
+
+def list_hosts(conn: sqlite3.Connection, user_id: int | None = None) -> list[dict[str, Any]]:
+    if user_id is None:
+        rows = conn.execute("SELECT * FROM hosts ORDER BY id DESC LIMIT 300").fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM hosts WHERE user_id=? ORDER BY id DESC LIMIT 100", (user_id,)).fetchall()
+    return [host_public(r) for r in rows]
+
+
+def create_host_application(user: sqlite3.Row, data: dict[str, Any]) -> tuple[bool, str]:
+    name = str(data.get("name", "")).strip()[:40]
+    region = str(data.get("region", "")).strip()[:40] or "默认地区"
+    server_addr = str(data.get("server_addr", "")).strip()[:200]
+    note = str(data.get("note", "")).strip()[:300]
+    cpu = str(data.get("cpu", "")).strip()[:60]
+    memory = str(data.get("memory", "")).strip()[:60]
+    disk = str(data.get("disk", "")).strip()[:60]
+    if not name or not name.replace("_", "").replace("-", "").isalnum():
+        return False, "母鸡名称只能包含字母、数字、下划线、短横线"
+    if not server_addr:
+        return False, "请填写公网 IP 或域名"
+    try:
+        server_port = int(data.get("server_port", 7000) or 7000)
+        port_start = int(data.get("port_start", 20000) or 20000)
+        port_end = int(data.get("port_end", 20199) or 20199)
+        bandwidth = max(0, int(data.get("bandwidth_mbps", 0) or 0))
+        monthly = max(0.0, float(data.get("monthly_traffic_gb", 0) or 0))
+    except (TypeError, ValueError):
+        return False, "端口 / 带宽 / 流量格式不正确"
+    if not (1 <= server_port <= 65535):
+        return False, "frps 端口不合法"
+    if not (1 <= port_start <= port_end <= 65535):
+        return False, "端口范围不合法"
+    if port_end - port_start > 20000:
+        return False, "端口池不要超过 20000 个"
+    with db() as conn:
+        pending = conn.execute("SELECT COUNT(*) FROM hosts WHERE user_id=? AND status='pending'", (user["id"],)).fetchone()[0]
+        if pending >= 5:
+            return False, "待审核的托管申请过多，请等待处理"
+        conn.execute(
+            "INSERT INTO hosts(user_id, username, name, region, server_addr, server_port, port_start, port_end, bandwidth_mbps, monthly_traffic_gb, cpu, memory, disk, note, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (user["id"], user["username"], name, region, server_addr, server_port, port_start, port_end,
+             bandwidth, monthly, cpu, memory, disk, note, "pending", now(), now()))
+    return True, "已提交托管申请，等待管理员审核"
+
+
+def review_host_application(admin: sqlite3.Row, host_id: int, action: str, reason: str = "") -> tuple[bool, str]:
+    action = str(action or "").lower()
+    if action not in ("approve", "reject", "blacklist"):
+        return False, "未知操作"
+    with db() as conn:
+        host = conn.execute("SELECT * FROM hosts WHERE id=?", (host_id,)).fetchone()
+        if not host:
+            return False, "托管申请不存在"
+        if action == "reject":
+            conn.execute("UPDATE hosts SET status='rejected', reviewed_by=?, reviewed_at=?, updated_at=? WHERE id=?",
+                         (admin["id"], now(), now(), host_id))
+            return True, "已拒绝该申请"
+        if action == "blacklist":
+            conn.execute("UPDATE hosts SET status='blacklisted', reviewed_by=?, reviewed_at=?, updated_at=? WHERE id=?",
+                         (admin["id"], now(), now(), host_id))
+            if host["node_id"]:
+                conn.execute("UPDATE nodes SET active=0 WHERE id=?", (int(host["node_id"]),))
+            return True, "已加入黑名单"
+        if host["status"] == "approved" and host["node_id"]:
+            return False, "该申请已通过"
+        # approve -> create node
+        base_name = str(host["name"])
+        node_name = base_name
+        suffix = 1
+        while conn.execute("SELECT 1 FROM nodes WHERE name=?", (node_name,)).fetchone():
+            suffix += 1
+            node_name = f"{base_name}-{suffix}"
+        token = str(host["auth_token"] or "") or secrets.token_urlsafe(24)
+        cur = conn.execute(
+            "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, monthly_traffic_bytes, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (host["region"], node_name, host["server_addr"], int(host["server_port"]), token,
+             int(host["port_start"]), int(host["port_end"]), 0, "", "", "", int(host["bandwidth_mbps"] or 0),
+             int(float(host["monthly_traffic_gb"] or 0) * 1024 ** 3), 1,
+             f"托管：{host['username']} / {host['note'] or ''}".strip(), now()))
+        node_id = int(cur.lastrowid)
+        conn.executemany("INSERT OR IGNORE INTO ports(node_id, port, created_at) VALUES(?,?,?)",
+                         [(node_id, p, now()) for p in range(int(host["port_start"]), int(host["port_end"]) + 1)])
+        conn.execute("UPDATE hosts SET status='approved', node_id=?, reviewed_by=?, reviewed_at=?, updated_at=? WHERE id=?",
+                     (node_id, admin["id"], now(), now(), host_id))
+        conn.execute("UPDATE hosts SET auth_token=? WHERE id=?", (token, host_id))
+    return True, f"已通过并创建节点「{node_name}」"
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "frp-manager-lite-api/2.0.0"
 
@@ -5337,6 +5483,10 @@ class Handler(BaseHTTPRequestHandler):
                 node_payload["latency_ms"] = node_payload.get("auth_latency_ms")
             self.send_json({"ok": True, "version": APP_VERSION, "uptime_seconds": int(time.time() - SERVER_START_TS), "latest_version": panel_latest_version(), "update_link": PANEL_UPDATE_LINK, "user": public_user(user), "software_license": sw_license, "node": node_payload, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "my_plans": my_plans, "payment": payment_public(payment_config(conn)), "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
             return
+        if path == "/api/user/hosts":
+            with db() as conn:
+                self.send_json({"ok": True, "hosts": list_hosts(conn, int(user["id"]))})
+            return
         if path == "/api/user/points":
             with db() as conn:
                 logs = []
@@ -5386,6 +5536,12 @@ class Handler(BaseHTTPRequestHandler):
                     "points_total": conn.execute("SELECT COALESCE(SUM(delta),0) FROM point_logs WHERE kind='key_recharge'").fetchone()[0],
                 }
             self.send_json({"ok": True, "keys": keys, "stats": stats})
+            return
+        if path == "/api/admin/hosts":
+            if not self.require_admin():
+                return
+            with db() as conn:
+                self.send_json({"ok": True, "hosts": list_hosts(conn)})
             return
         if path == "/api/admin/plans":
             if not self.require_admin():
@@ -5696,6 +5852,20 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": ok, "message": msg, "error": None if ok else msg}, 200 if ok else 400)
             return
 
+        if path == "/api/user/hosts":
+            user = self.require_user()
+            if not user:
+                return
+            ok_rate, retry_after = rate_limit_check(f"host:{user['id']}", 5)
+            if not ok_rate:
+                self.send_json({"ok": False, "error": f"提交过于频繁，请 {retry_after} 秒后再试"}, 429)
+                return
+            ok, msg = create_host_application(user, data)
+            if ok:
+                audit("host_apply", user, None, None, "", str(data.get("name", "")))
+            self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg}, 200 if ok else 400)
+            return
+
         if path == "/api/user/plans/cancel":
             user = self.require_user()
             if not user:
@@ -5945,6 +6115,18 @@ class Handler(BaseHTTPRequestHandler):
             self.admin_recharge_key_delete(data)
         elif path == "/api/admin/users/points":
             self.admin_user_points(data)
+        elif path == "/api/admin/hosts/review":
+            admin = self.require_admin()
+            if not admin:
+                return
+            try:
+                host_id = int(data.get("id", 0))
+            except (TypeError, ValueError):
+                host_id = 0
+            ok, msg = review_host_application(admin, host_id, str(data.get("action", "")), str(data.get("reason", "")))
+            if ok:
+                audit("host_review", admin, None, None, "", f"host={host_id} {msg}")
+            self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg}, 200 if ok else 400)
         elif path == "/api/admin/plans/save":
             self.admin_plan_save(data)
         elif path == "/api/admin/plans/delete":
