@@ -5999,7 +5999,7 @@ class Handler(BaseHTTPRequestHandler):
                         "SELECT 1 FROM user_plans WHERE user_id=? AND quota_bytes>0 AND status='active' AND (expires_at=0 OR expires_at>?) LIMIT 1",
                         (user["id"], now())).fetchone()
                     if quota_active:
-                        raise ValueError("流量套餐不支持域名型隧道（HTTP/HTTPS），请使用 TCP/UDP 端口隧道")
+                        raise ValueError("当前套餐含流量额度，域名隧道无法计入流量，请使用 TCP/UDP 端口隧道")
                 if total_plans:
                     refresh_user_plan_usage(conn, int(user["id"]))
                     active_plans = conn.execute(
