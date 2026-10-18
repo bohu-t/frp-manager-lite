@@ -2214,6 +2214,11 @@ def sample_traffic_once() -> int:
         return 0
 
 _bandwidth_strikes: dict[int, int] = {}
+# 带宽滥用检测：每 6 分钟评估一次，连续 5 轮（约 30 分钟）超限才封禁 30 分钟
+ABUSE_CHECK_SECONDS = int(os.getenv("FML_ABUSE_CHECK_SECONDS", "360") or "360")
+ABUSE_STRIKES = int(os.getenv("FML_ABUSE_STRIKES", "5") or "5")
+ABUSE_BAN_SECONDS = int(os.getenv("FML_ABUSE_BAN_MINUTES", "30") or "30") * 60
+_abuse_last_check = 0.0
 
 
 def auto_unban(conn: sqlite3.Connection) -> None:
@@ -2247,8 +2252,8 @@ def check_bandwidth_abuse(conn: sqlite3.Connection) -> None:
             _bandwidth_strikes[uid] = _bandwidth_strikes.get(uid, 0) + 1
         else:
             _bandwidth_strikes[uid] = 0
-        if _bandwidth_strikes.get(uid, 0) >= 3 and int(user["banned_until"] or 0) <= now():
-            until = now() + 1800
+        if _bandwidth_strikes.get(uid, 0) >= ABUSE_STRIKES and int(user["banned_until"] or 0) <= now():
+            until = now() + ABUSE_BAN_SECONDS
             reason = f"持续占用带宽（约 {kbps:.0f} Kbps / 上限 {limit} Kbps）"
             conn.execute("UPDATE users SET banned_until=?, ban_reason=? WHERE id=?", (until, reason, uid))
             conn.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
@@ -2272,9 +2277,12 @@ def start_plan_usage_loop() -> None:
         while True:
             try:
                 expire_plans_once()
+                global _abuse_last_check
                 with db() as conn:
                     auto_unban(conn)
-                    check_bandwidth_abuse(conn)
+                    if time.time() - _abuse_last_check >= ABUSE_CHECK_SECONDS:
+                        _abuse_last_check = time.time()
+                        check_bandwidth_abuse(conn)
                 with db() as conn:
                     ids = [int(r["user_id"]) for r in conn.execute(
                         "SELECT DISTINCT user_id FROM user_plans WHERE quota_bytes>0 AND status='active'")]
