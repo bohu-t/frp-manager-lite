@@ -4358,14 +4358,6 @@ def refresh_user_plan_usage(conn: sqlite3.Connection, user_id: int) -> None:
         (user_id,)).fetchall()
     if not traffic_plans:
         return
-    unlimited = conn.execute(
-        "SELECT COUNT(*) FROM user_plans WHERE user_id=? AND billing_mode='time' AND quota_bytes=0 AND status='active' AND (expires_at=0 OR expires_at>?)",
-        (user_id, now())).fetchone()[0]
-    if unlimited:
-        conn.execute(
-            "UPDATE user_plans SET usage_started_at=? WHERE user_id=? AND quota_bytes>0 AND status='active'",
-            (now(), user_id))
-        return
     changed = False
     for p in traffic_plans:
         quota = int(p["quota_bytes"] or 0)
@@ -4467,14 +4459,7 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
             chosen_node = conn.execute("SELECT id, name FROM nodes WHERE id=? AND active=1", (node_id,)).fetchone()
             if not chosen_node:
                 return False, "所选节点不存在或已停用", None
-        new_mode = (row_val(plan, "billing_mode", "time") or "time")
-        other_mode = "time" if new_mode == "traffic" else "traffic"
-        other_mode_name = "时间套餐" if new_mode == "traffic" else "流量套餐"
-        conflict = conn.execute(
-            "SELECT 1 FROM user_plans WHERE user_id=? AND billing_mode=? AND status='active' AND (expires_at=0 OR expires_at>?) LIMIT 1",
-            (user["id"], other_mode, now())).fetchone()
-        if conflict:
-            return False, f"已有生效中的{other_mode_name}，不能同时购买{'流量' if new_mode == 'traffic' else '时间'}套餐，请先退订或到期", None
+
         cost = int(row_val(plan, "price_points", 0) or 0)
         balance = int(row_val(conn.execute("SELECT points FROM users WHERE id=?", (user["id"],)).fetchone(), "points", 0) or 0)
         if cost > balance:
@@ -5269,9 +5254,6 @@ class Handler(BaseHTTPRequestHandler):
                 port_stats = {"total": port_count, "used": len(used_ports), "free": port_count - len(used_ports)}
                 user_dashboard = frps_user_dashboard(user["username"], user) if node else None
                 refresh_user_plan_usage(conn, int(user["id"]))
-                unlimited_active = bool(conn.execute(
-                    "SELECT 1 FROM user_plans WHERE user_id=? AND billing_mode='time' AND quota_bytes=0 AND status='active' AND (expires_at=0 OR expires_at>?) LIMIT 1",
-                    (user["id"], now())).fetchone())
                 my_plans = []
                 for r in conn.execute("SELECT * FROM user_plans WHERE user_id=? ORDER BY id DESC", (user["id"],)):
                     exp = int(r["expires_at"] or 0)
@@ -5291,7 +5273,7 @@ class Handler(BaseHTTPRequestHandler):
                         "refund_points": (compute_plan_refund(conn, r)["points"] if status == "active" else 0),
                         "grace_until": int(conn.execute(
                             "SELECT COALESCE(MAX(release_at),0) FROM user_plan_ports WHERE user_plan_id=?", (r["id"],)).fetchone()[0] or 0),
-                        "paused": bool(int(r["quota_bytes"] or 0) > 0 and unlimited_active),
+                        "paused": False,
                     })
             node_payload = node_public(node) if node else None
             if node_payload:
@@ -5998,7 +5980,10 @@ class Handler(BaseHTTPRequestHandler):
                     quota_active = conn.execute(
                         "SELECT 1 FROM user_plans WHERE user_id=? AND quota_bytes>0 AND status='active' AND (expires_at=0 OR expires_at>?) LIMIT 1",
                         (user["id"], now())).fetchone()
-                    if quota_active:
+                    unlimited_active = conn.execute(
+                        "SELECT 1 FROM user_plans WHERE user_id=? AND billing_mode='time' AND quota_bytes=0 AND status='active' AND (expires_at=0 OR expires_at>?) LIMIT 1",
+                        (user["id"], now())).fetchone()
+                    if quota_active and not unlimited_active:
                         raise ValueError("当前套餐含流量额度，域名隧道无法计入流量，请使用 TCP/UDP 端口隧道")
                 if total_plans:
                     refresh_user_plan_usage(conn, int(user["id"]))
