@@ -966,6 +966,7 @@ async function loadPlans(){
         <li><span>速率上限</span><b>${p.bandwidth_limit_mbs ? p.bandwidth_limit_mbs + ' MB/s' : '不限'}</b></li>
       </ul>
       ${p.note ? `<p class="plan-note">${esc(p.note)}</p>` : ''}
+      ${p.fair_use_note ? `<p class="plan-note plan-fair">${esc(p.fair_use_note)}</p>` : ''}
       <button type="button" class="plan-buy" onclick="buyPlan(${p.id})" ${enough ? '' : 'disabled'}>${enough ? '积分购买' : '积分不足'}</button>
     </article>`;
   }).join('') || '<p class="muted">管理员还没有上架套餐。</p>';
@@ -2062,6 +2063,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>速率 MB/s</label><input name="bandwidth_limit_mbs" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
       <div><label>排序</label><input name="sort_order" type="number" value="0"><span class="muted small">数字越小越靠前</span></div>
       <div><label>备注</label><input name="note" placeholder="套餐说明，展示给用户"></div>
+      <div style="grid-column:1/-1"><label>公平使用说明</label><textarea name="fair_use_note" rows="2" placeholder="例如：标称不限量，月流量超过 1TB 将限速"></textarea></div>
       <div><label>状态</label><select name="active"><option value="1">上架</option><option value="0">下架</option></select></div>
       <div class="form-actions" style="grid-column:1/-1"><button>保存套餐</button><button type="button" class="secondary" onclick="resetPlanForm()">清空</button></div>
     </form></section>
@@ -2587,6 +2589,7 @@ function resetPlanForm(){
   f.elements.bandwidth_limit_mbs.value = '0';
   f.elements.sort_order.value = '0';
   f.elements.active.value = '1';
+  f.elements.fair_use_note.value = '';
 }
 function editPlan(id){
   const f = document.querySelector('#planForm');
@@ -2603,6 +2606,7 @@ function editPlan(id){
   f.elements.node_id.value = p.node_id || 0;
   f.elements.sort_order.value = p.sort_order;
   f.elements.note.value = p.note;
+  f.elements.fair_use_note.value = p.fair_use_note || '';
   f.elements.active.value = p.active ? '1' : '0';
   f.scrollIntoView({behavior:'smooth', block:'center'});
 }

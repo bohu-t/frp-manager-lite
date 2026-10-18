@@ -2213,6 +2213,50 @@ def sample_traffic_once() -> int:
     except Exception:
         return 0
 
+_bandwidth_strikes: dict[int, int] = {}
+
+
+def auto_unban(conn: sqlite3.Connection) -> None:
+    conn.execute("UPDATE users SET banned_until=0, ban_reason='' WHERE banned_until>0 AND banned_until<=?", (now(),))
+
+
+def check_bandwidth_abuse(conn: sqlite3.Connection) -> None:
+    """连续多个采样周期接近带宽上限的用户，临时封禁 30 分钟。"""
+    window = now() - 900
+    rows = conn.execute(
+        "SELECT user_id, ts, SUM(bytes) AS total FROM traffic_samples WHERE ts>=? GROUP BY user_id, ts ORDER BY user_id, ts",
+        (window,)).fetchall()
+    per_user: dict[int, list[tuple[int, int]]] = {}
+    for r in rows:
+        per_user.setdefault(int(r["user_id"]), []).append((int(r["ts"]), int(r["total"] or 0)))
+    for uid, points in per_user.items():
+        if len(points) < 2:
+            continue
+        (t1, b1), (t2, b2) = points[-2], points[-1]
+        if t2 <= t1:
+            continue
+        kbps = max(0, (b2 - b1)) * 8 / 1024 / max(1, t2 - t1)
+        user = conn.execute("SELECT id, username, bandwidth_limit_kbps, banned_until FROM users WHERE id=?", (uid,)).fetchone()
+        if not user:
+            continue
+        limit = int(user["bandwidth_limit_kbps"] or 0)
+        if limit <= 0:
+            _bandwidth_strikes[uid] = 0
+            continue
+        if kbps >= limit * 0.9:
+            _bandwidth_strikes[uid] = _bandwidth_strikes.get(uid, 0) + 1
+        else:
+            _bandwidth_strikes[uid] = 0
+        if _bandwidth_strikes.get(uid, 0) >= 3 and int(user["banned_until"] or 0) <= now():
+            until = now() + 1800
+            reason = f"持续占用带宽（约 {kbps:.0f} Kbps / 上限 {limit} Kbps）"
+            conn.execute("UPDATE users SET banned_until=?, ban_reason=? WHERE id=?", (until, reason, uid))
+            conn.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
+            conn.execute("INSERT INTO user_bans(user_id, username, reason, banned_by, created_at) VALUES(?,?,?,NULL,?)",
+                         (uid, user["username"], reason, now()))
+            _bandwidth_strikes[uid] = 0
+
+
 _plan_usage_started = False
 
 
@@ -2228,6 +2272,9 @@ def start_plan_usage_loop() -> None:
         while True:
             try:
                 expire_plans_once()
+                with db() as conn:
+                    auto_unban(conn)
+                    check_bandwidth_abuse(conn)
                 with db() as conn:
                     ids = [int(r["user_id"]) for r in conn.execute(
                         "SELECT DISTINCT user_id FROM user_plans WHERE quota_bytes>0 AND status='active'")]
@@ -2512,6 +2559,8 @@ def init_db() -> None:
                 bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0,
                 active INTEGER NOT NULL DEFAULT 1,
                 expires_at INTEGER NOT NULL DEFAULT 0,
+                banned_until INTEGER NOT NULL DEFAULT 0,
+                ban_reason TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS ports (
@@ -2654,6 +2703,7 @@ def init_db() -> None:
                 duration_days INTEGER NOT NULL DEFAULT 30,
                 node_id INTEGER REFERENCES nodes(id) ON DELETE SET NULL,
                 note TEXT NOT NULL DEFAULT '',
+                fair_use_note TEXT NOT NULL DEFAULT '',
                 active INTEGER NOT NULL DEFAULT 1,
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL
@@ -2754,9 +2804,15 @@ def init_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0")
         if "points" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN points INTEGER NOT NULL DEFAULT 0")
+        if "banned_until" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN banned_until INTEGER NOT NULL DEFAULT 0")
+        if "ban_reason" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN ban_reason TEXT NOT NULL DEFAULT ''")
         plan_cols = {r["name"] for r in conn.execute("PRAGMA table_info(plans)").fetchall()}
         if "billing_mode" not in plan_cols:
             conn.execute("ALTER TABLE plans ADD COLUMN billing_mode TEXT NOT NULL DEFAULT 'time'")
+        if "fair_use_note" not in plan_cols:
+            conn.execute("ALTER TABLE plans ADD COLUMN fair_use_note TEXT NOT NULL DEFAULT ''")
         if setting_get(conn, "migration_billing_mode_v1", "") != "1":
             # 历史套餐：有流量额度且没有有效期，按流量模式处理（只执行一次）
             conn.execute("UPDATE plans SET billing_mode='traffic' WHERE duration_days=0 AND traffic_limit_bytes>0")
@@ -4016,6 +4072,7 @@ def plan_public(row: sqlite3.Row) -> dict[str, Any]:
         "duration_days": int(row["duration_days"] or 0),
         "node_id": int(row["node_id"] or 0),
         "note": row["note"] or "",
+        "fair_use_note": row_val(row, "fair_use_note", "") or "",
         "active": bool(row["active"]),
         "sort_order": int(row["sort_order"] or 0),
         "created_at": int(row["created_at"] or 0),
@@ -4032,7 +4089,8 @@ def list_plans(conn: sqlite3.Connection, active_only: bool = False) -> list[dict
 
 def save_plan(plan_id: int, name: str, price_cents: int, max_ports: int, traffic_limit_bytes: int,
               bandwidth_limit_kbps: int, duration_days: int, node_id: int, note: str,
-              active: bool, sort_order: int, price_points: int = 0, billing_mode: str = "time") -> tuple[bool, str]:
+              active: bool, sort_order: int, price_points: int = 0, billing_mode: str = "time",
+              fair_use_note: str = "") -> tuple[bool, str]:
     name = str(name or "").strip()[:60]
     if not name:
         return False, "请填写套餐名称"
@@ -4056,17 +4114,17 @@ def save_plan(plan_id: int, name: str, price_cents: int, max_ports: int, traffic
     with db() as conn:
         if plan_id:
             cur = conn.execute(
-                "UPDATE plans SET name=?, price_cents=?, price_points=?, billing_mode=?, max_ports=?, traffic_limit_bytes=?, bandwidth_limit_kbps=?, duration_days=?, node_id=?, note=?, active=?, sort_order=? WHERE id=?",
+                "UPDATE plans SET name=?, price_cents=?, price_points=?, billing_mode=?, max_ports=?, traffic_limit_bytes=?, bandwidth_limit_kbps=?, duration_days=?, node_id=?, note=?, fair_use_note=?, active=?, sort_order=? WHERE id=?",
                 (name, price_cents, price_points, billing_mode, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days,
-                 node_id or None, str(note or "")[:200], 1 if active else 0, sort_order, plan_id))
+                 node_id or None, str(note or "")[:200], str(fair_use_note or "")[:500], 1 if active else 0, sort_order, plan_id))
             if cur.rowcount == 0:
                 return False, "套餐不存在"
         else:
             seq_no = int(conn.execute("SELECT COALESCE(MAX(seq_no),0) FROM plans").fetchone()[0]) + 1
             conn.execute(
-                "INSERT INTO plans(seq_no, name, price_cents, price_points, billing_mode, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days, node_id, note, active, sort_order, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO plans(seq_no, name, price_cents, price_points, billing_mode, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days, node_id, note, fair_use_note, active, sort_order, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (seq_no, name, price_cents, price_points, billing_mode, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days,
-                 node_id or None, str(note or "")[:200], 1 if active else 0, sort_order, now()))
+                 node_id or None, str(note or "")[:200], str(fair_use_note or "")[:500], 1 if active else 0, sort_order, now()))
     return True, "套餐已保存"
 
 
@@ -5439,6 +5497,10 @@ class Handler(BaseHTTPRequestHandler):
             if not user["active"]:
                 self.send_json({"ok": False, "error": "账号已停用"}, 403)
                 return
+            banned_until = int(row_val(user, "banned_until", 0) or 0)
+            if banned_until > now():
+                self.send_json({"ok": False, "error": f"账号因异常占用带宽被封禁，解除时间：{fmt_time(banned_until)}"}, 403)
+                return
             if is_expired(user):
                 self.send_json({"ok": False, "error": "账号已到期"}, 403)
                 return
@@ -5811,6 +5873,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("HTTP/HTTPS/TCPMUX 必须填写自定义域名")
             if proxy_type in SECRET_KEY_PROXY_TYPES and not secret_key:
                 secret_key = secrets.token_urlsafe(16)
+            if int(row_val(user, "banned_until", 0) or 0) > now():
+                raise ValueError("账号因异常占用带宽被封禁，暂时无法创建隧道")
             with db() as conn:
                 if user["node_id"] and node_traffic_exceeded(conn, int(user["node_id"])):
                     raise ValueError("当前节点本月流量已用尽，暂时无法创建新隧道")
@@ -6217,7 +6281,7 @@ class Handler(BaseHTTPRequestHandler):
                             int(traffic_gb * 1024 ** 3), int(bandwidth_mbs * 1024), duration_days,
                             node_id, str(data.get("note", "")),
                             str(data.get("active", "1")) in ("1", "true", "on", "True"), sort_order, price_points,
-                            str(data.get("billing_mode", "time")))
+                            str(data.get("billing_mode", "time")), str(data.get("fair_use_note", "")))
         if ok:
             audit("plan_save", admin, None, None, "", f"套餐 {data.get('name','')} id={plan_id or 'new'}")
         self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg}, 200 if ok else 400)

@@ -1642,3 +1642,5 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .node-pick-body{display:flex;flex-direction:column;gap:2px}
 .node-pick-body b{font-size:14px}
 .node-pick-body small{color:var(--muted);font-size:12px}
+
+.plan-fair{color:var(--muted);border-left:2px solid var(--border-strong);padding-left:8px}
