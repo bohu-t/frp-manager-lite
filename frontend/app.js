@@ -1640,12 +1640,26 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
     return;
   }
   if(view === 'profile'){
+    const myPlans = data.my_plans || [];
+    const activePlans = myPlans.filter(p => !p.expired);
+    const planRows = myPlans.map((p, i) => `<tr>
+        <td>${i + 1}</td>
+        <td>${esc(p.plan_name || '-')}</td>
+        <td>${p.max_ports}</td>
+        <td>${p.traffic_limit_bytes ? fmtBytes(p.traffic_limit_bytes) : '不限'} / ${p.bandwidth_limit_kbps ? (Number(p.bandwidth_limit_kbps) / 1024).toFixed(1) + ' MB/s' : '不限'}</td>
+        <td>${p.expires_at ? esc(p.expires_text) : '不限期'}</td>
+        <td>${p.expired ? '<span class="bad">已到期</span>' : '<span class="ok">生效中</span>'}</td>
+      </tr>`).join('') || '<tr><td colspan="6" class="muted">还没有购买过套餐</td></tr>';
+    const latestExpiry = activePlans.length
+      ? (activePlans.some(p => !p.expires_at) ? '不限期' : activePlans.map(p => p.expires_text).sort().slice(-1)[0])
+      : '';
     app.innerHTML = appLayoutHtml(`
       <div class="profile-grid">
         <section class="card profile-card">
           <div class="profile-head"><span class="profile-avatar">${avatarSvg(data.user.username||'U', data.user.role, 56)}</span><div class="profile-id"><strong>${esc(data.user.username||'-')}</strong><small>${data.user.role === 'admin' ? '系统管理员' : '普通用户'}</small></div></div>
           <div class="profile-rows">
-            <div class="info-line"><span>套餐到期</span><strong>${Number(data.user.expires_at || 0) ? `${esc(data.user.expires_text)}${Number(data.user.expires_at) <= Date.now() / 1000 ? ' <span class="bad">已到期</span>' : ''}` : '<span class="muted">未购买套餐</span>'}</strong></div>
+            <div class="info-line"><span>套餐到期</span><strong>${latestExpiry ? esc(latestExpiry) : '<span class="muted">未购买套餐</span>'}</strong></div>
+            <div class="info-line"><span>生效套餐</span><strong>${activePlans.length} 个</strong></div>
             <div class="info-line"><span>今日流量</span><strong>${fmtBytes(todayTraffic)}${trafficLimit ? ' / ' + fmtBytes(trafficLimit) : ' / 不限'}</strong></div>
             <div class="info-line"><span>隧道数量</span><strong>${data.tunnels.length} 条</strong></div>
             <div class="info-line"><span>端口上限</span><strong>${esc(data.user.max_ports ?? '-')}</strong></div>
@@ -1657,6 +1671,10 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
             <div style="grid-column:1/-1"><label>设置邮箱（用于「忘记密码」接收验证码）</label><input name="email" type="email" value="${esc(data.user.email || '')}" placeholder="user@example.com"></div>
             <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存邮箱</button></div>
           </form>
+        </section>
+        <section class="card profile-plans">
+          <div class="section-title"><div><div class="section-kicker">MY PLANS</div><h2>${stIcon('license')}我的套餐</h2><p>每个套餐独立计算有效期，互不影响。</p></div><span class="section-count">${activePlans.length} 个生效中</span></div>
+          <table><thead><tr><th>序号</th><th>套餐</th><th>端口</th><th>流量 / 速率</th><th>到期</th><th>状态</th></tr></thead><tbody>${planRows}</tbody></table>
         </section>
         <section class="card profile-pwd">
           <div class="section-title"><div><div class="section-kicker">SECURITY</div><h2>${stIcon('key')}修改登录密码</h2><p>修改当前账号的登录密码，下次登录请使用新密码。</p></div></div>

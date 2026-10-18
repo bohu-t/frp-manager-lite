@@ -2655,6 +2655,23 @@ def init_db() -> None:
                 created_at INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_point_logs_user ON point_logs(user_id, id);
+            CREATE TABLE IF NOT EXISTS user_plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                username TEXT NOT NULL DEFAULT '',
+                plan_id INTEGER REFERENCES plans(id) ON DELETE SET NULL,
+                plan_name TEXT NOT NULL DEFAULT '',
+                order_no TEXT NOT NULL DEFAULT '',
+                max_ports INTEGER NOT NULL DEFAULT 0,
+                traffic_limit_bytes INTEGER NOT NULL DEFAULT 0,
+                bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0,
+                duration_days INTEGER NOT NULL DEFAULT 0,
+                node_id INTEGER,
+                starts_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_user_plans_user ON user_plans(user_id, id);
             CREATE TABLE IF NOT EXISTS recharge_keys (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 seq_no INTEGER NOT NULL DEFAULT 0,
@@ -4065,6 +4082,25 @@ def redeem_recharge_key(user: sqlite3.Row, raw_key: str) -> tuple[bool, str, int
     return True, f"充值成功，获得 {int(row['points'])} 积分", balance
 
 
+def recalc_user_entitlements(conn: sqlite3.Connection, user_id: int) -> None:
+    """按当前有效套餐汇总用户权益；没有套餐记录时保持原值。"""
+    rows = conn.execute(
+        "SELECT * FROM user_plans WHERE user_id=? AND (expires_at=0 OR expires_at>?) ORDER BY id",
+        (user_id, now())).fetchall()
+    if not rows:
+        return
+    total_ports = sum(int(r["max_ports"] or 0) for r in rows)
+    traffic_vals = [int(r["traffic_limit_bytes"] or 0) for r in rows]
+    bw_vals = [int(r["bandwidth_limit_kbps"] or 0) for r in rows]
+    expiry_vals = [int(r["expires_at"] or 0) for r in rows]
+    traffic = 0 if any(v == 0 for v in traffic_vals) else sum(traffic_vals)
+    bandwidth = 0 if any(v == 0 for v in bw_vals) else max(bw_vals)
+    expires_at = 0 if any(v == 0 for v in expiry_vals) else max(expiry_vals)
+    conn.execute(
+        "UPDATE users SET max_ports=MAX(max_ports, ?), traffic_limit_bytes=?, bandwidth_limit_kbps=?, expires_at=? WHERE id=?",
+        (min(100, total_ports), traffic, bandwidth, expires_at, user_id))
+
+
 def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool, str]:
     user = conn.execute("SELECT * FROM users WHERE id=?", (order["user_id"],)).fetchone()
     if not user:
@@ -4083,14 +4119,16 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
         conn.executemany("UPDATE ports SET user_id=? WHERE node_id=? AND port=?",
                          [(user["id"], node_id, r["port"]) for r in free_ports])
     duration_days = int(order["duration_days"] or 0)
-    base = int(user["expires_at"] or 0)
-    if base < now():
-        base = now()
-    new_expiry = 0 if duration_days <= 0 else base + duration_days * 86400
+    expires_at = 0 if duration_days <= 0 else now() + duration_days * 86400
     conn.execute(
-        "UPDATE users SET node_id=?, max_ports=MAX(max_ports, ?), traffic_limit_bytes=?, bandwidth_limit_kbps=?, expires_at=? WHERE id=?",
-        (node_id, max_ports, int(order["traffic_limit_bytes"] or 0), int(order["bandwidth_limit_kbps"] or 0), new_expiry, user["id"]))
+        "INSERT INTO user_plans(user_id, username, plan_id, plan_name, order_no, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days, node_id, starts_at, expires_at, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (user["id"], user["username"], order["plan_id"], order["plan_name"], order["order_no"],
+         max_ports, int(order["traffic_limit_bytes"] or 0), int(order["bandwidth_limit_kbps"] or 0),
+         duration_days, node_id, now(), expires_at, now()))
+    recalc_user_entitlements(conn, int(user["id"]))
     return True, "已开通"
+
+
 
 
 def mark_order_paid(order_no: str, transaction_id: str = "", provider: str = "") -> tuple[bool, str]:
@@ -4919,13 +4957,22 @@ class Handler(BaseHTTPRequestHandler):
                 ports_display = ports[:200] if port_count > 200 else ports
                 port_stats = {"total": port_count, "used": len(used_ports), "free": port_count - len(used_ports)}
                 user_dashboard = frps_user_dashboard(user["username"], user) if node else None
+                my_plans = []
+                for r in conn.execute("SELECT * FROM user_plans WHERE user_id=? ORDER BY id DESC", (user["id"],)):
+                    exp = int(r["expires_at"] or 0)
+                    my_plans.append({
+                        "id": r["id"], "plan_name": r["plan_name"], "max_ports": r["max_ports"],
+                        "traffic_limit_bytes": r["traffic_limit_bytes"], "bandwidth_limit_kbps": r["bandwidth_limit_kbps"],
+                        "expires_at": exp, "expires_text": fmt_time(exp),
+                        "expired": bool(exp and exp <= now()), "created_at": r["created_at"],
+                    })
             node_payload = node_public(node) if node else None
             if node_payload:
                 # 用节点健康快照（后台定时采集），避免每次打开概览都实时探测。
                 health = node_health_lookup(node_payload)
                 node_payload.update(health if health is not None else check_node_auth_port(node_payload))
                 node_payload["latency_ms"] = node_payload.get("auth_latency_ms")
-            self.send_json({"ok": True, "version": APP_VERSION, "uptime_seconds": int(time.time() - SERVER_START_TS), "latest_version": panel_latest_version(), "update_link": PANEL_UPDATE_LINK, "user": public_user(user), "software_license": sw_license, "node": node_payload, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
+            self.send_json({"ok": True, "version": APP_VERSION, "uptime_seconds": int(time.time() - SERVER_START_TS), "latest_version": panel_latest_version(), "update_link": PANEL_UPDATE_LINK, "user": public_user(user), "software_license": sw_license, "node": node_payload, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "my_plans": my_plans, "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
             return
         if path == "/api/user/points":
             with db() as conn:
