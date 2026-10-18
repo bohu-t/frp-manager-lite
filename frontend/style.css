@@ -1658,3 +1658,16 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .app-dialog .form-actions .danger{background:#dc2626;border-color:#dc2626;color:#fff}
 .app-dialog .form-actions .danger:hover{background:#b91c1c;border-color:#b91c1c;color:#fff}
 .app-dialog h2{font-weight:700}
+
+/* ---- 账单与充值 ---- */
+.billing-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:16px;align-items:start}
+.billing-left{display:grid;gap:16px;min-width:0}
+.card.billing-balance,:root[data-theme="light"] .card.billing-balance{background:linear-gradient(135deg,#2c6dd2,#4f8ef7) !important;border-color:transparent !important;color:#fff !important}
+.billing-balance-head{display:flex;align-items:center;justify-content:space-between;font-size:13px;opacity:.9}
+.billing-balance-value{font-size:38px;font-weight:700;line-height:1.2;margin:10px 0 6px}
+.billing-balance-value small{font-size:14px;font-weight:500;opacity:.85;margin-left:4px}
+.billing-balance-meta{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;opacity:.85}
+.billing-balance .status-badge{background:rgba(255,255,255,.18);color:#fff;border-color:rgba(255,255,255,.35)}
+.billing-divider{height:1px;background:var(--border);margin:18px 0}
+.billing-history{min-width:0}
+@media(max-width:1100px){.billing-grid{grid-template-columns:1fr}}
