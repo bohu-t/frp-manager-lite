@@ -746,7 +746,7 @@ function appSidebarHtml(kind='dashboard'){
   const items = isAdmin ? [
     ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','chart','订单','orders'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
   ] : [
-    ['dashboard','home','概览'],['dashboard-nodes','node','可用节点'],['dashboard-plans','license','购买套餐'],['dashboard-myplans','license','我的套餐'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
+    ['dashboard','home','概览'],['dashboard-nodes','node','可用节点'],['dashboard-plans','license','购买套餐'],['dashboard-myplans','license','我的套餐'],['dashboard-points','bolt','账单充值'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
   ];
   const links = items.map(([action, icon, label, section]) => {
     const active = kind === action || (section && kind === section) ? ' active' : '';
@@ -1191,7 +1191,7 @@ async function loadPoints(){
       <td>${esc(l.note || l.ref || '-')}</td>
     </tr>`).join('') || '<tr><td colspan="6" class="muted">暂无积分记录</td></tr>';
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">POINTS</span><h1>积分充值</h1><p>在线充值或使用充值密钥，积分可用于购买套餐。</p></div><div class="ov-head-badge"><span>当前余额</span><b>${data.balance}</b></div></div>
+    <div class="ov-page-head"><div><span class="section-kicker">POINTS</span><h1>账单充值</h1><p>在线充值或使用充值密钥，余额可用于购买套餐。</p></div><div class="ov-head-badge"><span>当前余额</span><b>${data.balance}</b></div></div>
     <div class="points-grid">
       <section class="card">
         <div class="section-title"><div><h2>${stIcon('license')}在线充值</h2><p>1 元 = ${rate} 积分</p></div></div>
@@ -1210,7 +1210,7 @@ async function loadPoints(){
       </section>
     </div>
     <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}积分明细</h2><p>最近 100 条</p></div></div><table><thead><tr><th>序号</th><th>时间</th><th>类型</th><th>变动</th><th>余额</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table></section>
-  `, 'dashboard-points', '积分充值');
+  `, 'dashboard-points', '账单充值');
 
   const rf = document.querySelector('#pointsRechargeForm');
   if(rf){
@@ -1627,7 +1627,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         </section>
         <section class="workspace-stat ov-stat" style="--ov-accent:#f59e0b;--ov-tint:#fff8ec">
           <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v9M9.6 10.2h4.2a2.1 2.1 0 0 1 0 4.2H9.6"/></svg></span><div class="ov-stat-copy"><span class="ov-stat-label">积分余额</span><strong class="ov-stat-value">${esc(data.user.points ?? 0)}</strong><span class="ov-stat-sub">可用于购买套餐</span></div></div>
-          <div class="ov-points-action"><button type="button" class="secondary" onclick="loadPoints()">充值积分</button></div>
+          <div class="ov-points-action"><button type="button" class="secondary" onclick="loadPoints()">账单充值</button></div>
         </section>
         <section class="workspace-stat ov-stat" style="--ov-accent:#2c6dd2;--ov-tint:#eef4ff">
           <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24">${UIICONS.port}</svg></span><div class="ov-stat-copy"><span class="ov-stat-label">端口上限</span><strong class="ov-stat-value">${esc(data.user.max_ports ?? '-')}</strong><span class="ov-stat-sub">可分配端口总数</span></div></div>
@@ -1812,17 +1812,6 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
             <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存邮箱</button></div>
           </form>
         </section>
-        <section class="card profile-points">
-          <div class="section-title"><div><div class="section-kicker">POINTS</div><h2>${stIcon('bolt')}积分充值</h2><p>当前余额 ${Number(data.user.points || 0)} 积分 · 1 元 = ${rate} 积分</p></div><button type="button" class="secondary" onclick="loadPoints()">积分明细</button></div>
-          <form id="profileRechargeForm" class="grid">
-            <div><label>充值积分</label><input name="points" type="number" min="1" step="1" value="${rate * 10}" required><span class="muted small" id="profileAmountHint">应付 ¥10.00</span></div>
-            <div class="form-actions" style="grid-column:1/-1"><button>去支付</button></div>
-          </form>
-          <form id="profileKeyForm" class="grid" style="margin-top:12px">
-            <div><label>充值密钥</label><input name="key" placeholder="PT-..." required></div>
-            <div class="form-actions" style="grid-column:1/-1"><button>兑换积分</button></div>
-          </form>
-        </section>
         <section class="card profile-pwd">
           <div class="section-title"><div><div class="section-kicker">SECURITY</div><h2>${stIcon('key')}修改登录密码</h2><p>修改当前账号的登录密码，下次登录请使用新密码。</p></div></div>
           <form id="profilePwdForm" class="grid">${passwordFieldsHtml()}<div class="form-actions" style="grid-column:1/-1"><button type="submit">保存新密码</button></div></form>
@@ -1830,7 +1819,6 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
       </div>`, 'dashboard-profile', '个人中心');
     initUserEmailForm();
     initPasswordForm();
-    initProfilePoints();
     return;
   }
   const sideNav = `<aside class="app-sidebar">
