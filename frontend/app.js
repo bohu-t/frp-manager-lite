@@ -946,15 +946,17 @@ async function loadPlans(){
       api('/api/user/orders').catch(() => ({orders:[]})),
       api('/api/user/points').catch(() => ({balance:0, payment:{}}))
     ]);
-    data = {plans: plansRes.plans || [], payment: plansRes.payment || {}, orders: ordersRes.orders || [], balance: pointsRes.balance || 0};
+    data = {plans: plansRes.plans || [], payment: plansRes.payment || {}, orders: ordersRes.orders || [], balance: pointsRes.balance || 0, activeModes: ordersRes.active_modes || []};
   }catch(err){
     if(err.message === 'unauthorized') return renderLogin();
     show(err.message, true);
     return;
   }
   window.__fmlPlans = data.plans || [];
+  const activeModes = data.activeModes || [];
   const cards = (data.plans || []).map(p => {
     const enough = Number(data.balance) >= Number(p.price_points);
+    const modeConflict = activeModes.includes(p.billing_mode === 'traffic' ? 'time' : 'traffic');
     return `
     <article class="plan-card">
       <div class="plan-card-head"><h3>${esc(p.name)}</h3><span class="plan-price">${p.price_points} <small>积分</small></span></div>
@@ -967,7 +969,7 @@ async function loadPlans(){
       </ul>
       ${p.note ? `<p class="plan-note">${esc(p.note)}</p>` : ''}
       ${p.fair_use_note ? `<p class="plan-note plan-fair">${esc(p.fair_use_note)}</p>` : ''}
-      <button type="button" class="plan-buy" onclick="buyPlan(${p.id})" ${enough ? '' : 'disabled'}>${enough ? '积分购买' : '积分不足'}</button>
+      <button type="button" class="plan-buy" onclick="buyPlan(${p.id})" ${(enough && !modeConflict) ? '' : 'disabled'}>${modeConflict ? '与现有套餐冲突' : (enough ? '积分购买' : '积分不足')}</button>
     </article>`;
   }).join('') || '<p class="muted">管理员还没有上架套餐。</p>';
   const statusText = {pending:'待支付', paid:'已完成', cancelled:'已取消', expired:'已过期', refunded:'已退款'};
