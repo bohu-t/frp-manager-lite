@@ -97,6 +97,58 @@ if(systemDarkQuery){
 applyColorMode(colorMode);
 
 const esc = (s) => String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+
+/* ---- 统一的应用内弹窗（替代浏览器 confirm/prompt/alert）---- */
+function appDialog(opts){
+  return new Promise(resolve => {
+    const id = 'appDialogModal';
+    const old = document.getElementById(id);
+    if(old) old.remove();
+    const inputHtml = opts.input
+      ? `<div class="input-group"><label class="input-label">${esc(opts.inputLabel || '')}</label><input id="appDialogInput" class="input-ios" value="${esc(opts.inputValue || '')}"></div>`
+      : '';
+    const cancelBtn = opts.cancelText === null ? '' : `<button type="button" class="secondary" id="appDialogCancel">${esc(opts.cancelText || '取消')}</button>`;
+    document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="${id}" role="dialog" aria-modal="true">
+      <section class="modal-page card app-dialog">
+        <div class="section-title modal-title"><div><h2>${esc(opts.title || '提示')}</h2></div></div>
+        <p class="app-dialog-message">${esc(opts.message || '').replace(/\n/g, '<br>')}</p>
+        ${inputHtml}
+        <div class="form-actions app-dialog-actions">${cancelBtn}<button type="button" id="appDialogOk" class="${opts.danger ? 'danger' : ''}">${esc(opts.okText || '确定')}</button></div>
+      </section>
+    </div>`);
+    const modal = document.getElementById(id);
+    const finish = (ok) => {
+      const inp = modal.querySelector('#appDialogInput');
+      const value = inp ? inp.value : '';
+      modal.remove();
+      resolve({ ok, value });
+    };
+    modal.querySelector('#appDialogOk').onclick = () => finish(true);
+    const cancel = modal.querySelector('#appDialogCancel');
+    if(cancel) cancel.onclick = () => finish(false);
+    modal.addEventListener('click', (e) => { if(e.target === modal) finish(false); });
+    const inp = modal.querySelector('#appDialogInput');
+    if(inp){
+      inp.focus(); inp.select();
+      inp.onkeydown = (e) => { if(e.key === 'Enter'){ e.preventDefault(); finish(true); } };
+    }
+    if(!inp && opts.danger && cancel){ cancel.focus(); }
+    const onKey = (e) => { if(e.key === 'Escape'){ document.removeEventListener('keydown', onKey); finish(false); } };
+    document.addEventListener('keydown', onKey);
+  });
+}
+async function appConfirm(message, opts){
+  const r = await appDialog(Object.assign({title:'确认', message, okText:'确定', cancelText:'取消'}, opts || {}));
+  return r.ok;
+}
+async function appPrompt(message, defaultValue, opts){
+  const r = await appDialog(Object.assign({title:'请输入', message, input:true, inputValue:defaultValue || '', okText:'确定'}, opts || {}));
+  return r.ok ? r.value : null;
+}
+async function appAlert(message, opts){
+  await appDialog(Object.assign({title:'提示', message, okText:'知道了', cancelText:null}, opts || {}));
+}
+
 const show = (msg, err=false) => { flash.textContent = msg; flash.className = 'flash' + (err ? ' err' : ''); setTimeout(()=>flash.classList.add('hidden'), 8000); };
 const hideFlash = () => flash.classList.add('hidden');
 
@@ -1021,16 +1073,16 @@ async function confirmBuyPlan(planId){
   closeBuyPlan();
   try{
     const r = await api('/api/user/orders', {method:'POST', body:{plan_id:planId, node_id:nodeId}});
-    show(r.message || '购买成功');
+    await appAlert(r.message || '购买成功', {title:'购买成功'});
     await loadPlans();
   }catch(err){ show(err.message, true); }
 }
 
 async function cancelPlan(id, name, refund){
-  if(!confirm(`确认退订「${name}」？\n按剩余比例预计退回 ${refund} 积分（已扣除手续费）。\n退订后该套餐分配的端口会回收，相关隧道会停用。`)) return;
+  if(!await appConfirm(`确认退订「${name}」？\n按剩余比例预计退回 ${refund} 积分（已扣除手续费）。\n退订后相关隧道会停用，端口保留 3 天可续期。`, {title:'退订套餐', okText:'确认退订', danger:true})) return;
   try{
     const r = await api('/api/user/plans/cancel', {method:'POST', body:{id}});
-    show(r.message || '退订成功');
+    await appAlert(r.message || '退订成功', {title:'退订成功'});
     await loadDashboard('profile');
   }catch(err){ show(err.message, true); }
 }
@@ -1124,7 +1176,7 @@ async function loadPoints(){
       if(!key){ show('请输入充值密钥', true); return; }
       try{
         const r = await api('/api/user/points/redeem', {method:'POST', body:{key}});
-        show(r.message || '充值成功');
+        await appAlert(r.message || '充值成功', {title:'充值成功'});
         await loadPoints();
       }catch(err){ show(err.message, true); }
     };
@@ -1829,7 +1881,7 @@ function closeTunnelModal(){
 }
 
 async function toggleTunnel(id){ await api('/api/tunnels/toggle', {method:'POST', body:{id}}).then(()=>loadDashboard('tunnels')).catch(e=>show(e.message,true)); }
-async function deleteTunnel(id){ if(confirm('删除这个隧道？')) await api('/api/tunnels/delete', {method:'POST', body:{id}}).then(()=>loadDashboard('tunnels')).catch(e=>show(e.message,true)); }
+async function deleteTunnel(id){ if(await appConfirm('删除这个隧道？', {title:'删除隧道', okText:'删除', danger:true})) await api('/api/tunnels/delete', {method:'POST', body:{id}}).then(()=>loadDashboard('tunnels')).catch(e=>show(e.message,true)); }
 
 async function loadAdminProxies(page=adminProxyPage){
   clearAdminDashboardTimer();
@@ -2281,7 +2333,7 @@ async function loadAdmin(section=currentAdminSection){
         const keys = r.keys || [];
         if(keys.length) await copyText(keys.join('\n'));
         await loadAdmin();
-        show(r.message || '充值密钥已生成');
+        await appAlert((r.message || '充值密钥已生成') + (keys.length ? '\n已复制到剪贴板。' : ''), {title:'生成完成'});
       }catch(err){ show(err.message, true); }
     };
   }
@@ -2357,13 +2409,13 @@ function renderRiskResult(data){
 }
 
 async function banUser(id){
-  const reason = prompt('请输入封禁原因', '违法/违规内容投诉');
+  const reason = await appPrompt('请输入封禁原因', '违法/违规内容投诉', {title:'封禁用户'});
   if(reason === null) return;
   await api('/api/admin/users/ban', {method:'POST', body:{id, reason}}).then(r=>{loadAdmin().then(()=>show(r.message || '已封禁'));}).catch(e=>show(e.message,true));
 }
 
 async function backupToR2(){
-  if(!confirm('现在生成全量备份并上传到 Cloudflare R2？')) return;
+  if(!await appConfirm('现在生成全量备份并上传到 Cloudflare R2？', {title:'R2 备份'})) return;
   await api('/api/admin/backup/r2', {method:'POST', body:{}}).then(r=>{
     show(`${r.message}：${r.object_key}`);
     reloadAdminCurrentPage();
@@ -2501,7 +2553,7 @@ async function restoreFullBackup(){
   const input = document.querySelector('#restoreBackupFile');
   const file = input && input.files && input.files[0];
   if(!file){ show('请先选择全量备份 zip 文件', true); return; }
-  const confirmText = prompt('恢复会替换当前数据库。请输入 RESTORE 确认：');
+  const confirmText = await appPrompt('恢复会替换当前数据库。请输入 RESTORE 确认：', '', {title:'恢复备份'});
   if(confirmText !== 'RESTORE') return;
   try{
     const dataUrl = await fileToDataUrl(file);
@@ -2585,7 +2637,7 @@ async function submitAdminCred(e){
     show(r.message || (kind === 'token' ? '令牌已重置' : '密码已重置'));
   }catch(err){ show(err.message, true); }
 }
-async function adminDelete(id){ if(confirm('删除用户会释放端口并删除隧道，确定？')) await api('/api/admin/users/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('用户已删除'))).catch(e=>show(e.message,true)); }
+async function adminDelete(id){ if(await appConfirm('删除用户会释放端口并删除隧道，确定？', {title:'删除用户', okText:'删除', danger:true})) await api('/api/admin/users/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('用户已删除'))).catch(e=>show(e.message,true)); }
 function resetPlanForm(){
   const f = document.querySelector('#planForm');
   if(!f) return;
@@ -2621,27 +2673,27 @@ function editPlan(id){
   f.scrollIntoView({behavior:'smooth', block:'center'});
 }
 async function adminAdjustPoints(id, username){
-  const raw = prompt(`调整 ${username} 的积分（正数增加，负数扣减）`, '100');
+  const raw = await appPrompt(`调整 ${username} 的积分（正数增加，负数扣减）`, '100', {title:'调整积分'});
   if(raw === null) return;
   const delta = Number(raw);
   if(!Number.isInteger(delta) || delta === 0){ show('请输入非零整数', true); return; }
   try{
     const r = await api('/api/admin/users/points', {method:'POST', body:{id, delta, note:'管理员调整'}});
     await loadAdmin();
-    show(r.message || '积分已调整');
+    await appAlert(r.message || '积分已调整', {title:'积分已调整'});
   }catch(err){ show(err.message, true); }
 }
 
 async function rechargeKeyToggle(id){ await api('/api/admin/recharge-keys/toggle', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥状态已更新'))).catch(e=>show(e.message,true)); }
-async function rechargeKeyDelete(id){ if(confirm('删除这枚充值密钥？')) await api('/api/admin/recharge-keys/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥已删除'))).catch(e=>show(e.message,true)); }
+async function rechargeKeyDelete(id){ if(await appConfirm('删除这枚充值密钥？', {title:'删除充值密钥', okText:'删除', danger:true})) await api('/api/admin/recharge-keys/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥已删除'))).catch(e=>show(e.message,true)); }
 async function planToggle(id){ await api('/api/admin/plans/toggle', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('套餐状态已更新'))).catch(e=>show(e.message,true)); }
-async function planDelete(id){ if(confirm('删除这个套餐？删除后不再展示，历史订单和套餐数据仍保留。')) await api('/api/admin/plans/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('套餐已删除'))).catch(e=>show(e.message,true)); }
-async function orderComplete(orderNo){ if(confirm('确认手动开通该订单？将立即分配端口并延长有效期。')) await api('/api/admin/orders/complete', {method:'POST', body:{order_no:orderNo}}).then(r=>loadAdmin().then(()=>show(r.message || '已开通'))).catch(e=>show(e.message,true)); }
+async function planDelete(id){ if(await appConfirm('删除这个套餐？删除后不再展示，历史订单和套餐数据仍保留。', {title:'删除套餐', okText:'删除', danger:true})) await api('/api/admin/plans/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('套餐已删除'))).catch(e=>show(e.message,true)); }
+async function orderComplete(orderNo){ if(await appConfirm('确认手动开通该订单？将立即分配端口并延长有效期。', {title:'手动开通'})) await api('/api/admin/orders/complete', {method:'POST', body:{order_no:orderNo}}).then(r=>loadAdmin().then(()=>appAlert(r.message || '已开通', {title:'开通完成'}))).catch(e=>show(e.message,true)); }
 
 async function inviteToggle(id){ await api('/api/admin/invite-keys/toggle', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥状态已更新'))).catch(e=>show(e.message,true)); }
-async function inviteDelete(id){ if(confirm('删除这个注册密钥？')) await api('/api/admin/invite-keys/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥已删除'))).catch(e=>show(e.message,true)); }
+async function inviteDelete(id){ if(await appConfirm('删除这个注册密钥？', {title:'删除注册密钥', okText:'删除', danger:true})) await api('/api/admin/invite-keys/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥已删除'))).catch(e=>show(e.message,true)); }
 async function softwareLicenseToggle(id){ await api('/api/admin/software-licenses/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
-async function softwareLicenseUnbind(id){ if(confirm('解绑后该授权码可被下一台客户服务器重新激活，确定？')) await api('/api/admin/software-licenses/unbind', {method:'POST', body:{id}}).then(r=>{loadAdmin().then(()=>show(r.message || '已解绑'));}).catch(e=>show(e.message,true)); }
+async function softwareLicenseUnbind(id){ if(await appConfirm('解绑后该授权码可被下一台客户服务器重新激活，确定？', {title:'解绑授权码'})) await api('/api/admin/software-licenses/unbind', {method:'POST', body:{id}}).then(r=>{loadAdmin().then(()=>show(r.message || '已解绑'));}).catch(e=>show(e.message,true)); }
 function editNode(n){
   const card = document.querySelector('#editNodeCard');
   const f = document.querySelector('#editNodeForm');
@@ -2651,7 +2703,7 @@ function editNode(n){
   card.scrollIntoView({behavior:'smooth', block:'start'});
 }
 async function nodeToggle(id){ await api('/api/admin/nodes/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
-async function nodeDelete(id){ if(confirm('删除节点会删除空端口池；节点下有用户/隧道时会被拒绝。确定？')) await api('/api/admin/nodes/delete', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
+async function nodeDelete(id){ if(await appConfirm('删除节点会删除空端口池；节点下有用户/隧道时会被拒绝。确定？', {title:'删除节点', okText:'删除', danger:true})) await api('/api/admin/nodes/delete', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
 
 // 一键添加节点脚本（公开仓库版，不依赖本面板）
 const NODE_INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/bohu-t/lite-install/main/add-frps-node.sh';
@@ -3428,7 +3480,7 @@ function initRenewForm(){
 let currentDashboardNodeId=null;
 async function switchDashboardNode(nodeId, backView){
   if(!nodeId||String(nodeId)===String(currentDashboardNodeId)){closeNodeSwitch();return;}
-  if(!confirm('确定切换接入节点？已有隧道不会自动迁移，切换前请确认目标节点资源。'))return;
+  if(!await appConfirm('确定切换接入节点？已有隧道不会自动迁移，切换前请确认目标节点资源。', {title:'切换节点'}))return;
   try{
     await api('/api/user/node/switch',{method:'POST',body:{node_id:nodeId}});
     closeNodeSwitch();

@@ -1649,3 +1649,12 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .pay-config-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
 .pay-config-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:rgba(148,163,184,.06)}
 .pay-config-item>div{display:flex;align-items:center;gap:10px;font-size:13px}
+
+/* ---- 应用内确认弹窗 ---- */
+.app-dialog{width:min(92vw,460px);max-width:460px}
+.app-dialog-message{margin:6px 0 18px;line-height:1.75;font-size:14px;color:var(--text)}
+.app-dialog-actions{justify-content:flex-end;gap:10px}
+.app-dialog .input-group{margin-bottom:8px}
+.app-dialog .form-actions .danger{background:#dc2626;border-color:#dc2626;color:#fff}
+.app-dialog .form-actions .danger:hover{background:#b91c1c;border-color:#b91c1c;color:#fff}
+.app-dialog h2{font-weight:700}

@@ -4302,7 +4302,7 @@ def compute_plan_refund(conn: sqlite3.Connection, plan_row: sqlite3.Row) -> dict
     ratio = min(ratios) if ratios else 1.0
     fee = refund_fee_percent(conn)
     gross = int(round(price * ratio))
-    net = int(round(gross * (100 - fee) / 100))
+    net = int(gross * (100 - fee) / 100 + 0.5)
     return {"eligible": True, "points": net, "ratio": round(ratio, 4), "fee_percent": fee, "gross": gross}
 
 
