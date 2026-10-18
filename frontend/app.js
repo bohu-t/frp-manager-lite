@@ -1141,39 +1141,54 @@ function renderNewNode(){
     if(!list.length) return null;
     return Math.min(...list.map(p => Number(p.price_points || 0)));
   };
+  const emptyHint = (text) => `<div class="nn-empty">${stIcon('node')}<p>${text}</p></div>`;
+
   const step1 = regionNames.map(name => {
     const active = nnState.region === name;
     const min = regionPrice(name);
     return `<button type="button" class="region-card${active ? ' active' : ''}" onclick="nnPickRegion('${esc(name)}')">
-      <span class="region-card-name">${esc(name)}</span>
-      <span class="region-card-meta">${regions[name].length} 个节点</span>
-      <span class="region-card-price">${min === null ? '暂无套餐' : min + ' 积分起'}</span>
+      <span class="region-card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="10" r="2.6" fill="none" stroke="currentColor" stroke-width="1.7"/></svg></span>
+      <span class="region-card-body">
+        <span class="region-card-name">${esc(name)}</span>
+        <span class="region-card-meta">${regions[name].length} 个节点</span>
+        <span class="region-card-price">${min === null ? '暂无套餐' : min + ' 积分起'}</span>
+      </span>
     </button>`;
-  }).join('') || '<p class="muted">暂无可用节点</p>';
+  }).join('') || emptyHint('暂无可用节点');
 
   const regionNodes = nnState.region ? (regions[nnState.region] || []) : [];
-  const step2 = !nnState.region ? '<p class="muted small">请先选择地区</p>' : (regionNodes.map(n => {
+  const step2 = !nnState.region ? emptyHint('请先在上方选择地区') : (regionNodes.map(n => {
     const active = Number(nnState.nodeId) === Number(n.id);
     const online = !!n.auth_port_ok;
     const exceeded = !!n.traffic_exceeded;
-    const disabled = exceeded;
-    return `<button type="button" class="nn-node${active ? ' active' : ''}${disabled ? ' disabled' : ''}" ${disabled ? 'disabled' : ''} onclick="nnPickNode(${Number(n.id)})">
+    return `<button type="button" class="nn-node${active ? ' active' : ''}${exceeded ? ' disabled' : ''}" ${exceeded ? 'disabled' : ''} onclick="nnPickNode(${Number(n.id)})">
+      <span class="nn-node-icon">${stIcon('node')}</span>
       <span class="nn-node-main"><b>${esc(n.name || '-')}</b><small>${esc(n.server_addr || '')}:${esc(n.server_port ?? '')} · 空闲端口 ${Number(n.free_count || 0)}</small></span>
       <span class="status-badge ${exceeded ? 'bad' : (online ? 'ok' : 'bad')}"><i></i>${exceeded ? '流量已用尽' : (online ? '在线' : '不可达')}</span>
     </button>`;
-  }).join('') || '<p class="muted small">该地区暂无节点</p>');
+  }).join('') || emptyHint('该地区暂无可用节点'));
 
   const nodePlans = nnState.nodeId ? nnPlansFor(nnState.nodeId) : [];
-  const step3 = !nnState.nodeId ? '<p class="muted small">请先选择节点</p>' : (nodePlans.map(p => {
+  const step3 = !nnState.nodeId ? emptyHint('请先选择节点，随后会显示该节点可购买的套餐') : (nodePlans.map(p => {
     const active = Number(nnState.planId) === Number(p.id);
+    const modeText = p.billing_mode === 'traffic' ? '流量计费' : '时间计费';
+    const mainText = p.billing_mode === 'traffic'
+      ? (p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '按量')
+      : (p.duration_days ? p.duration_days + ' 天' : '不限期');
     return `<button type="button" class="nn-plan${active ? ' active' : ''}" onclick="nnPickPlan(${Number(p.id)})">
-      <span class="nn-plan-head"><b>${esc(p.name)}</b><strong>${Number(p.price_points)} 积分</strong></span>
-      <span class="nn-plan-meta">${p.max_ports} 端口 · ${p.billing_mode === 'traffic' ? (p.traffic_limit_gb ? p.traffic_limit_gb + ' GB 流量' : '流量套餐') : (p.duration_days ? p.duration_days + ' 天' : '不限期')}${p.billing_mode === 'time' && p.traffic_limit_gb ? ' · ' + p.traffic_limit_gb + ' GB 上限' : ''}</span>
+      <span class="nn-plan-top"><span class="nn-plan-tag">${modeText}</span><strong>${Number(p.price_points)} <small>积分</small></strong></span>
+      <span class="nn-plan-name">${esc(p.name)}</span>
+      <span class="nn-plan-specs">
+        <span><b>${p.max_ports}</b> 端口</span>
+        <span><b>${mainText}</b></span>
+        <span><b>${p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '不限'}</b> 流量</span>
+      </span>
       ${p.note ? `<span class="nn-plan-note">${esc(p.note)}</span>` : ''}
     </button>`;
-  }).join('') || '<p class="muted small">该节点暂无可购买套餐</p>');
+  }).join('') || emptyHint('该节点暂无可购买套餐'));
 
   const chosenPlan = plans.find(p => Number(p.id) === Number(nnState.planId));
+  const chosenNode = nodes.find(n => Number(n.id) === Number(nnState.nodeId));
   const ready = !!(nnState.region && nnState.nodeId && nnState.planId);
   const payText = ready ? `立即支付 · ${Number(chosenPlan ? chosenPlan.price_points : 0)} 积分` : '请完成上方三步';
 
@@ -1192,7 +1207,7 @@ function renderNewNode(){
       <div class="nn-plan-grid">${step3}</div>
     </section>
     <div class="nn-paybar">
-      <div class="nn-paybar-info">${ready ? `已选：${esc(nnState.region)} / ${esc((window.__nnData.nodes.find(n => Number(n.id) === Number(nnState.nodeId)) || {}).name || '')} / ${esc(chosenPlan ? chosenPlan.name : '')}` : '请依次完成地区、节点、套餐选择'}</div>
+      <div class="nn-paybar-info">${ready ? `已选：${esc(nnState.region)} / ${esc(chosenNode ? chosenNode.name : '')} / ${esc(chosenPlan ? chosenPlan.name : '')}` : '请依次完成地区、节点、套餐选择'}</div>
       <button type="button" class="nn-pay${ready ? ' ready' : ''}" ${ready ? '' : 'disabled'} onclick="nnPay()">${payText}</button>
     </div>
   `, 'dashboard-nodes', '新建节点');
