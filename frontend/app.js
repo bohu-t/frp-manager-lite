@@ -746,7 +746,7 @@ function appSidebarHtml(kind='dashboard'){
   const items = isAdmin ? [
     ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','chart','订单','orders'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
   ] : [
-    ['dashboard','home','概览'],['dashboard-nodes','node','新建节点'],['dashboard-plans','license','购买套餐'],['dashboard-myplans','license','我的套餐'],['dashboard-points','bolt','账单与充值'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
+    ['dashboard','home','概览'],['dashboard-nodes','node','新建节点'],['dashboard-myplans','license','我的节点'],['dashboard-points','bolt','账单与充值'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
   ];
   const links = items.map(([action, icon, label, section]) => {
     const active = kind === action || (section && kind === section) ? ' active' : '';
@@ -1259,9 +1259,9 @@ async function loadMyPlans(){
     </tr>`).join('') || '<tr><td colspan="7" class="muted">还没有购买过套餐</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <section class="card">
-      <div class="section-title"><div><div class="section-kicker">MY PLANS</div><h2>${stIcon('license')}我的套餐</h2><p>流量套餐只统计该套餐分配端口产生的流量；时间套餐按到期时间失效。</p></div><div class="row" style="gap:10px"><span class="section-count">${active.length} 个生效中</span><button type="button" class="secondary" onclick="loadPlans()">购买套餐</button></div></div>
+      <div class="section-title"><div><div class="section-kicker">MY PLANS</div><h2>${stIcon('license')}我的节点</h2><p>这里列出你已购买的节点套餐；流量套餐只统计该套餐分配端口产生的流量。</p></div><div class="row" style="gap:10px"><span class="section-count">${active.length} 个生效中</span><button type="button" class="secondary" onclick="loadNewNode()">新建节点</button></div></div>
       <table><thead><tr><th>序号</th><th>套餐</th><th>端口</th><th>计费</th><th>额度 / 到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>
-    </section>`, 'dashboard-myplans', '我的套餐');
+    </section>`, 'dashboard-myplans', '我的节点');
 }
 
 function initProfilePoints(){
