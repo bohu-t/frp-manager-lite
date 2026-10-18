@@ -1080,7 +1080,7 @@ async function confirmBuyPlan(planId){
 }
 
 async function cancelPlan(id, name, refund){
-  if(!await appConfirm(`确认退订「${name}」？\n预计退回 ${refund} 积分。\n退订后相关隧道会停用，套餐端口立即回收（不保留）。`, {title:'退订套餐', okText:'确认退订', danger:true})) return;
+  if(!await appConfirm(`确认退订「${name}」？\n预计退回 ${refund} 积分。`, {title:'退订套餐', okText:'确认退订', danger:true})) return;
   try{
     const r = await api('/api/user/plans/cancel', {method:'POST', body:{id}});
     await appAlert(r.message || '退订成功', {title:'退订成功'});
