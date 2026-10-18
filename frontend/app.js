@@ -1648,7 +1648,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         <td>${p.max_ports}</td>
         <td>${p.billing_mode === 'traffic' ? '流量' : '时间'}</td>
         <td>${p.billing_mode === 'traffic' ? `${p.used_gb} / ${p.quota_gb} GB` : (p.expires_at ? esc(p.expires_text) : '不限期')}</td>
-        <td>${p.status === 'exhausted' ? '<span class="bad">流量用尽</span>' : (p.expired ? '<span class="bad">已到期</span>' : '<span class="ok">生效中</span>')}</td>
+        <td>${p.status === 'exhausted' ? '<span class="bad">流量用尽</span>' : (p.expired ? '<span class="bad">已到期</span>' : (p.paused ? '<span class="muted">已暂停</span>' : '<span class="ok">生效中</span>'))}</td>
       </tr>`).join('') || '<tr><td colspan="6" class="muted">还没有购买过套餐</td></tr>';
     const latestExpiry = activePlans.length
       ? (activePlans.every(p => p.billing_mode === 'traffic')
@@ -1677,7 +1677,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
           </form>
         </section>
         <section class="card profile-plans">
-          <div class="section-title"><div><div class="section-kicker">MY PLANS</div><h2>${stIcon('license')}我的套餐</h2><p>每个套餐独立计算有效期，互不影响。</p></div><span class="section-count">${activePlans.length} 个生效中</span></div>
+          <div class="section-title"><div><div class="section-kicker">MY PLANS</div><h2>${stIcon('license')}我的套餐</h2><p>每个套餐独立计算；时间套餐生效期间，流量套餐暂停计时与扣量。</p></div><span class="section-count">${activePlans.length} 个生效中</span></div>
           <table><thead><tr><th>序号</th><th>套餐</th><th>端口</th><th>计费</th><th>额度 / 到期</th><th>状态</th></tr></thead><tbody>${planRows}</tbody></table>
         </section>
         <section class="card profile-pwd">

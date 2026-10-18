@@ -2691,6 +2691,7 @@ def init_db() -> None:
                 billing_mode TEXT NOT NULL DEFAULT 'time',
                 quota_bytes INTEGER NOT NULL DEFAULT 0,
                 used_bytes INTEGER NOT NULL DEFAULT 0,
+                usage_started_at INTEGER NOT NULL DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'active',
                 order_no TEXT NOT NULL DEFAULT '',
                 max_ports INTEGER NOT NULL DEFAULT 0,
@@ -2749,6 +2750,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE user_plans ADD COLUMN quota_bytes INTEGER NOT NULL DEFAULT 0")
         if "used_bytes" not in up_cols:
             conn.execute("ALTER TABLE user_plans ADD COLUMN used_bytes INTEGER NOT NULL DEFAULT 0")
+        if "usage_started_at" not in up_cols:
+            conn.execute("ALTER TABLE user_plans ADD COLUMN usage_started_at INTEGER NOT NULL DEFAULT 0")
         if "status" not in up_cols:
             conn.execute("ALTER TABLE user_plans ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
         if "price_points" not in plan_cols:
@@ -4152,24 +4155,37 @@ def recalc_user_entitlements(conn: sqlite3.Connection, user_id: int) -> None:
 
 
 def refresh_user_plan_usage(conn: sqlite3.Connection, user_id: int) -> None:
-    """按购买顺序（先进先出）把用户流量计入流量型套餐，用尽即失效。"""
-    plans = conn.execute(
+    """流量型套餐按购买顺序先进先出扣减；存在不限流量的时间套餐时暂停累计。"""
+    traffic_plans = conn.execute(
         "SELECT * FROM user_plans WHERE user_id=? AND billing_mode='traffic' AND status='active' ORDER BY id",
         (user_id,)).fetchall()
-    if not plans:
+    if not traffic_plans:
         return
-    start_ts = min(int(p["starts_at"] or 0) for p in plans)
-    row = conn.execute("SELECT COALESCE(SUM(bytes),0) FROM traffic_samples WHERE user_id=? AND ts>=?", (user_id, start_ts)).fetchone()
+    unlimited = conn.execute(
+        "SELECT COUNT(*) FROM user_plans WHERE user_id=? AND billing_mode='time' AND status='active' AND (expires_at=0 OR expires_at>?)",
+        (user_id, now())).fetchone()[0]
+    if unlimited:
+        # 时间套餐（不限流量）生效期间：冻结流量套餐的计数起点，不扣额度
+        conn.execute(
+            "UPDATE user_plans SET usage_started_at=? WHERE user_id=? AND billing_mode='traffic' AND status='active'",
+            (now(), user_id))
+        return
+    baseline = min(int(p["usage_started_at"] or p["starts_at"] or 0) for p in traffic_plans)
+    row = conn.execute("SELECT COALESCE(SUM(bytes),0) FROM traffic_samples WHERE user_id=? AND ts>=?", (user_id, baseline)).fetchone()
     remaining = int(row[0] or 0) if row else 0
     changed = False
-    for p in plans:
+    for p in traffic_plans:
         quota = int(p["quota_bytes"] or 0)
+        used = int(p["used_bytes"] or 0)
         if quota <= 0:
+            conn.execute("UPDATE user_plans SET usage_started_at=? WHERE id=?", (now(), p["id"]))
             continue
-        used = min(remaining, quota)
-        remaining -= used
-        conn.execute("UPDATE user_plans SET used_bytes=? WHERE id=?", (used, p["id"]))
-        if used >= quota:
+        room = max(0, quota - used)
+        add = min(remaining, room)
+        remaining -= add
+        new_used = used + add
+        conn.execute("UPDATE user_plans SET used_bytes=?, usage_started_at=? WHERE id=?", (new_used, now(), p["id"]))
+        if new_used >= quota:
             conn.execute("UPDATE user_plans SET status='exhausted', expires_at=? WHERE id=?", (now(), p["id"]))
             changed = True
     if changed:
@@ -4202,9 +4218,9 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
     else:
         expires_at = 0 if duration_days <= 0 else now() + duration_days * 86400
     conn.execute(
-        "INSERT INTO user_plans(user_id, username, plan_id, plan_name, order_no, billing_mode, quota_bytes, used_bytes, status, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days, node_id, starts_at, expires_at, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO user_plans(user_id, username, plan_id, plan_name, order_no, billing_mode, quota_bytes, used_bytes, usage_started_at, status, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days, node_id, starts_at, expires_at, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (user["id"], user["username"], order["plan_id"], order["plan_name"], order["order_no"],
-         billing_mode, quota_bytes, 0, "active",
+         billing_mode, quota_bytes, 0, now(), "active",
          max_ports, int(order["traffic_limit_bytes"] or 0), int(order["bandwidth_limit_kbps"] or 0),
          duration_days, node_id, now(), expires_at, now()))
     recalc_user_entitlements(conn, int(user["id"]))
@@ -5040,6 +5056,9 @@ class Handler(BaseHTTPRequestHandler):
                 port_stats = {"total": port_count, "used": len(used_ports), "free": port_count - len(used_ports)}
                 user_dashboard = frps_user_dashboard(user["username"], user) if node else None
                 refresh_user_plan_usage(conn, int(user["id"]))
+                unlimited_active = bool(conn.execute(
+                    "SELECT 1 FROM user_plans WHERE user_id=? AND billing_mode='time' AND status='active' AND (expires_at=0 OR expires_at>?) LIMIT 1",
+                    (user["id"], now())).fetchone())
                 my_plans = []
                 for r in conn.execute("SELECT * FROM user_plans WHERE user_id=? ORDER BY id DESC", (user["id"],)):
                     exp = int(r["expires_at"] or 0)
@@ -5055,6 +5074,7 @@ class Handler(BaseHTTPRequestHandler):
                         "traffic_limit_bytes": r["traffic_limit_bytes"], "bandwidth_limit_kbps": r["bandwidth_limit_kbps"],
                         "expires_at": exp, "expires_text": fmt_time(exp),
                         "status": status, "expired": status != "active", "created_at": r["created_at"],
+                        "paused": bool((r["billing_mode"] or "time") == "traffic" and unlimited_active),
                     })
             node_payload = node_public(node) if node else None
             if node_payload:
