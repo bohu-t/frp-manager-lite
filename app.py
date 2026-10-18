@@ -2230,7 +2230,7 @@ def start_plan_usage_loop() -> None:
                 expire_plans_once()
                 with db() as conn:
                     ids = [int(r["user_id"]) for r in conn.execute(
-                        "SELECT DISTINCT user_id FROM user_plans WHERE billing_mode='traffic' AND status='active'")]
+                        "SELECT DISTINCT user_id FROM user_plans WHERE quota_bytes>0 AND status='active'")]
                     for uid in ids:
                         refresh_user_plan_usage(conn, uid)
             except Exception:
@@ -4049,6 +4049,8 @@ def save_plan(plan_id: int, name: str, price_cents: int, max_ports: int, traffic
     billing_mode = "traffic" if str(billing_mode) == "traffic" else "time"
     if billing_mode == "traffic" and traffic_limit_bytes <= 0:
         return False, "流量套餐必须填写流量额度"
+    if billing_mode == "time" and duration_days <= 0:
+        return False, "时间套餐必须填写有效期天数"
     # 套餐不再绑定节点，节点由用户在购买时自行选择
     node_id = 0
     with db() as conn:
@@ -4209,16 +4211,16 @@ def expire_plans_once() -> int:
 def refresh_user_plan_usage(conn: sqlite3.Connection, user_id: int) -> None:
     """流量型套餐只统计该套餐分配端口产生的流量，用尽即失效。"""
     traffic_plans = conn.execute(
-        "SELECT * FROM user_plans WHERE user_id=? AND billing_mode='traffic' AND status='active' ORDER BY id",
+        "SELECT * FROM user_plans WHERE user_id=? AND quota_bytes>0 AND status='active' ORDER BY id",
         (user_id,)).fetchall()
     if not traffic_plans:
         return
     unlimited = conn.execute(
-        "SELECT COUNT(*) FROM user_plans WHERE user_id=? AND billing_mode='time' AND status='active' AND (expires_at=0 OR expires_at>?)",
+        "SELECT COUNT(*) FROM user_plans WHERE user_id=? AND billing_mode='time' AND quota_bytes=0 AND status='active' AND (expires_at=0 OR expires_at>?)",
         (user_id, now())).fetchone()[0]
     if unlimited:
         conn.execute(
-            "UPDATE user_plans SET usage_started_at=? WHERE user_id=? AND billing_mode='traffic' AND status='active'",
+            "UPDATE user_plans SET usage_started_at=? WHERE user_id=? AND quota_bytes>0 AND status='active'",
             (now(), user_id))
         return
     changed = False
@@ -4265,7 +4267,7 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
     duration_days = int(order["duration_days"] or 0)
     plan_row = conn.execute("SELECT billing_mode FROM plans WHERE id=?", (order["plan_id"],)).fetchone() if order["plan_id"] else None
     billing_mode = (row_val(plan_row, "billing_mode", "time") if plan_row else "time") or "time"
-    quota_bytes = int(order["traffic_limit_bytes"] or 0) if billing_mode == "traffic" else 0
+    quota_bytes = int(order["traffic_limit_bytes"] or 0)
     if billing_mode == "traffic":
         expires_at = 0
     else:
@@ -4278,7 +4280,7 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
          duration_days, node_id, now(), expires_at, now()))
     conn.execute("UPDATE users SET node_id=? WHERE id=?", (node_id, user["id"]))
     plan_id_new = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
-    if billing_mode == "traffic" and free_ports:
+    if quota_bytes > 0 and free_ports:
         conn.executemany(
             "INSERT OR IGNORE INTO user_plan_ports(user_plan_id, user_id, node_id, port, created_at) VALUES(?,?,?,?,?)",
             [(plan_id_new, user["id"], node_id, r["port"], now()) for r in free_ports])
@@ -5116,7 +5118,7 @@ class Handler(BaseHTTPRequestHandler):
                 user_dashboard = frps_user_dashboard(user["username"], user) if node else None
                 refresh_user_plan_usage(conn, int(user["id"]))
                 unlimited_active = bool(conn.execute(
-                    "SELECT 1 FROM user_plans WHERE user_id=? AND billing_mode='time' AND status='active' AND (expires_at=0 OR expires_at>?) LIMIT 1",
+                    "SELECT 1 FROM user_plans WHERE user_id=? AND billing_mode='time' AND quota_bytes=0 AND status='active' AND (expires_at=0 OR expires_at>?) LIMIT 1",
                     (user["id"], now())).fetchone())
                 my_plans = []
                 for r in conn.execute("SELECT * FROM user_plans WHERE user_id=? ORDER BY id DESC", (user["id"],)):
@@ -5133,7 +5135,7 @@ class Handler(BaseHTTPRequestHandler):
                         "traffic_limit_bytes": r["traffic_limit_bytes"], "bandwidth_limit_kbps": r["bandwidth_limit_kbps"],
                         "expires_at": exp, "expires_text": fmt_time(exp),
                         "status": status, "expired": status != "active", "created_at": r["created_at"],
-                        "paused": bool((r["billing_mode"] or "time") == "traffic" and unlimited_active),
+                        "paused": bool(int(r["quota_bytes"] or 0) > 0 and unlimited_active),
                     })
             node_payload = node_public(node) if node else None
             if node_payload:

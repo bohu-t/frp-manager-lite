@@ -962,6 +962,7 @@ async function loadPlans(){
         <li><span>端口数</span><b>${p.max_ports}</b></li>
         <li><span>计费方式</span><b>${p.billing_mode === 'traffic' ? '流量' : '时间'}</b></li>
         <li><span>${p.billing_mode === 'traffic' ? '流量额度' : '有效期'}</span><b>${p.billing_mode === 'traffic' ? (p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '未设置') : (p.duration_days ? p.duration_days + ' 天' : '不限期')}</b></li>
+        ${p.billing_mode !== 'traffic' ? `<li><span>流量上限</span><b>${p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '不限量'}</b></li>` : ''}
         <li><span>速率上限</span><b>${p.bandwidth_limit_mbs ? p.bandwidth_limit_mbs + ' MB/s' : '不限'}</b></li>
       </ul>
       ${p.note ? `<p class="plan-note">${esc(p.note)}</p>` : ''}
@@ -1647,7 +1648,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         <td>${esc(p.plan_name || '-')}</td>
         <td>${p.max_ports}</td>
         <td>${p.billing_mode === 'traffic' ? '流量' : '时间'}</td>
-        <td>${p.billing_mode === 'traffic' ? `${p.used_gb} / ${p.quota_gb} GB` : (p.expires_at ? esc(p.expires_text) : '不限期')}</td>
+        <td>${p.quota_gb > 0 ? `${p.used_gb} / ${p.quota_gb} GB` : '不限量'}${p.billing_mode !== 'traffic' && p.expires_at ? `<br><span class="muted small">到期 ${esc(p.expires_text)}</span>` : ''}</td>
         <td>${p.status === 'exhausted' ? '<span class="bad">流量用尽</span>' : (p.expired ? '<span class="bad">已到期</span>' : (p.paused ? '<span class="muted">已暂停</span>' : '<span class="ok">生效中</span>'))}</td>
       </tr>`).join('') || '<tr><td colspan="6" class="muted">还没有购买过套餐</td></tr>';
     const latestExpiry = activePlans.length
@@ -2016,7 +2017,7 @@ async function loadAdmin(section=currentAdminSection){
       <td><b>${p.price_points}</b> 积分</td>
       <td>${p.max_ports}</td>
       <td>${p.billing_mode === 'traffic' ? '流量' : '时间'}</td>
-      <td>${p.billing_mode === 'traffic' ? (p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '未设置') : (p.duration_days ? p.duration_days + ' 天' : '不限期')}</td>
+      <td>${p.billing_mode === 'traffic' ? (p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '未设置') : `${p.duration_days ? p.duration_days + ' 天' : '不限期'}${p.traffic_limit_gb ? ' · ' + p.traffic_limit_gb + ' GB 上限' : ' · 不限量'}`}</td>
       <td>${p.bandwidth_limit_mbs ? p.bandwidth_limit_mbs + ' MB/s' : '不限'}</td>
       <td><span class="status-badge ${p.active ? 'ok' : 'bad'}"><i></i>${p.active ? '上架' : '下架'}</span></td>
       <td class="actions node-actions"><button type="button" class="node-action" onclick="editPlan(${p.id})">编辑</button><button type="button" class="node-action" onclick="planToggle(${p.id})">${p.active ? '下架' : '上架'}</button><button type="button" class="node-action node-action-danger" onclick="planDelete(${p.id})">删除</button></td>
@@ -2057,7 +2058,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>计费方式</label><select name="billing_mode"><option value="time">时间模式（按天）</option><option value="traffic">流量模式（按 GB）</option></select></div>
       <div><label>有效期（天）</label><input name="duration_days" type="number" value="30" min="0" max="3650"><span class="muted small">时间模式生效；0 表示不限期</span></div>
       <div><label>端口数</label><input name="max_ports" type="number" value="5" min="0" max="100"></div>
-      <div><label>流量额度 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">流量模式必填；用尽即失效</span></div>
+      <div><label>流量额度 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">流量模式必填；时间模式可选填（0 表示不限量）</span></div>
       <div><label>速率 MB/s</label><input name="bandwidth_limit_mbs" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
       <div><label>排序</label><input name="sort_order" type="number" value="0"><span class="muted small">数字越小越靠前</span></div>
       <div><label>备注</label><input name="note" placeholder="套餐说明，展示给用户"></div>
