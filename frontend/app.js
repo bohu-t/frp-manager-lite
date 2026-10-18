@@ -746,7 +746,7 @@ function appSidebarHtml(kind='dashboard'){
   const items = isAdmin ? [
     ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','chart','订单','orders'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
   ] : [
-    ['dashboard','home','概览'],['dashboard-nodes','node','可用节点'],['dashboard-plans','license','购买套餐'],['dashboard-myplans','license','我的套餐'],['dashboard-points','bolt','账单充值'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
+    ['dashboard','home','概览'],['dashboard-nodes','node','新建节点'],['dashboard-plans','license','购买套餐'],['dashboard-myplans','license','我的套餐'],['dashboard-points','bolt','账单与充值'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
   ];
   const links = items.map(([action, icon, label, section]) => {
     const active = kind === action || (section && kind === section) ? ' active' : '';
@@ -1100,6 +1100,128 @@ async function resumePay(orderNo){
 }
 
 
+
+let nnState = { region: '', nodeId: 0, planId: 0 };
+
+async function loadNewNode(){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
+  let nodes = [], plans = [];
+  try{
+    const [nres, pres] = await Promise.all([api('/api/user/nodes'), api('/api/plans')]);
+    nodes = (nres.nodes || []).filter(n => n.active !== false);
+    plans = pres.plans || [];
+  }catch(err){
+    if(err.message === 'unauthorized') return renderLogin();
+    show(err.message, true);
+    return;
+  }
+  window.__nnData = { nodes, plans };
+  if(nnState.region && !nodes.some(n => (n.region || '默认地区') === nnState.region)) nnState = { region:'', nodeId:0, planId:0 };
+  renderNewNode();
+}
+
+function nnPlansFor(nodeId){
+  const plans = (window.__nnData && window.__nnData.plans) || [];
+  return plans.filter(p => Number(p.node_id || 0) === 0 || Number(p.node_id) === Number(nodeId));
+}
+
+function renderNewNode(){
+  const data = window.__nnData || { nodes: [], plans: [] };
+  const nodes = data.nodes || [];
+  const plans = data.plans || [];
+  const regions = {};
+  nodes.forEach(n => {
+    const key = n.region || '默认地区';
+    (regions[key] = regions[key] || []).push(n);
+  });
+  const regionNames = Object.keys(regions);
+  const regionPrice = (name) => {
+    const ids = regions[name].map(n => Number(n.id));
+    const list = plans.filter(p => Number(p.node_id || 0) === 0 || ids.includes(Number(p.node_id)));
+    if(!list.length) return null;
+    return Math.min(...list.map(p => Number(p.price_points || 0)));
+  };
+  const step1 = regionNames.map(name => {
+    const active = nnState.region === name;
+    const min = regionPrice(name);
+    return `<button type="button" class="region-card${active ? ' active' : ''}" onclick="nnPickRegion('${esc(name)}')">
+      <span class="region-card-name">${esc(name)}</span>
+      <span class="region-card-meta">${regions[name].length} 个节点</span>
+      <span class="region-card-price">${min === null ? '暂无套餐' : min + ' 积分起'}</span>
+    </button>`;
+  }).join('') || '<p class="muted">暂无可用节点</p>';
+
+  const regionNodes = nnState.region ? (regions[nnState.region] || []) : [];
+  const step2 = !nnState.region ? '<p class="muted small">请先选择地区</p>' : (regionNodes.map(n => {
+    const active = Number(nnState.nodeId) === Number(n.id);
+    const online = !!n.auth_port_ok;
+    const exceeded = !!n.traffic_exceeded;
+    const disabled = exceeded;
+    return `<button type="button" class="nn-node${active ? ' active' : ''}${disabled ? ' disabled' : ''}" ${disabled ? 'disabled' : ''} onclick="nnPickNode(${Number(n.id)})">
+      <span class="nn-node-main"><b>${esc(n.name || '-')}</b><small>${esc(n.server_addr || '')}:${esc(n.server_port ?? '')} · 空闲端口 ${Number(n.free_count || 0)}</small></span>
+      <span class="status-badge ${exceeded ? 'bad' : (online ? 'ok' : 'bad')}"><i></i>${exceeded ? '流量已用尽' : (online ? '在线' : '不可达')}</span>
+    </button>`;
+  }).join('') || '<p class="muted small">该地区暂无节点</p>');
+
+  const nodePlans = nnState.nodeId ? nnPlansFor(nnState.nodeId) : [];
+  const step3 = !nnState.nodeId ? '<p class="muted small">请先选择节点</p>' : (nodePlans.map(p => {
+    const active = Number(nnState.planId) === Number(p.id);
+    return `<button type="button" class="nn-plan${active ? ' active' : ''}" onclick="nnPickPlan(${Number(p.id)})">
+      <span class="nn-plan-head"><b>${esc(p.name)}</b><strong>${Number(p.price_points)} 积分</strong></span>
+      <span class="nn-plan-meta">${p.max_ports} 端口 · ${p.billing_mode === 'traffic' ? (p.traffic_limit_gb ? p.traffic_limit_gb + ' GB 流量' : '流量套餐') : (p.duration_days ? p.duration_days + ' 天' : '不限期')}${p.billing_mode === 'time' && p.traffic_limit_gb ? ' · ' + p.traffic_limit_gb + ' GB 上限' : ''}</span>
+      ${p.note ? `<span class="nn-plan-note">${esc(p.note)}</span>` : ''}
+    </button>`;
+  }).join('') || '<p class="muted small">该节点暂无可购买套餐</p>');
+
+  const chosenPlan = plans.find(p => Number(p.id) === Number(nnState.planId));
+  const ready = !!(nnState.region && nnState.nodeId && nnState.planId);
+  const payText = ready ? `立即支付 · ${Number(chosenPlan ? chosenPlan.price_points : 0)} 积分` : '请完成上方三步';
+
+  app.innerHTML = appLayoutHtml(`
+    <div class="ov-page-head"><div><span class="section-kicker">NEW NODE</span><h1>新建节点</h1><p>选择地区、节点与套餐，三步完成后即可支付开通。</p></div></div>
+    <section class="card nn-step">
+      <div class="nn-step-head"><span class="nn-step-no">1</span><div><h2>选择地区</h2><p>${regionNames.length} 个地区可选</p></div></div>
+      <div class="region-grid">${step1}</div>
+    </section>
+    <section class="card nn-step">
+      <div class="nn-step-head"><span class="nn-step-no">2</span><div><h2>选择节点</h2><p>${nnState.region ? esc(nnState.region) + ' · ' + regionNodes.length + ' 个节点' : '先选择地区'}</p></div></div>
+      <div class="nn-node-list">${step2}</div>
+    </section>
+    <section class="card nn-step">
+      <div class="nn-step-head"><span class="nn-step-no">3</span><div><h2>选择套餐</h2><p>${nnState.nodeId ? '该节点可用套餐' : '先选择节点'}</p></div></div>
+      <div class="nn-plan-grid">${step3}</div>
+    </section>
+    <div class="nn-paybar">
+      <div class="nn-paybar-info">${ready ? `已选：${esc(nnState.region)} / ${esc((window.__nnData.nodes.find(n => Number(n.id) === Number(nnState.nodeId)) || {}).name || '')} / ${esc(chosenPlan ? chosenPlan.name : '')}` : '请依次完成地区、节点、套餐选择'}</div>
+      <button type="button" class="nn-pay${ready ? ' ready' : ''}" ${ready ? '' : 'disabled'} onclick="nnPay()">${payText}</button>
+    </div>
+  `, 'dashboard-nodes', '新建节点');
+}
+
+function nnPickRegion(name){
+  nnState.region = name; nnState.nodeId = 0; nnState.planId = 0;
+  renderNewNode();
+}
+function nnPickNode(id){
+  nnState.nodeId = Number(id); nnState.planId = 0;
+  renderNewNode();
+}
+function nnPickPlan(id){
+  nnState.planId = Number(id);
+  renderNewNode();
+}
+async function nnPay(){
+  if(!nnState.region || !nnState.nodeId || !nnState.planId) return;
+  const plan = ((window.__nnData || {}).plans || []).find(p => Number(p.id) === Number(nnState.planId)) || {};
+  if(!await appConfirm(`确认购买「${plan.name || ''}」？\n将扣除 ${Number(plan.price_points || 0)} 积分，并开通到所选节点。`, {title:'确认购买', okText:'确认支付'})) return;
+  try{
+    const r = await api('/api/user/orders', {method:'POST', body:{plan_id:nnState.planId, node_id:nnState.nodeId}});
+    await appAlert((r.message || '购买成功') + '\n\n10 分钟内且端口未产生流量，可全额退订。', {title:'开通成功'});
+    nnState = { region:'', nodeId:0, planId:0 };
+    await loadNewNode();
+  }catch(err){ await appAlert(err.message, {title:'购买失败'}); }
+}
+
 async function loadMyPlans(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
   let data;
@@ -1189,28 +1311,37 @@ async function loadPoints(){
       <td>${l.delta > 0 ? '+' : ''}${l.delta}</td>
       <td>${l.balance_after}</td>
       <td>${esc(l.note || l.ref || '-')}</td>
-    </tr>`).join('') || '<tr><td colspan="6" class="muted">暂无积分记录</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">暂无交易记录</td></tr>';
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">POINTS</span><h1>账单充值</h1><p>在线充值或使用充值密钥，余额可用于购买套餐。</p></div><div class="ov-head-badge"><span>当前余额</span><b>${data.balance}</b></div></div>
-    <div class="points-grid">
-      <section class="card">
-        <div class="section-title"><div><h2>${stIcon('license')}在线充值</h2><p>1 元 = ${rate} 积分</p></div></div>
-        <form id="pointsRechargeForm" class="grid">
-          <div><label>充值积分</label><input name="points" type="number" min="1" step="1" value="${rate * 10}" required><span class="muted small" id="pointsAmountHint">应付 ¥${(10).toFixed(2)}</span></div>
-          ${channelHtml}
-          <div class="form-actions" style="grid-column:1/-1"><button>去支付</button></div>
-        </form>
-      </section>
-      <section class="card">
-        <div class="section-title"><div><h2>${stIcon('key')}充值密钥</h2><p>输入管理员发放的充值密钥，立即到账</p></div></div>
-        <form id="pointsKeyForm" class="grid">
-          <div><label>充值密钥</label><input name="key" placeholder="PT-..." required></div>
-          <div class="form-actions" style="grid-column:1/-1"><button>兑换积分</button></div>
-        </form>
+    <div class="ov-page-head"><div><span class="section-kicker">BILLING</span><h1>账单与充值</h1><p>查看余额、充值方式与交易历史。</p></div></div>
+    <div class="billing-grid">
+      <div class="billing-left">
+        <section class="card billing-balance">
+          <div class="billing-balance-head"><span>当前余额</span><span class="status-badge ok"><i></i>可用</span></div>
+          <div class="billing-balance-value">${Number(data.balance)} <small>积分</small></div>
+          <div class="billing-balance-meta"><span>充值比例 1 元 = ${rate} 积分</span><span>可用于购买套餐</span></div>
+        </section>
+        <section class="card">
+          <div class="section-title"><div><h2>${stIcon('license')}在线充值</h2><p>选择金额并完成支付，积分立即到账</p></div></div>
+          <form id="pointsRechargeForm" class="grid">
+            <div><label>充值积分</label><input name="points" type="number" min="1" step="1" value="${rate * 10}" required><span class="muted small" id="pointsAmountHint">应付 ¥${(10).toFixed(2)}</span></div>
+            ${channelHtml}
+            <div class="form-actions" style="grid-column:1/-1"><button>去支付</button></div>
+          </form>
+          <div class="billing-divider"></div>
+          <div class="section-title"><div><h2>${stIcon('key')}充值密钥</h2><p>输入管理员发放的密钥，立即到账</p></div></div>
+          <form id="pointsKeyForm" class="grid">
+            <div><label>充值密钥</label><input name="key" placeholder="PT-..." required></div>
+            <div class="form-actions" style="grid-column:1/-1"><button>兑换积分</button></div>
+          </form>
+        </section>
+      </div>
+      <section class="card billing-history">
+        <div class="section-title"><div><h2>${stIcon('chart')}交易历史</h2><p>最近 100 条记录</p></div></div>
+        <table><thead><tr><th>序号</th><th>时间</th><th>类型</th><th>变动</th><th>余额</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table>
       </section>
     </div>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}积分明细</h2><p>最近 100 条</p></div></div><table><thead><tr><th>序号</th><th>时间</th><th>类型</th><th>变动</th><th>余额</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table></section>
-  `, 'dashboard-points', '账单充值');
+  `, 'dashboard-points', '账单与充值');
 
   const rf = document.querySelector('#pointsRechargeForm');
   if(rf){
@@ -1735,41 +1866,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
     return;
   }
   if(view === 'nodes'){
-    let nodeData = { nodes: [], current_node_id: currentDashboardNodeId };
-    try{ nodeData = await api('/api/user/nodes'); }catch(err){ show(err.message, true); }
-    const nodes = nodeData.nodes || [];
-    const nodeCards = nodes.map(n => {
-      const free = Number(n.free_count || 0), total = Number(n.port_count || 0);
-      const usedPct = total > 0 ? Math.min(100, Math.round((total - free) / total * 100)) : 0;
-      const online = !!n.auth_port_ok;
-      const bw = Number(n.bandwidth_mbps || 0);
-      const monthLimit = Number(n.monthly_traffic_gb || 0);
-      const monthUsed = Number(n.month_used_gb || 0);
-      const trafficExceeded = !!n.traffic_exceeded;
-      return `<article class="node-card${n.is_current ? ' is-current' : ''}">
-        <div class="node-card-head">
-          <div class="node-card-title"><span class="node-card-region">${esc(n.region || '-')}</span><strong>${esc(n.name || '-')}</strong>${n.is_current ? '<span class="node-current-tag">当前节点</span>' : ''}</div>
-          <span class="status-badge ${trafficExceeded ? 'bad' : (online ? 'ok' : 'bad')}"><i></i>${trafficExceeded ? '流量已用尽' : (online ? '在线' : '不可达')}</span>
-        </div>
-        <div class="node-card-rows">
-          <div class="node-info-line"><span>接入地址</span><strong>${esc(n.server_addr || '-')}:${esc(n.server_port ?? '-')}</strong></div>
-          <div class="node-info-line"><span>端口池</span><strong>空闲 ${free} / 共 ${total}</strong></div>
-          <div class="node-info-line"><span>带宽上限</span><strong>${bw > 0 ? bw + ' Mbps' : '不限'}</strong></div>
-          <div class="node-info-line"><span>实测延迟</span><strong data-latency-node="${esc(n.server_addr || '')}">测量中…</strong></div>
-          <div class="node-info-line"><span>本月流量</span><strong class="${trafficExceeded ? 'bad' : ''}">${monthUsed} GB / ${monthLimit > 0 ? monthLimit + ' GB' : '不限'}</strong></div>
-          <div class="node-info-line"><span>线路备注</span><strong>${esc(n.note || '—')}</strong></div>
-        </div>
-        <div class="node-card-pool"><div class="node-pool-label"><span>端口占用</span><b>${usedPct}%</b></div><div class="node-pool-track"><span style="width:${usedPct}%"></span></div></div>
-        <div class="node-card-foot">${trafficExceeded ? '<button class="secondary" type="button" disabled>本月流量已用尽</button>' : (n.is_current ? '<button class="secondary" type="button" disabled>当前使用中</button>' : `<button type="button" onclick="switchDashboardNode(${Number(n.id)}, 'nodes')">切换到此节点</button>`)}</div>
-      </article>`;
-    }).join('') || '<div class="empty-state"><strong>暂无可用节点</strong><p class="muted small">管理员启用节点后会显示在这里。</p></div>';
-    app.innerHTML = appLayoutHtml(`
-      <section class="card node-list-page">
-        <div class="section-title"><div><div class="section-kicker">NODES</div><h2>${stIcon('node')}可用节点</h2><p>选择接入节点；切换后新创建的隧道会使用该节点，已有隧道不会自动迁移。</p></div><span class="section-count">${nodes.length} 个节点</span></div>
-        <div class="node-card-grid">${nodeCards}</div>
-      </section>`, 'dashboard-nodes', '节点');
-    fillNodeLatencies();
-    return;
+    return loadNewNode();
   }
   if(view === 'profile'){
     const myPlans = data.my_plans || [];
@@ -2186,6 +2283,7 @@ async function loadAdmin(section=currentAdminSection){
       <input type="hidden" name="id" value="">
       <div><label>套餐名称</label><input name="name" placeholder="例如 入门版 / 专业版" required></div>
       <div><label>积分价格</label><input name="price_points" type="number" value="100" min="0" step="1"><span class="muted small">用户购买时扣除的积分</span></div>
+      <div><label>适用节点</label><select name="node_id"><option value="0">全部节点（通用）</option>${nodeOptions(data.nodes || [])}</select><span class="muted small">绑定后用户只能在该节点购买此套餐</span></div>
       <div><label>计费方式</label><select name="billing_mode"><option value="time">时间模式（按天）</option><option value="traffic">流量模式（按 GB）</option></select></div>
       <div><label>有效期（天）</label><input name="duration_days" type="number" value="30" min="0" max="3650"><span class="muted small">时间模式生效；0 表示不限期</span></div>
       <div><label>端口数</label><input name="max_ports" type="number" value="5" min="0" max="100"></div>
@@ -2720,6 +2818,7 @@ function resetPlanForm(){
   f.elements.sort_order.value = '0';
   f.elements.active.value = '1';
   f.elements.fair_use_note.value = '';
+  f.elements.node_id.value = '0';
 }
 function editPlan(id){
   const f = document.querySelector('#planForm');
@@ -2737,6 +2836,7 @@ function editPlan(id){
   f.elements.sort_order.value = p.sort_order;
   f.elements.note.value = p.note;
   f.elements.fair_use_note.value = p.fair_use_note || '';
+  f.elements.node_id.value = p.node_id || 0;
   f.elements.active.value = p.active ? '1' : '0';
   f.scrollIntoView({behavior:'smooth', block:'center'});
 }

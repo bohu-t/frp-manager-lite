@@ -4131,9 +4131,10 @@ def save_plan(plan_id: int, name: str, price_cents: int, max_ports: int, traffic
         return False, "流量套餐必须填写流量额度"
     if billing_mode == "time" and duration_days <= 0:
         return False, "时间套餐必须填写有效期天数"
-    # 套餐不再绑定节点，节点由用户在购买时自行选择
-    node_id = 0
+    node_id = int(node_id or 0)
     with db() as conn:
+        if node_id and not conn.execute("SELECT 1 FROM nodes WHERE id=?", (node_id,)).fetchone():
+            return False, "所选节点不存在"
         if plan_id:
             cur = conn.execute(
                 "UPDATE plans SET name=?, price_cents=?, price_points=?, billing_mode=?, max_ports=?, traffic_limit_bytes=?, bandwidth_limit_kbps=?, duration_days=?, node_id=?, note=?, fair_use_note=?, active=?, sort_order=? WHERE id=?",
@@ -4509,6 +4510,9 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
             chosen_node = conn.execute("SELECT id, name FROM nodes WHERE id=? AND active=1", (node_id,)).fetchone()
             if not chosen_node:
                 return False, "所选节点不存在或已停用", None
+        plan_node_id = int(row_val(plan, "node_id", 0) or 0)
+        if plan_node_id and plan_node_id != int(node_id or 0):
+            return False, "该套餐不适用于所选节点，请重新选择", None
 
         cost = int(row_val(plan, "price_points", 0) or 0)
         balance = int(row_val(conn.execute("SELECT points FROM users WHERE id=?", (user["id"],)).fetchone(), "points", 0) or 0)
