@@ -2227,6 +2227,7 @@ def start_plan_usage_loop() -> None:
         time.sleep(20)
         while True:
             try:
+                expire_plans_once()
                 with db() as conn:
                     ids = [int(r["user_id"]) for r in conn.execute(
                         "SELECT DISTINCT user_id FROM user_plans WHERE billing_mode='traffic' AND status='active'")]
@@ -2718,9 +2719,9 @@ def init_db() -> None:
                 user_id INTEGER NOT NULL,
                 node_id INTEGER NOT NULL,
                 port INTEGER NOT NULL,
-                created_at INTEGER NOT NULL,
-                UNIQUE(node_id, port)
+                created_at INTEGER NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS idx_user_plan_ports_port ON user_plan_ports(node_id, port);
             CREATE TABLE IF NOT EXISTS recharge_keys (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 seq_no INTEGER NOT NULL DEFAULT 0,
@@ -4176,6 +4177,35 @@ def recalc_user_entitlements(conn: sqlite3.Connection, user_id: int) -> None:
         (min(100, total_ports), traffic, bandwidth, expires_at, user_id))
 
 
+def release_plan_resources(conn: sqlite3.Connection, plan_row: sqlite3.Row) -> None:
+    """套餐失效：停用该套餐端口上的隧道并回收端口。"""
+    ports = conn.execute("SELECT node_id, port FROM user_plan_ports WHERE user_plan_id=?", (plan_row["id"],)).fetchall()
+    for pr in ports:
+        node_id, port = int(pr["node_id"]), int(pr["port"])
+        conn.execute("UPDATE tunnels SET enabled=0 WHERE user_id=? AND node_id=? AND remote_port=?",
+                     (plan_row["user_id"], node_id, port))
+        conn.execute("UPDATE ports SET user_id=NULL WHERE node_id=? AND port=?", (node_id, port))
+    conn.execute("DELETE FROM user_plan_ports WHERE user_plan_id=?", (plan_row["id"],))
+
+
+def expire_plans_once() -> int:
+    """把已到期的时间套餐标记为 expired，并回收端口。"""
+    count = 0
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM user_plans WHERE status='active' AND billing_mode='time' AND expires_at>0 AND expires_at<=?",
+            (now(),)).fetchall()
+        users: set[int] = set()
+        for r in rows:
+            conn.execute("UPDATE user_plans SET status='expired' WHERE id=?", (r["id"],))
+            release_plan_resources(conn, r)
+            users.add(int(r["user_id"]))
+            count += 1
+        for uid in users:
+            recalc_user_entitlements(conn, uid)
+    return count
+
+
 def refresh_user_plan_usage(conn: sqlite3.Connection, user_id: int) -> None:
     """流量型套餐只统计该套餐分配端口产生的流量，用尽即失效。"""
     traffic_plans = conn.execute(
@@ -4209,6 +4239,7 @@ def refresh_user_plan_usage(conn: sqlite3.Connection, user_id: int) -> None:
         conn.execute("UPDATE user_plans SET used_bytes=?, usage_started_at=? WHERE id=?", (used, now(), p["id"]))
         if used >= quota:
             conn.execute("UPDATE user_plans SET status='exhausted', expires_at=? WHERE id=?", (now(), p["id"]))
+            release_plan_resources(conn, p)
             changed = True
     if changed:
         recalc_user_entitlements(conn, user_id)
@@ -4245,6 +4276,7 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
          billing_mode, quota_bytes, 0, now(), "active",
          max_ports, int(order["traffic_limit_bytes"] or 0), int(order["bandwidth_limit_kbps"] or 0),
          duration_days, node_id, now(), expires_at, now()))
+    conn.execute("UPDATE users SET node_id=? WHERE id=?", (node_id, user["id"]))
     plan_id_new = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
     if billing_mode == "traffic" and free_ports:
         conn.executemany(
