@@ -960,8 +960,8 @@ async function loadPlans(){
       <div class="plan-card-head"><h3>${esc(p.name)}</h3><span class="plan-price">${p.price_points} <small>积分</small></span></div>
       <ul class="plan-meta">
         <li><span>端口数</span><b>${p.max_ports}</b></li>
-        <li><span>有效期</span><b>${p.duration_days ? p.duration_days + ' 天' : '不限期'}</b></li>
-        <li><span>流量上限</span><b>${p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '不限'}</b></li>
+        <li><span>计费方式</span><b>${p.billing_mode === 'traffic' ? '流量' : '时间'}</b></li>
+        <li><span>${p.billing_mode === 'traffic' ? '流量额度' : '有效期'}</span><b>${p.billing_mode === 'traffic' ? (p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '未设置') : (p.duration_days ? p.duration_days + ' 天' : '不限期')}</b></li>
         <li><span>速率上限</span><b>${p.bandwidth_limit_mbs ? p.bandwidth_limit_mbs + ' MB/s' : '不限'}</b></li>
       </ul>
       ${p.note ? `<p class="plan-note">${esc(p.note)}</p>` : ''}
@@ -1646,12 +1646,16 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         <td>${i + 1}</td>
         <td>${esc(p.plan_name || '-')}</td>
         <td>${p.max_ports}</td>
-        <td>${p.traffic_limit_bytes ? fmtBytes(p.traffic_limit_bytes) : '不限'} / ${p.bandwidth_limit_kbps ? (Number(p.bandwidth_limit_kbps) / 1024).toFixed(1) + ' MB/s' : '不限'}</td>
-        <td>${p.expires_at ? esc(p.expires_text) : '不限期'}</td>
-        <td>${p.expired ? '<span class="bad">已到期</span>' : '<span class="ok">生效中</span>'}</td>
+        <td>${p.billing_mode === 'traffic' ? '流量' : '时间'}</td>
+        <td>${p.billing_mode === 'traffic' ? `${p.used_gb} / ${p.quota_gb} GB` : (p.expires_at ? esc(p.expires_text) : '不限期')}</td>
+        <td>${p.status === 'exhausted' ? '<span class="bad">流量用尽</span>' : (p.expired ? '<span class="bad">已到期</span>' : '<span class="ok">生效中</span>')}</td>
       </tr>`).join('') || '<tr><td colspan="6" class="muted">还没有购买过套餐</td></tr>';
     const latestExpiry = activePlans.length
-      ? (activePlans.some(p => !p.expires_at) ? '不限期' : activePlans.map(p => p.expires_text).sort().slice(-1)[0])
+      ? (activePlans.every(p => p.billing_mode === 'traffic')
+          ? '按流量计费'
+          : (activePlans.some(p => !p.expires_at && p.billing_mode !== 'traffic')
+              ? '不限期'
+              : activePlans.filter(p => p.billing_mode !== 'traffic').map(p => p.expires_text).sort().slice(-1)[0]))
       : '';
     app.innerHTML = appLayoutHtml(`
       <div class="profile-grid">
@@ -1674,7 +1678,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         </section>
         <section class="card profile-plans">
           <div class="section-title"><div><div class="section-kicker">MY PLANS</div><h2>${stIcon('license')}我的套餐</h2><p>每个套餐独立计算有效期，互不影响。</p></div><span class="section-count">${activePlans.length} 个生效中</span></div>
-          <table><thead><tr><th>序号</th><th>套餐</th><th>端口</th><th>流量 / 速率</th><th>到期</th><th>状态</th></tr></thead><tbody>${planRows}</tbody></table>
+          <table><thead><tr><th>序号</th><th>套餐</th><th>端口</th><th>计费</th><th>额度 / 到期</th><th>状态</th></tr></thead><tbody>${planRows}</tbody></table>
         </section>
         <section class="card profile-pwd">
           <div class="section-title"><div><div class="section-kicker">SECURITY</div><h2>${stIcon('key')}修改登录密码</h2><p>修改当前账号的登录密码，下次登录请使用新密码。</p></div></div>
@@ -2011,8 +2015,9 @@ async function loadAdmin(section=currentAdminSection){
       <td>${esc(p.name)}</td>
       <td><b>${p.price_points}</b> 积分</td>
       <td>${p.max_ports}</td>
-      <td>${p.duration_days ? p.duration_days + ' 天' : '不限期'}</td>
-      <td>${p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '不限'} / ${p.bandwidth_limit_mbs ? p.bandwidth_limit_mbs + ' MB/s' : '不限'}</td>
+      <td>${p.billing_mode === 'traffic' ? '流量' : '时间'}</td>
+      <td>${p.billing_mode === 'traffic' ? (p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '未设置') : (p.duration_days ? p.duration_days + ' 天' : '不限期')}</td>
+      <td>${p.bandwidth_limit_mbs ? p.bandwidth_limit_mbs + ' MB/s' : '不限'}</td>
       <td><span class="status-badge ${p.active ? 'ok' : 'bad'}"><i></i>${p.active ? '上架' : '下架'}</span></td>
       <td class="actions node-actions"><button type="button" class="node-action" onclick="editPlan(${p.id})">编辑</button><button type="button" class="node-action" onclick="planToggle(${p.id})">${p.active ? '下架' : '上架'}</button><button type="button" class="node-action node-action-danger" onclick="planDelete(${p.id})">删除</button></td>
     </tr>`).join('') || '<tr><td colspan="9" class="muted">还没有套餐，先在上方创建</td></tr>';
@@ -2049,16 +2054,17 @@ async function loadAdmin(section=currentAdminSection){
       <input type="hidden" name="id" value="">
       <div><label>套餐名称</label><input name="name" placeholder="例如 入门版 / 专业版" required></div>
       <div><label>积分价格</label><input name="price_points" type="number" value="100" min="0" step="1"><span class="muted small">用户购买时扣除的积分</span></div>
-      <div><label>有效期（天）</label><input name="duration_days" type="number" value="30" min="0" max="3650"><span class="muted small">0 表示不限期</span></div>
+      <div><label>计费方式</label><select name="billing_mode"><option value="time">时间模式（按天）</option><option value="traffic">流量模式（按 GB）</option></select></div>
+      <div><label>有效期（天）</label><input name="duration_days" type="number" value="30" min="0" max="3650"><span class="muted small">时间模式生效；0 表示不限期</span></div>
       <div><label>端口数</label><input name="max_ports" type="number" value="5" min="0" max="100"></div>
-      <div><label>流量上限 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
+      <div><label>流量额度 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">流量模式必填；用尽即失效</span></div>
       <div><label>速率 MB/s</label><input name="bandwidth_limit_mbs" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
       <div><label>排序</label><input name="sort_order" type="number" value="0"><span class="muted small">数字越小越靠前</span></div>
       <div><label>备注</label><input name="note" placeholder="套餐说明，展示给用户"></div>
       <div><label>状态</label><select name="active"><option value="1">上架</option><option value="0">下架</option></select></div>
       <div class="form-actions" style="grid-column:1/-1"><button>保存套餐</button><button type="button" class="secondary" onclick="resetPlanForm()">清空</button></div>
     </form></section>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>序号</th><th>名称</th><th>积分价格</th><th>端口</th><th>有效期</th><th>流量 / 速率</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>序号</th><th>名称</th><th>积分价格</th><th>端口</th><th>计费</th><th>有效期 / 额度</th><th>速率</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
     <section class="card" id="recharge-keys"><div class="section-title"><div><h2>${stIcon('key')}积分充值密钥</h2><p>生成后发给用户，用户在「积分充值」页兑换；每枚只能使用一次</p></div><span class="section-count">可用 ${(data.recharge_keys || []).filter(k => !k.used_by && k.active).length}</span></div>
       <form id="rechargeKeyForm" class="grid" style="margin-bottom:18px">
         <div><label>每枚积分</label><input name="points" type="number" value="100" min="1" step="1"></div>
@@ -2575,6 +2581,7 @@ function resetPlanForm(){
   f.elements.price_points.value = '100';
   f.elements.max_ports.value = '5';
   f.elements.duration_days.value = '30';
+  f.elements.billing_mode.value = 'time';
   f.elements.traffic_limit_gb.value = '0';
   f.elements.bandwidth_limit_mbs.value = '0';
   f.elements.sort_order.value = '0';
@@ -2589,6 +2596,7 @@ function editPlan(id){
   f.elements.price_points.value = p.price_points;
   f.elements.max_ports.value = p.max_ports;
   f.elements.duration_days.value = p.duration_days;
+  f.elements.billing_mode.value = p.billing_mode || 'time';
   f.elements.traffic_limit_gb.value = p.traffic_limit_gb;
   f.elements.bandwidth_limit_mbs.value = p.bandwidth_limit_mbs;
   f.elements.node_id.value = p.node_id || 0;
