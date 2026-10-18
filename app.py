@@ -2756,6 +2756,7 @@ def init_db() -> None:
                 plan_id INTEGER REFERENCES plans(id) ON DELETE SET NULL,
                 plan_name TEXT NOT NULL DEFAULT '',
                 billing_mode TEXT NOT NULL DEFAULT 'time',
+                price_points INTEGER NOT NULL DEFAULT 0,
                 quota_bytes INTEGER NOT NULL DEFAULT 0,
                 used_bytes INTEGER NOT NULL DEFAULT 0,
                 usage_started_at INTEGER NOT NULL DEFAULT 0,
@@ -2828,6 +2829,8 @@ def init_db() -> None:
         up_cols = {r["name"] for r in conn.execute("PRAGMA table_info(user_plans)").fetchall()}
         if "billing_mode" not in up_cols:
             conn.execute("ALTER TABLE user_plans ADD COLUMN billing_mode TEXT NOT NULL DEFAULT 'time'")
+        if "price_points" not in up_cols:
+            conn.execute("ALTER TABLE user_plans ADD COLUMN price_points INTEGER NOT NULL DEFAULT 0")
         if "quota_bytes" not in up_cols:
             conn.execute("ALTER TABLE user_plans ADD COLUMN quota_bytes INTEGER NOT NULL DEFAULT 0")
         if "used_bytes" not in up_cols:
@@ -4010,6 +4013,7 @@ def payment_config(conn: sqlite3.Connection) -> dict[str, Any]:
         "wechat_mch_id": setting_get(conn, "wechat_mch_id", ""),
         "wechat_api_key": setting_get(conn, "wechat_api_key", ""),
         "points_per_yuan": max(1, int(setting_get(conn, "points_per_yuan", "1") or 1)),
+        "refund_fee_percent": max(0, min(100, int(setting_get(conn, "refund_fee_percent", "10") or 10))),
     }
 
 
@@ -4058,6 +4062,7 @@ def payment_public(cfg: dict[str, Any]) -> dict[str, Any]:
         "wechat_appid": cfg.get("wechat_appid", ""),
         "wechat_mch_id": cfg.get("wechat_mch_id", ""),
         "points_per_yuan": int(cfg.get("points_per_yuan") or 1),
+        "refund_fee_percent": int(cfg.get("refund_fee_percent") or 10),
         "alipay_configured": bool(cfg.get("alipay_app_id") and cfg.get("alipay_private_key") and cfg.get("alipay_public_key")),
         "wechat_configured": bool(cfg.get("wechat_appid") and cfg.get("wechat_mch_id") and cfg.get("wechat_api_key")),
     }
@@ -4245,6 +4250,48 @@ def recalc_user_entitlements(conn: sqlite3.Connection, user_id: int) -> None:
         (min(100, total_ports), traffic, bandwidth, expires_at, user_id))
 
 
+def refund_fee_percent(conn: sqlite3.Connection) -> int:
+    try:
+        return max(0, min(100, int(setting_get(conn, "refund_fee_percent", "10") or 10)))
+    except (TypeError, ValueError):
+        return 10
+
+
+def compute_plan_refund(conn: sqlite3.Connection, plan_row: sqlite3.Row) -> dict[str, Any]:
+    price = int(plan_row["price_points"] or 0)
+    if (plan_row["status"] or "active") != "active":
+        return {"eligible": False, "points": 0, "ratio": 0.0, "fee_percent": refund_fee_percent(conn), "gross": 0}
+    ratios: list[float] = []
+    if int(plan_row["expires_at"] or 0):
+        total = max(1, int(plan_row["duration_days"] or 0) * 86400)
+        remaining = max(0, int(plan_row["expires_at"]) - now())
+        ratios.append(min(1.0, remaining / total))
+    if int(plan_row["quota_bytes"] or 0) > 0:
+        ratios.append(max(0.0, 1 - int(plan_row["used_bytes"] or 0) / int(plan_row["quota_bytes"])))
+    ratio = min(ratios) if ratios else 1.0
+    fee = refund_fee_percent(conn)
+    gross = int(round(price * ratio))
+    net = int(round(gross * (100 - fee) / 100))
+    return {"eligible": True, "points": net, "ratio": round(ratio, 4), "fee_percent": fee, "gross": gross}
+
+
+def cancel_user_plan(user: sqlite3.Row, user_plan_id: int) -> tuple[bool, str, dict[str, Any]]:
+    with db() as conn:
+        p = conn.execute("SELECT * FROM user_plans WHERE id=? AND user_id=?", (user_plan_id, user["id"])).fetchone()
+        if not p:
+            return False, "套餐记录不存在", {}
+        if (p["status"] or "active") != "active":
+            return False, "该套餐已失效，无法退订", {}
+        info = compute_plan_refund(conn, p)
+        conn.execute("UPDATE user_plans SET status='cancelled', expires_at=? WHERE id=?", (now(), p["id"]))
+        release_plan_resources(conn, p)
+        if int(info["points"]) > 0:
+            points_change(conn, int(user["id"]), int(info["points"]), "plan_refund", p["plan_name"], "套餐退订退款")
+        recalc_user_entitlements(conn, int(user["id"]))
+    msg = f"退订成功，退回 {info['points']} 积分（剩余比例 {int(info['ratio']*100)}%，手续费 {info['fee_percent']}%）"
+    return True, msg, info
+
+
 def release_plan_resources(conn: sqlite3.Connection, plan_row: sqlite3.Row) -> None:
     """套餐失效：停用该套餐端口上的隧道并回收端口。"""
     ports = conn.execute("SELECT node_id, port FROM user_plan_ports WHERE user_plan_id=?", (plan_row["id"],)).fetchall()
@@ -4339,14 +4386,14 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
     else:
         expires_at = 0 if duration_days <= 0 else now() + duration_days * 86400
     conn.execute(
-        "INSERT INTO user_plans(user_id, username, plan_id, plan_name, order_no, billing_mode, quota_bytes, used_bytes, usage_started_at, status, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days, node_id, starts_at, expires_at, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO user_plans(user_id, username, plan_id, plan_name, order_no, billing_mode, price_points, quota_bytes, used_bytes, usage_started_at, status, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days, node_id, starts_at, expires_at, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (user["id"], user["username"], order["plan_id"], order["plan_name"], order["order_no"],
-         billing_mode, quota_bytes, 0, now(), "active",
+         billing_mode, int(order["points"] or 0), quota_bytes, 0, now(), "active",
          max_ports, int(order["traffic_limit_bytes"] or 0), int(order["bandwidth_limit_kbps"] or 0),
          duration_days, node_id, now(), expires_at, now()))
     conn.execute("UPDATE users SET node_id=? WHERE id=?", (node_id, user["id"]))
     plan_id_new = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
-    if quota_bytes > 0 and free_ports:
+    if free_ports:
         conn.executemany(
             "INSERT OR IGNORE INTO user_plan_ports(user_plan_id, user_id, node_id, port, created_at) VALUES(?,?,?,?,?)",
             [(plan_id_new, user["id"], node_id, r["port"], now()) for r in free_ports])
@@ -5201,6 +5248,8 @@ class Handler(BaseHTTPRequestHandler):
                         "traffic_limit_bytes": r["traffic_limit_bytes"], "bandwidth_limit_kbps": r["bandwidth_limit_kbps"],
                         "expires_at": exp, "expires_text": fmt_time(exp),
                         "status": status, "expired": status != "active", "created_at": r["created_at"],
+                        "price_points": int(r["price_points"] or 0),
+                        "refund_points": (compute_plan_refund(conn, r)["points"] if status == "active" else 0),
                         "paused": bool(int(r["quota_bytes"] or 0) > 0 and unlimited_active),
                     })
             node_payload = node_public(node) if node else None
@@ -5565,6 +5614,20 @@ class Handler(BaseHTTPRequestHandler):
                 return
             ok, msg = register_with_invite(str(data.get("username", "")), str(data.get("password", "")), str(data.get("invite_key", "")), int(data.get("node_id", 0)), str(data.get("email", "")), str(data.get("code", "")))
             self.send_json({"ok": ok, "message": msg, "error": None if ok else msg}, 200 if ok else 400)
+            return
+
+        if path == "/api/user/plans/cancel":
+            user = self.require_user()
+            if not user:
+                return
+            try:
+                upid = int(data.get("id", 0))
+            except (TypeError, ValueError):
+                upid = 0
+            ok, msg, info = cancel_user_plan(user, upid)
+            if ok:
+                audit("plan_cancel", user, None, None, "", msg)
+            self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "refund": info}, 200 if ok else 400)
             return
 
         if path == "/api/user/points/redeem":
@@ -6361,6 +6424,11 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 rate = 1
             setting_set(conn, "points_per_yuan", str(max(1, min(10000, rate))))
+            try:
+                fee = int(data.get("refund_fee_percent", 10) or 0)
+            except (TypeError, ValueError):
+                fee = 10
+            setting_set(conn, "refund_fee_percent", str(max(0, min(100, fee))))
         self.send_json({"ok": True, "message": "支付设置已保存"})
 
     def admin_smtp_config_save(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:

@@ -1026,6 +1026,15 @@ async function confirmBuyPlan(planId){
   }catch(err){ show(err.message, true); }
 }
 
+async function cancelPlan(id, name, refund){
+  if(!confirm(`确认退订「${name}」？\n按剩余比例预计退回 ${refund} 积分（已扣除手续费）。\n退订后该套餐分配的端口会回收，相关隧道会停用。`)) return;
+  try{
+    const r = await api('/api/user/plans/cancel', {method:'POST', body:{id}});
+    show(r.message || '退订成功');
+    await loadDashboard('profile');
+  }catch(err){ show(err.message, true); }
+}
+
 async function resumePay(orderNo){
   try{
     const r = await api('/api/orders/status?order_no=' + encodeURIComponent(orderNo));
@@ -1650,8 +1659,9 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         <td>${p.max_ports}</td>
         <td>${p.billing_mode === 'traffic' ? '流量' : '时间'}</td>
         <td>${p.quota_gb > 0 ? `${p.used_gb} / ${p.quota_gb} GB` : '不限量'}${p.billing_mode !== 'traffic' && p.expires_at ? `<br><span class="muted small">到期 ${esc(p.expires_text)}</span>` : ''}</td>
-        <td>${p.status === 'exhausted' ? '<span class="bad">流量用尽</span>' : (p.expired ? '<span class="bad">已到期</span>' : (p.paused ? '<span class="muted">已暂停</span>' : '<span class="ok">生效中</span>'))}</td>
-      </tr>`).join('') || '<tr><td colspan="6" class="muted">还没有购买过套餐</td></tr>';
+        <td>${p.status === 'exhausted' ? '<span class="bad">流量用尽</span>' : (p.status === 'cancelled' ? '<span class="muted">已退订</span>' : (p.expired ? '<span class="bad">已到期</span>' : (p.paused ? '<span class="muted">已暂停</span>' : '<span class="ok">生效中</span>')))}</td>
+        <td class="actions node-actions">${p.status === 'active' ? `<button type="button" class="node-action node-action-danger" onclick="cancelPlan(${p.id}, '${esc(p.plan_name)}', ${Number(p.refund_points || 0)})">退订</button>` : '<span class="muted small">—</span>'}</td>
+      </tr>`).join('') || '<tr><td colspan="7" class="muted">还没有购买过套餐</td></tr>';
     const latestExpiry = activePlans.length
       ? (activePlans.every(p => p.billing_mode === 'traffic')
           ? '按流量计费'
@@ -1680,7 +1690,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         </section>
         <section class="card profile-plans">
           <div class="section-title"><div><div class="section-kicker">MY PLANS</div><h2>${stIcon('license')}我的套餐</h2><p>流量套餐只统计该套餐分配端口产生的流量；时间套餐生效期间流量套餐暂停扣量。</p></div><span class="section-count">${activePlans.length} 个生效中</span></div>
-          <table><thead><tr><th>序号</th><th>套餐</th><th>端口</th><th>计费</th><th>额度 / 到期</th><th>状态</th></tr></thead><tbody>${planRows}</tbody></table>
+          <table><thead><tr><th>序号</th><th>套餐</th><th>端口</th><th>计费</th><th>额度 / 到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table>
         </section>
         <section class="card profile-pwd">
           <div class="section-title"><div><div class="section-kicker">SECURITY</div><h2>${stIcon('key')}修改登录密码</h2><p>修改当前账号的登录密码，下次登录请使用新密码。</p></div></div>
@@ -2899,6 +2909,7 @@ function adminPaymentCardHtml(pay){
       </div><span class="muted small">全部取消即关闭在线支付；只有已填好密钥的渠道才会对用户可用</span></div>
       <div><label>对外访问地址</label><input name="public_url" value="${esc(pay.public_url || '')}" placeholder="https://frp.example.com"></div>
       <div><label>积分兑换比例</label><input name="points_per_yuan" type="number" value="${Number(pay.points_per_yuan || 1)}" min="1" max="10000"><span class="muted small">1 元 = N 积分</span></div>
+      <div><label>退订手续费（%）</label><input name="refund_fee_percent" type="number" value="${Number(pay.refund_fee_percent ?? 10)}" min="0" max="100"><span class="muted small">按剩余比例退款后再扣</span></div>
       <div><label>支付宝 App ID</label><input name="alipay_app_id" value="${esc(pay.alipay_app_id || '')}" placeholder="2021000000000000"></div>
       <div><label>支付宝网关</label><input name="alipay_gateway" value="${esc(pay.alipay_gateway || 'https://openapi.alipay.com/gateway.do')}"></div>
       <div class="span-2"><label>支付宝应用私钥</label><textarea name="alipay_private_key" rows="2" placeholder="${pay.alipay_configured ? '已设置，留空不修改' : '-----BEGIN PRIVATE KEY-----'}"></textarea></div>
