@@ -1444,46 +1444,57 @@ async function loadMyPlans(){
   nodes.forEach(n => { nodeById[Number(n.id)] = n; });
   const groups = {};
   myPlans.forEach(p => {
-    const n = nodeById[Number(p.node_id)] || {};
-    const key = n.region || '未分配地区';
-    (groups[key] = groups[key] || []).push({ plan: p, node: n });
+    const key = Number(p.node_id || 0);
+    if(!groups[key]) groups[key] = [];
+    groups[key].push(p);
   });
-  const regionNames = Object.keys(groups);
-  const cardHtml = ({ plan: p, node: n }) => {
-    const statusText = p.status === 'exhausted' ? '流量用尽' : (p.status === 'cancelled' ? '已退订' : (p.expired ? '已到期' : '生效中'));
-    const statusClass = p.status === 'active' && !p.expired ? 'ok' : 'bad';
-    const quotaText = p.quota_gb > 0 ? `${p.used_gb} / ${p.quota_gb} GB` : '不限量';
-    const expireText = p.billing_mode === 'traffic' ? quotaText : (p.expires_at ? p.expires_text : '不限期');
-    return `<article class="my-node-card" onclick="openNodeTunnels(${Number(p.node_id || 0)})">
+  const groupKeys = Object.keys(groups);
+  const cardHtml = (nodeId) => {
+    const plans = groups[nodeId];
+    const n = nodeById[Number(nodeId)] || {};
+    const activePlans = plans.filter(p => p.status === 'active' && !p.expired);
+    const totalPorts = activePlans.reduce((sum, p) => sum + Number(p.max_ports || 0), 0);
+    const totalPaid = plans.reduce((sum, p) => sum + Number(p.price_points || 0), 0);
+    const bw = Number(n.bandwidth_mbps || 0);
+    const usedGb = Number(n.month_used_gb || 0);
+    const limitGb = Number(n.monthly_traffic_gb || 0);
+    const statusText = activePlans.length ? '运行中' : (plans.some(p => p.status === 'exhausted') ? '流量用尽' : '已到期');
+    const statusClass = activePlans.length ? 'ok' : 'bad';
+    const planRows = plans.map(p => {
+      const pStatus = p.status === 'exhausted' ? '流量用尽' : (p.status === 'cancelled' ? '已退订' : (p.expired ? '已到期' : '生效中'));
+      const detail = p.billing_mode === 'traffic' ? `${p.used_gb} / ${p.quota_gb} GB` : (p.expires_at ? p.expires_text : '不限期');
+      return `<div class="my-node-plan">
+        <div><b>${esc(p.plan_name || '-')}</b><small>${esc(detail)}</small></div>
+        <span class="status-badge ${p.status === 'active' && !p.expired ? 'ok' : 'bad'}"><i></i>${pStatus}</span>
+        ${p.status === 'active' ? `<button type="button" class="node-action node-action-danger" onclick="event.stopPropagation();cancelPlan(${p.id}, '${esc(p.plan_name)}', ${Number(p.refund_points || 0)})">退订</button>` : ''}
+      </div>`;
+    }).join('');
+    return `<article class="my-node-card" onclick="openNodeTunnels(${Number(nodeId)}, '${esc(n.name || '节点')}')">
       <div class="my-node-head">
-        <div><span class="my-node-region">${esc(n.region || '未分配')}</span><b>${esc(p.plan_name || '-')}</b></div>
+        <div class="my-node-title"><span class="my-node-region">${esc(n.region || '未分配')}</span><b>${esc(n.name || '节点 ' + nodeId)}</b><small>${plans.length} 个套餐</small></div>
         <span class="status-badge ${statusClass}"><i></i>${statusText}</span>
       </div>
+      <div class="my-node-notice"><b>节点说明</b><span>${esc(n.note || '合理使用，禁止违规业务')}</span></div>
       <div class="my-node-specs">
-        <div><span>端口</span><b>${p.max_ports}</b></div>
-        <div><span>${p.billing_mode === 'traffic' ? '流量' : '到期'}</span><b>${esc(expireText)}</b></div>
-        <div><span>接入地址</span><b>${esc(n.server_addr || '-')}</b></div>
-        <div><span>已付</span><b>${Number(p.price_points || 0)} 积分</b></div>
+        <div><span>可用端口</span><b>${totalPorts}</b></div>
+        <div><span>带宽 / 月流量</span><b>${bw > 0 ? bw + ' Mbps' : '不限'} / ${limitGb > 0 ? usedGb + '/' + limitGb + ' GB' : '不限'}</b></div>
+        <div><span>接入地址</span><b>${esc(n.server_addr || '-')}:${esc(n.server_port ?? '')}</b></div>
+        <div><span>已付</span><b>${totalPaid} 积分</b></div>
       </div>
-      <div class="my-node-foot">
-        <span class="muted small">${p.grace_until && p.status !== 'active' ? '端口保留至 ' + fmtTs(p.grace_until) : '点击进入隧道管理'}</span>
-        ${p.status === 'active' ? `<button type="button" class="node-action node-action-danger" onclick="event.stopPropagation();cancelPlan(${p.id}, '${esc(p.plan_name)}', ${Number(p.refund_points || 0)})">退订</button>` : ''}
-      </div>
+      <div class="my-node-plans">${planRows}</div>
+      <div class="my-node-foot"><span class="muted small">点击卡片进入隧道管理</span></div>
     </article>`;
   };
-  const sections = regionNames.map(region => `
-    <section class="card my-node-section">
-      <div class="section-title"><div><h2>${stIcon('node')}我的节点 <span class="my-node-sep">›</span> ${esc(region)}</h2><p>${groups[region].length} 个节点套餐</p></div></div>
-      <div class="my-node-grid">${groups[region].map(cardHtml).join('')}</div>
-    </section>`).join('') || `<section class="card"><div class="empty-state"><strong>还没有节点</strong><p class="muted small">去「新建节点」购买套餐后，这里会显示你的节点。</p><button type="button" onclick="loadNewNode()">新建节点</button></div></section>`;
+  const grid = groupKeys.map(cardHtml).join('') || `<section class="card"><div class="empty-state"><strong>还没有节点</strong><p class="muted small">去「新建节点」购买套餐后，这里会显示你的节点。</p><button type="button" onclick="loadNewNode()">新建节点</button></div></section>`;
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1>我的节点</h1><p>点击节点卡片进入隧道管理。</p></div>
-      <div class="row" style="gap:10px"><span class="section-count">${active.length} 个生效中</span><button type="button" class="secondary" onclick="loadNewNode()">新建节点</button></div></div>
-    ${sections}
+    <div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1>我的节点</h1><p>每个节点一张卡片，点击进入隧道管理。</p></div>
+      <div class="row" style="gap:10px"><span class="section-count">${active.length} 个生效套餐</span><button type="button" class="secondary" onclick="loadNewNode()">新建节点</button></div></div>
+    <div class="my-node-grid">${grid}</div>
   `, 'dashboard-myplans', '我的节点');
 }
 
-function openNodeTunnels(nodeId){
+function openNodeTunnels(nodeId, nodeName){
+  window.__selectedNode = { id: Number(nodeId || 0), name: nodeName || '' };
   loadDashboard('tunnels');
 }
 
@@ -2053,7 +2064,10 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
     return;
   }
   if(view === 'tunnels'){
+    const selNode = window.__selectedNode;
+    const crumb = selNode ? `<div class="node-crumb"><a href="#" onclick="loadMyPlans();return false;">我的节点</a><span>›</span><b>${esc(selNode.name)}</b></div>` : '';
     app.innerHTML = appLayoutHtml(`
+      ${crumb}
       <section class="card tunnel-create-card" id="tunnelCreateCard">
         <div class="section-title"><div><div class="section-kicker">CREATE TUNNEL</div><h2 id="tunnelFormTitle">${stIcon('plus')}创建隧道</h2><p id="tunnelFormHint">填好本地服务和公网访问方式，创建后重新下载 frpc.toml 并重启客户端即可生效。</p></div></div>
         <form id="tunnelForm" class="grid tunnel-create-form">
