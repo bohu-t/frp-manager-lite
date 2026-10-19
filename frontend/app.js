@@ -548,7 +548,7 @@ async function renderTrafficUsage(range){
   }
   const d = trafficChartCache[trafficRange];
   if(!d.has_data){
-    slot.innerHTML = `<div class="chart-empty"><strong>暂无流量数据</strong><p class="muted small">${d.enabled ? '当前统计范围内还没有产生流量。' : 'frps 控制台未接入面板，采集不到流量；接入后这里会自动出现曲线。'}</p></div>`;
+    slot.innerHTML = `<div class="chart-empty"><strong>暂无流量数据</strong><p class="muted small">当前统计范围内还没有产生流量。</p></div>`;
     return;
   }
   const label = d.range === 'today' ? '今日累计' : (d.range === '7d' ? '近 7 天' : '近 30 天');
@@ -570,7 +570,7 @@ async function renderTrafficProtocols(){
   try{ d = await api('/api/user/traffic/protocols'); }
   catch(err){ slot.innerHTML = `<p class="error small">${esc(err.message)}</p>`; return; }
   if(!d.has_data){
-    slot.innerHTML = `<div class="chart-empty"><strong>暂无流量数据</strong><p class="muted small">${d.enabled ? '本月还没有采集到协议流量。' : 'frps 控制台未接入面板，暂无协议流量。'}</p></div>`;
+    slot.innerHTML = `<div class="chart-empty"><strong>暂无流量数据</strong><p class="muted small">本月还没有采集到协议流量。</p></div>`;
     return;
   }
   const legend = d.items.map(it => `<li><span class="proto-dot" style="background:${protoColor(it.type)}"></span><span class="proto-name">${esc(it.label)}</span><span class="proto-val">${esc(fmtBytes(it.bytes))}</span><span class="proto-pct">${it.percent}%</span></li>`).join('');
