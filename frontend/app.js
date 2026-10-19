@@ -1409,16 +1409,10 @@ async function nnPay(){
     okBtn.textContent = '支付中…';
     try{
       const r = await api('/api/user/orders', {method:'POST', body:{plan_id:nnState.planId, node_id:nnState.nodeId}});
-      document.querySelector('#nnPayRows').innerHTML = `<div class="nn-pay-done"><b>✅ ${esc(r.message || '购买成功')}</b><small>已跳转到「我的节点」，可查看套餐与端口。</small></div>`;
-      const hint = document.querySelector('#nnPayHint'); if(hint) hint.remove();
-      const cancel = document.querySelector('#nnPayCancel'); if(cancel) cancel.remove();
-      okBtn.disabled = false;
-      okBtn.textContent = '完成';
-      okBtn.onclick = () => {
-        nnPayClose();
-        nnState = { region:'', nodeId:0, planId:0 };
-        loadMyPlans();
-      };
+      nnPayClose();
+      nnState = { region:'', nodeId:0, planId:0 };
+      await loadMyPlans();
+      show(r.message || '开通成功');
     }catch(err){
       const hint = document.querySelector('#nnPayHint');
       if(hint){ hint.textContent = err.message || '支付失败'; hint.className = 'bad small'; }
