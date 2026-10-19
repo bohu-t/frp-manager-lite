@@ -4154,6 +4154,8 @@ def save_plan(plan_id: int, name: str, price_cents: int, max_ports: int, traffic
     billing_mode = "traffic" if str(billing_mode) == "traffic" else "time"
     if billing_mode == "traffic" and traffic_limit_bytes <= 0:
         return False, "流量套餐必须填写流量额度"
+    if billing_mode == "traffic":
+        duration_days = 0
     if billing_mode == "time" and duration_days <= 0:
         return False, "时间套餐必须填写有效期天数"
     if billing_mode == "time" and duration_days > 30:

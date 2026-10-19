@@ -2537,7 +2537,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>积分价格</label><input name="price_points" type="number" value="100" min="0" step="1"><span class="muted small">用户购买时扣除的积分</span></div>
       <div><label>适用节点</label><select name="node_id"><option value="0">全部节点（通用）</option>${nodeOptions(data.nodes || [])}</select><span class="muted small">绑定后用户只能在该节点购买此套餐</span></div>
       <div><label>计费方式</label><select name="billing_mode"><option value="time">时间模式（按天）</option><option value="traffic">流量模式（按 GB）</option></select></div>
-      <div><label>有效期（天）</label><input name="duration_days" type="number" value="30" min="1" max="30"><span class="muted small">时间套餐按月售卖，单次最长 30 天</span></div>
+      <div><label>有效期（天）</label><input name="duration_days" type="number" value="30" min="0" max="30"><span class="muted small">仅时间套餐需要；流量套餐用完为止，不用填</span></div>
       <div><label>端口数</label><input name="max_ports" type="number" value="5" min="0" max="100"></div>
       <div><label>流量额度 GB</label><input name="traffic_limit_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">流量模式必填；时间模式可选填（0 表示不限量）</span></div>
       <div><label>速率 MB/s</label><input name="bandwidth_limit_mbs" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
@@ -2760,6 +2760,7 @@ async function loadAdmin(section=currentAdminSection){
     planForm.onsubmit = async (e) => {
       e.preventDefault();
       const body = Object.fromEntries(new FormData(e.target));
+      if(body.billing_mode === 'traffic') body.duration_days = '0';
       try{
         const r = await api('/api/admin/plans/save', {method:'POST', body});
         await loadAdmin();
