@@ -746,7 +746,7 @@ function appSidebarHtml(kind='dashboard'){
   const items = isAdmin ? [
     ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','chart','订单','orders'],['admin-hosts','cloud','托管中心'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
   ] : [
-    ['dashboard','home','概览'],['dashboard-nodes','node','新建节点'],['dashboard-myplans','license','我的节点'],['dashboard-hosts','cloud','托管中心'],['dashboard-points','bolt','账单与充值'],['dashboard-tunnels','tunnel','隧道管理'],['dashboard-profile','user','个人中心']
+    ['dashboard','home','概览'],['dashboard-nodes','node','新建节点'],['dashboard-myplans','license','我的节点'],['dashboard-hosts','cloud','托管中心'],['dashboard-points','bolt','账单与充值'],['dashboard-profile','user','个人中心']
   ];
   const links = items.map(([action, icon, label, section]) => {
     const active = kind === action || (section && kind === section) ? ' active' : '';
@@ -1429,29 +1429,62 @@ function nnPayClose(){
 
 async function loadMyPlans(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
-  let data;
-  try{ data = await api('/api/dashboard'); }
-  catch(err){
+  let data, nodes = [];
+  try{
+    const [dash, nres] = await Promise.all([api('/api/dashboard'), api('/api/user/nodes').catch(() => ({nodes:[]}))]);
+    data = dash; nodes = nres.nodes || [];
+  }catch(err){
     if(err.message === 'unauthorized') return renderLogin();
     show(err.message, true);
     return;
   }
   const myPlans = data.my_plans || [];
   const active = myPlans.filter(p => !p.expired);
-  const rows = myPlans.map((p, i) => `<tr>
-      <td>${i + 1}</td>
-      <td>${esc(p.plan_name || '-')}</td>
-      <td>${p.max_ports}</td>
-      <td>${p.billing_mode === 'traffic' ? '流量' : '时间'}</td>
-      <td>${p.quota_gb > 0 ? `${p.used_gb} / ${p.quota_gb} GB` : '不限量'}${p.billing_mode !== 'traffic' && p.expires_at ? `<br><span class="muted small">到期 ${esc(p.expires_text)}</span>` : ''}</td>
-      <td>${p.status === 'exhausted' ? '<span class="bad">流量用尽</span>' : (p.status === 'cancelled' ? '<span class="muted">已退订</span>' : (p.expired ? '<span class="bad">已到期</span>' : '<span class="ok">生效中</span>'))}${p.grace_until && p.status !== 'active' ? `<br><span class="muted small">端口保留至 ${fmtTs(p.grace_until)}</span>` : ''}</td>
-      <td class="actions node-actions">${p.status === 'active' ? `<button type="button" class="node-action node-action-danger" onclick="cancelPlan(${p.id}, '${esc(p.plan_name)}', ${Number(p.refund_points || 0)})">退订</button>` : '<span class="muted small">—</span>'}</td>
-    </tr>`).join('') || '<tr><td colspan="7" class="muted">还没有购买过套餐</td></tr>';
+  const nodeById = {};
+  nodes.forEach(n => { nodeById[Number(n.id)] = n; });
+  const groups = {};
+  myPlans.forEach(p => {
+    const n = nodeById[Number(p.node_id)] || {};
+    const key = n.region || '未分配地区';
+    (groups[key] = groups[key] || []).push({ plan: p, node: n });
+  });
+  const regionNames = Object.keys(groups);
+  const cardHtml = ({ plan: p, node: n }) => {
+    const statusText = p.status === 'exhausted' ? '流量用尽' : (p.status === 'cancelled' ? '已退订' : (p.expired ? '已到期' : '生效中'));
+    const statusClass = p.status === 'active' && !p.expired ? 'ok' : 'bad';
+    const quotaText = p.quota_gb > 0 ? `${p.used_gb} / ${p.quota_gb} GB` : '不限量';
+    const expireText = p.billing_mode === 'traffic' ? quotaText : (p.expires_at ? p.expires_text : '不限期');
+    return `<article class="my-node-card" onclick="openNodeTunnels(${Number(p.node_id || 0)})">
+      <div class="my-node-head">
+        <div><span class="my-node-region">${esc(n.region || '未分配')}</span><b>${esc(p.plan_name || '-')}</b></div>
+        <span class="status-badge ${statusClass}"><i></i>${statusText}</span>
+      </div>
+      <div class="my-node-specs">
+        <div><span>端口</span><b>${p.max_ports}</b></div>
+        <div><span>${p.billing_mode === 'traffic' ? '流量' : '到期'}</span><b>${esc(expireText)}</b></div>
+        <div><span>接入地址</span><b>${esc(n.server_addr || '-')}</b></div>
+        <div><span>已付</span><b>${Number(p.price_points || 0)} 积分</b></div>
+      </div>
+      <div class="my-node-foot">
+        <span class="muted small">${p.grace_until && p.status !== 'active' ? '端口保留至 ' + fmtTs(p.grace_until) : '点击进入隧道管理'}</span>
+        ${p.status === 'active' ? `<button type="button" class="node-action node-action-danger" onclick="event.stopPropagation();cancelPlan(${p.id}, '${esc(p.plan_name)}', ${Number(p.refund_points || 0)})">退订</button>` : ''}
+      </div>
+    </article>`;
+  };
+  const sections = regionNames.map(region => `
+    <section class="card my-node-section">
+      <div class="section-title"><div><h2>${stIcon('node')}我的节点 <span class="my-node-sep">›</span> ${esc(region)}</h2><p>${groups[region].length} 个节点套餐</p></div></div>
+      <div class="my-node-grid">${groups[region].map(cardHtml).join('')}</div>
+    </section>`).join('') || `<section class="card"><div class="empty-state"><strong>还没有节点</strong><p class="muted small">去「新建节点」购买套餐后，这里会显示你的节点。</p><button type="button" onclick="loadNewNode()">新建节点</button></div></section>`;
   app.innerHTML = appLayoutHtml(`
-    <section class="card">
-      <div class="section-title"><div><div class="section-kicker">MY PLANS</div><h2>${stIcon('license')}我的节点</h2><p>这里列出你已购买的节点套餐；流量套餐只统计该套餐分配端口产生的流量。</p></div><div class="row" style="gap:10px"><span class="section-count">${active.length} 个生效中</span><button type="button" class="secondary" onclick="loadNewNode()">新建节点</button></div></div>
-      <table><thead><tr><th>序号</th><th>套餐</th><th>端口</th><th>计费</th><th>额度 / 到期</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>
-    </section>`, 'dashboard-myplans', '我的节点');
+    <div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1>我的节点</h1><p>点击节点卡片进入隧道管理。</p></div>
+      <div class="row" style="gap:10px"><span class="section-count">${active.length} 个生效中</span><button type="button" class="secondary" onclick="loadNewNode()">新建节点</button></div></div>
+    ${sections}
+  `, 'dashboard-myplans', '我的节点');
+}
+
+function openNodeTunnels(nodeId){
+  loadDashboard('tunnels');
 }
 
 function initProfilePoints(){

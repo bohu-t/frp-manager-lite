@@ -1754,3 +1754,19 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .nn-pay-done{display:flex;flex-direction:column;gap:6px;padding:14px;border:1px solid #bbf7d0;border-radius:12px;background:#f0fdf4}
 .nn-pay-done b{color:#15803d;font-size:15px}
 .nn-pay-done small{color:var(--muted);font-size:12px}
+
+/* ---- 我的节点卡片 ---- */
+.my-node-section{margin-bottom:16px}
+.my-node-sep{color:var(--muted);font-weight:400;margin:0 2px}
+.my-node-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.my-node-card{display:flex;flex-direction:column;gap:12px;padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--card);cursor:pointer;transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease}
+.my-node-card:hover{transform:translateY(-2px);border-color:#93c5fd;box-shadow:0 10px 22px rgba(15,35,70,.10)}
+.my-node-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.my-node-head>div{display:flex;flex-direction:column;gap:3px;min-width:0}
+.my-node-region{font-size:11px;color:#1677FF;background:rgba(22,119,255,.08);padding:2px 8px;border-radius:999px;align-self:flex-start}
+.my-node-head b{font-size:15px;color:var(--text-strong)}
+.my-node-specs{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px;border-radius:10px;background:rgba(148,163,184,.07)}
+.my-node-specs div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.my-node-specs span{font-size:11px;color:var(--muted)}
+.my-node-specs b{font-size:13px;color:var(--text-strong);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.my-node-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px dashed var(--border);padding-top:10px}

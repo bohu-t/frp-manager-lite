@@ -5461,7 +5461,7 @@ class Handler(BaseHTTPRequestHandler):
                     if status == "active" and exp and exp <= now():
                         status = "expired"
                     my_plans.append({
-                        "id": r["id"], "plan_name": r["plan_name"], "max_ports": r["max_ports"],
+                        "id": r["id"], "plan_name": r["plan_name"], "node_id": int(r["node_id"] or 0), "max_ports": r["max_ports"],
                         "billing_mode": r["billing_mode"] or "time",
                         "quota_bytes": int(r["quota_bytes"] or 0), "used_bytes": int(r["used_bytes"] or 0),
                         "quota_gb": round(int(r["quota_bytes"] or 0) / 1024 / 1024 / 1024, 2),
