@@ -1434,8 +1434,10 @@ async function loadMyPlans(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
   let data, nodes = [];
   try{
-    const [dash, nres] = await Promise.all([api('/api/dashboard'), api('/api/user/nodes').catch(() => ({nodes:[]}))]);
+    const [dash, nres, pres] = await Promise.all([api('/api/dashboard'), api('/api/user/nodes').catch(() => ({nodes:[]})), api('/api/plans').catch(() => ({plans:[]}))]);
     data = dash; nodes = nres.nodes || [];
+    const planById = {};
+    (pres.plans || []).forEach(p => { planById[Number(p.id)] = p; });
   }catch(err){
     if(err.message === 'unauthorized') return renderLogin();
     show(err.message, true);
@@ -1462,7 +1464,7 @@ async function loadMyPlans(){
     const expireText = p.billing_mode === 'traffic' ? '按流量计费' : (p.expires_at ? p.expires_text : '不限期');
     return `<article class="my-node-card" onclick="openNodeTunnels(${Number(p.node_id || 0)}, '${esc(n.name || '节点')}')">
       <div class="my-node-head">
-        <div class="my-node-title"><span class="my-node-region">${esc(n.region || '未分配')}</span><b>${esc(n.name || '节点 ' + (p.node_id || ''))}</b></div>
+        <div class="my-node-title"><span class="my-node-region">${esc(n.region || '未分配')}</span><b>${esc(n.name || '节点 ' + (p.node_id || ''))}</b><small>${esc(p.plan_name || '')}</small></div>
         <span class="status-badge ${statusClass}"><i></i>${statusText}</span>
       </div>
       <div class="my-node-notice"><b>节点说明</b><span>${esc((n.note && n.note !== '自动创建的默认节点') ? n.note : '合理使用，禁止违规业务')}</span>${n.server_addr ? `<span class="my-node-speed">测速：<a href="https://www.itdog.cn/ping/${encodeURIComponent(n.server_addr)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">https://www.itdog.cn/ping/${esc(n.server_addr)}</a></span>` : ''}</div>
@@ -1473,8 +1475,8 @@ async function loadMyPlans(){
         <div><span>接入地址</span><b>${esc(n.server_addr || '-')}:${esc(n.server_port ?? '')}</b></div>
       </div>
       <div class="my-node-foot">
-        <span class="my-node-plan-name">套餐：${esc(p.plan_name || '-')}</span>
-        ${p.status === 'active' ? `<button type="button" class="node-action node-action-danger" onclick="event.stopPropagation();cancelPlan(${p.id}, '${esc(p.plan_name)}', ${Number(p.refund_points || 0)})">退订</button>` : ''}
+        <div class="my-node-price"><span>续费价格</span><b>${Number((planById[Number(p.plan_id)] || {}).price_points ?? p.price_points ?? 0)} 积分</b></div>
+        <span class="muted small">${p.billing_mode === 'traffic' ? '按流量计费' : (p.expires_at ? '到期 ' + esc(p.expires_text) : '不限期')}</span>
       </div>
     </article>`;
   };
