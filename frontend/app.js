@@ -1432,11 +1432,10 @@ function nnPayClose(){
 
 async function loadMyPlans(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
-  let data, nodes = [];
+  let data, nodes = [], planById = {};
   try{
     const [dash, nres, pres] = await Promise.all([api('/api/dashboard'), api('/api/user/nodes').catch(() => ({nodes:[]})), api('/api/plans').catch(() => ({plans:[]}))]);
     data = dash; nodes = nres.nodes || [];
-    const planById = {};
     (pres.plans || []).forEach(p => { planById[Number(p.id)] = p; });
   }catch(err){
     if(err.message === 'unauthorized') return renderLogin();
