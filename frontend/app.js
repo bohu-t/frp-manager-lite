@@ -1485,8 +1485,8 @@ async function loadMyPlans(){
   };
   const grid = groupKeys.map(cardHtml).join('') || `<section class="card"><div class="empty-state"><strong>还没有节点</strong><p class="muted small">去「新建节点」购买套餐后，这里会显示你的节点。</p><button type="button" onclick="loadNewNode()">新建节点</button></div></section>`;
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1>我的节点</h1><p>每个节点一张卡片，点击进入隧道管理。</p></div>
-      <div class="row" style="gap:10px"><span class="section-count">${active.length} 个生效套餐</span><button type="button" class="secondary" onclick="loadNewNode()">新建节点</button></div></div>
+    <div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1>我的节点</h1></div>
+      <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadNewNode()">新建节点</button></div></div>
     <div class="my-node-grid">${grid}</div>
   `, 'dashboard-myplans', '我的节点');
 }
