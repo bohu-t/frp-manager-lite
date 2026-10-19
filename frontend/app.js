@@ -1106,7 +1106,7 @@ async function resumePay(orderNo){
 
 
 
-let nnState = { region: '', nodeId: 0, planId: 0 };
+let nnState = { region: '', nodeId: 0, planId: 0, ports: [], tunnels: [] };
 
 
 const HOST_STATUS_CLASS = {pending:'', approved:'ok', rejected:'bad', blacklisted:'bad'};
@@ -1229,7 +1229,7 @@ async function loadNewNode(){
     return;
   }
   window.__nnData = { nodes, plans };
-  if(nnState.region && !nodes.some(n => (n.region || '默认地区') === nnState.region)) nnState = { region:'', nodeId:0, planId:0 };
+  if(nnState.region && !nodes.some(n => (n.region || '默认地区') === nnState.region)) nnState = { region:'', nodeId:0, planId:0, ports:[], tunnels:[] };
   renderNewNode();
 }
 
@@ -1260,16 +1260,17 @@ function renderNewNode(){
   };
   const emptyHint = (text) => `<div class="nn-empty">${stIcon('node')}<p>${text}</p></div>`;
   const currentStep = !nnState.region ? 1 : (!nnState.nodeId ? 2 : (!nnState.planId ? 3 : 4));
+  const maxTunnels = Math.max(1, Math.min(20, Number(((plans.find(p => Number(p.id) === Number(nnState.planId)) || {}).max_ports) || 1)));
 
   const stepper = `
     <div class="nn-stepper">
-      ${[['1','选择地区','选取您满意的地区'],['2','选择节点','选择接入服务器'],['3','选择套餐','按需选择计费方式'],['4','支付开通','完成支付，立即使用']].map(([no,title,sub], idx) => {
+      ${[['1','选择地区','选取您满意的地区'],['2','选择节点','选择接入服务器'],['3','选择套餐','按需选择计费方式'],['4','创建隧道','预分配公网端口'],['5','支付开通','完成支付，立即使用']].map(([no,title,sub], idx) => {
         const n = idx + 1;
         const state = n < currentStep ? ' done' : (n === currentStep ? ' active' : '');
         return `<div class="nn-step-item${state}">
           <span class="nn-step-dot">${n < currentStep ? '✓' : no}</span>
           <div class="nn-step-copy"><b>${title}</b><small>${sub}</small></div>
-          ${n < 4 ? '<span class="nn-step-line"></span>' : ''}
+          ${n < 5 ? '<span class="nn-step-line"></span>' : ''}
         </div>`;
       }).join('')}
     </div>`;
@@ -1342,18 +1343,37 @@ function renderNewNode(){
   const chosenPlan = plans.find(p => Number(p.id) === Number(nnState.planId));
   const chosenNode = nodes.find(n => Number(n.id) === Number(nnState.nodeId));
   const ready = !!(nnState.region && nnState.nodeId && nnState.planId);
-  const step4 = `<div class="nn-pay-panel">
+  const portPool = nnState.ports || [];
+  const tunnelRows = (nnState.tunnels || []).map((t, i) => {
+    const used = new Set((nnState.tunnels || []).map(x => Number(x.remote_port || 0)).filter(Boolean));
+    const opts = portPool.map(pt => `<option value="${pt}" ${Number(t.remote_port) === Number(pt) ? 'selected' : ''}${used.has(pt) && Number(t.remote_port) !== Number(pt) ? ' disabled' : ''}>${pt}</option>`).join('');
+    return `<div class="nn-tunnel-row">
+      <label class="nn-field"><span>隧道名称</span><input value="${esc(t.name || '')}" maxlength="40" oninput="nnTunnelSet(${i},'name',this.value)"></label>
+      <label class="nn-field"><span>协议</span><select onchange="nnTunnelSet(${i},'proxy_type',this.value)"><option value="tcp"${t.proxy_type === 'tcp' ? ' selected' : ''}>TCP</option><option value="udp"${t.proxy_type === 'udp' ? ' selected' : ''}>UDP</option></select></label>
+      <label class="nn-field"><span>本地端口</span><input type="number" min="1" max="65535" value="${Number(t.local_port || 0)}" oninput="nnTunnelSet(${i},'local_port',this.value)"></label>
+      <label class="nn-field"><span>公网端口</span><select onchange="nnTunnelSet(${i},'remote_port',this.value)">${opts || '<option value="0">暂无可用端口</option>'}</select></label>
+      <button type="button" class="node-action node-action-danger" onclick="nnTunnelRemove(${i})">删除</button>
+    </div>`;
+  }).join('');
+  const step4 = !nnState.planId ? emptyHint('请先选择套餐，随后可预分配端口并创建隧道') : `<div class="nn-tunnel-wrap">
+      <p class="muted small">公网端口已按套餐预分配，开通后立即生效。可先配置需要映射的本地服务，最多 ${maxTunnels} 条。</p>
+      <div class="nn-tunnel-list">${tunnelRows}</div>
+      <button type="button" class="secondary" ${(nnState.tunnels || []).length >= Math.min(maxTunnels, portPool.length || maxTunnels) ? 'disabled' : ''} onclick="nnTunnelAdd()">+ 添加隧道</button>
+    </div>`;
+  const tunnelSummary = (nnState.tunnels || []).filter(t => t.name).map(t => `${esc(t.name)} ${esc(t.proxy_type.toUpperCase())} ${t.remote_port || '-'}`).join('、');
+  const step5 = `<div class="nn-pay-panel">
       <div class="nn-pay-summary">
         <div><span>地区</span><b>${nnState.region ? esc(nnState.region) : '未选择'}</b></div>
         <div><span>节点</span><b>${chosenNode ? esc(chosenNode.name) : '未选择'}</b></div>
         <div><span>套餐</span><b>${chosenPlan ? esc(chosenPlan.name) : '未选择'}</b></div>
+        <div><span>隧道</span><b>${tunnelSummary || '暂未配置'}</b></div>
         <div><span>应付</span><b class="nn-pay-amount">${chosenPlan ? Number(chosenPlan.price_points) : 0} 积分</b></div>
       </div>
-      <button type="button" class="nn-pay${ready ? ' ready' : ''}" ${ready ? '' : 'disabled'} onclick="nnPay()">${ready ? '立即支付并开通' : '请完成上方三步'}</button>
+      <button type="button" class="nn-pay${ready ? ' ready' : ''}" ${ready ? '' : 'disabled'} onclick="nnPay()">${ready ? '立即支付并开通' : '请完成上方步骤'}</button>
     </div>`;
 
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">NEW NODE</span><h1>新建节点</h1><p>四步完成：选择地区、节点、套餐，支付后立即开通。</p></div></div>
+    <div class="ov-page-head"><div><span class="section-kicker">NEW NODE</span><h1>新建节点</h1><p>五步完成：选择地区、节点、套餐，配置隧道后支付立即开通。</p></div></div>
     ${stepper}
     <section class="card nn-block">
       <div class="nn-block-head"><span class="nn-block-icon">${stIcon('node')}</span><div><h2>1. 选择地区</h2><p>选择离你更近的地区，延迟更低</p></div></div>
@@ -1368,22 +1388,57 @@ function renderNewNode(){
       ${step3}
     </section>
     <section class="card nn-block">
-      <div class="nn-block-head"><span class="nn-block-icon">${stIcon('bolt')}</span><div><h2>4. 支付开通</h2><p>确认信息后完成支付，立即生效</p></div></div>
+      <div class="nn-block-head"><span class="nn-block-icon">${stIcon('link')}</span><div><h2>4. 创建隧道</h2><p>端口预分配，开通即可使用</p></div></div>
       ${step4}
+    </section>
+    <section class="card nn-block">
+      <div class="nn-block-head"><span class="nn-block-icon">${stIcon('bolt')}</span><div><h2>5. 支付开通</h2><p>确认信息后完成支付，立即生效</p></div></div>
+      ${step5}
     </section>
   `, 'dashboard-nodes', '新建节点');
 }
 
 function nnPickRegion(name){
-  nnState.region = name; nnState.nodeId = 0; nnState.planId = 0;
+  nnState.region = name; nnState.nodeId = 0; nnState.planId = 0; nnState.ports = []; nnState.tunnels = [];
   renderNewNode();
 }
 function nnPickNode(id){
-  nnState.nodeId = Number(id); nnState.planId = 0;
+  nnState.nodeId = Number(id); nnState.planId = 0; nnState.ports = []; nnState.tunnels = [];
   renderNewNode();
 }
-function nnPickPlan(id){
+async function nnPickPlan(id){
   nnState.planId = Number(id);
+  const plan = ((window.__nnData || {}).plans || []).find(p => Number(p.id) === Number(id)) || {};
+  const maxPorts = Math.max(1, Math.min(20, Number(plan.max_ports || 1)));
+  nnState.tunnels = [{ name: 'tcp-1', proxy_type: 'tcp', local_port: 8080, remote_port: 0 }];
+  nnState.ports = [];
+  renderNewNode();
+  try{
+    const r = await api('/api/user/nodes/' + Number(nnState.nodeId) + '/free-ports?count=' + maxPorts);
+    nnState.ports = (r.ports || []).map(Number);
+    if(nnState.tunnels[0] && !nnState.tunnels[0].remote_port) nnState.tunnels[0].remote_port = nnState.ports[0] || 0;
+  }catch(e){}
+  renderNewNode();
+}
+
+function nnTunnelSet(i, key, value){
+  const t = (nnState.tunnels || [])[i];
+  if(!t) return;
+  t[key] = (key === 'local_port' || key === 'remote_port') ? Number(value || 0) : value;
+}
+
+function nnTunnelAdd(){
+  const plan = ((window.__nnData || {}).plans || []).find(p => Number(p.id) === Number(nnState.planId)) || {};
+  const maxPorts = Math.max(1, Math.min(20, Number(plan.max_ports || 1)));
+  if((nnState.tunnels || []).length >= Math.min(maxPorts, (nnState.ports || []).length || maxPorts)) return;
+  const used = new Set(nnState.tunnels.map(t => Number(t.remote_port || 0)));
+  const free = (nnState.ports || []).find(pt => !used.has(Number(pt))) || 0;
+  nnState.tunnels.push({ name: 'tcp-' + (nnState.tunnels.length + 1), proxy_type: 'tcp', local_port: 8080 + nnState.tunnels.length, remote_port: free });
+  renderNewNode();
+}
+
+function nnTunnelRemove(i){
+  (nnState.tunnels || []).splice(i, 1);
   renderNewNode();
 }
 async function nnPay(){
@@ -1397,6 +1452,7 @@ async function nnPay(){
         <div><span>地区</span><b>${esc(nnState.region)}</b></div>
         <div><span>节点</span><b>${esc(node.name || '')}</b></div>
         <div><span>套餐</span><b>${esc(plan.name || '')}</b></div>
+        <div><span>隧道</span><b>${(nnState.tunnels || []).filter(t => t.name).map(t => esc(t.name) + ' ' + t.proxy_type.toUpperCase() + ' ' + (t.remote_port || '-')).join('、') || '暂未配置'}</b></div>
         <div><span>应付</span><b class="nn-pay-amount">${Number(plan.price_points || 0)} 积分</b></div>
       </div>
       <p class="muted small" id="nnPayHint">10 分钟内且端口未产生流量，可全额退订。</p>
@@ -1411,9 +1467,10 @@ async function nnPay(){
     okBtn.disabled = true;
     okBtn.textContent = '支付中…';
     try{
-      const r = await api('/api/user/orders', {method:'POST', body:{plan_id:nnState.planId, node_id:nnState.nodeId}});
+      const tunnels = (nnState.tunnels || []).filter(t => t.name && Number(t.local_port) > 0).map(t => ({name:t.name, proxy_type:t.proxy_type, local_port:Number(t.local_port), remote_port:Number(t.remote_port || 0)}));
+      const r = await api('/api/user/orders', {method:'POST', body:{plan_id:nnState.planId, node_id:nnState.nodeId, tunnels}});
       nnPayClose();
-      nnState = { region:'', nodeId:0, planId:0 };
+      nnState = { region:'', nodeId:0, planId:0, ports:[], tunnels:[] };
       await loadMyPlans();
       show(r.message || '开通成功');
     }catch(err){

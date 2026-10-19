@@ -4564,7 +4564,7 @@ def mark_order_paid(order_no: str, transaction_id: str = "", provider: str = "")
 MAX_PLANS_PER_NODE = max(1, int(os.getenv("FML_MAX_PLANS_PER_NODE", "2") or 2))
 
 
-def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: int = 0) -> tuple[bool, str, dict[str, Any] | None]:
+def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: int = 0, tunnels: list[dict[str, Any]] | None = None) -> tuple[bool, str, dict[str, Any] | None]:
     """积分购买套餐：用户自选节点，扣积分后立即开通。"""
     with db() as conn:
         plan = conn.execute("SELECT * FROM plans WHERE id=? AND active=1 AND deleted=0", (plan_id,)).fetchone()
@@ -4600,6 +4600,7 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
         if not ok:
             conn.rollback()
             return False, msg, None
+        created_tunnels = create_preconfigured_tunnels(conn, user, int(node_id or 0), tunnels or [], int(plan["max_ports"] or 0))
         conn.execute("UPDATE orders SET status='paid', paid_at=?, updated_at=? WHERE id=?", (now(), now(), order["id"]))
         provision_msg = msg
     with db() as conn:
@@ -4607,7 +4608,45 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
         balance = int(row_val(conn.execute("SELECT points FROM users WHERE id=?", (user["id"],)).fetchone(), "points", 0) or 0)
     payload = order_public(row)
     payload["balance"] = balance
+    payload["tunnels"] = created_tunnels
     return True, ("购买成功，已叠加到原套餐" if provision_msg == "已叠加到原套餐" else "购买成功，套餐已开通"), payload
+
+
+def create_preconfigured_tunnels(conn: sqlite3.Connection, user: sqlite3.Row, node_id: int, items: list[dict[str, Any]], max_ports: int) -> list[dict[str, Any]]:
+    """开通后按用户预配置创建隧道，端口从该账号已分配端口中选择。"""
+    if not items or not node_id:
+        return []
+    owned = [int(r["port"]) for r in conn.execute(
+        "SELECT port FROM ports WHERE node_id=? AND user_id=? ORDER BY port", (node_id, user["id"])).fetchall()]
+    used = {int(r["remote_port"]) for r in conn.execute(
+        "SELECT remote_port FROM tunnels WHERE node_id=? AND proxy_type IN ('tcp','udp') AND remote_port>0", (node_id,)).fetchall()}
+    free = [p for p in owned if p not in used]
+    created: list[dict[str, Any]] = []
+    limit = max_ports if max_ports > 0 else len(free)
+    for item in items[:max(1, min(limit, 20))]:
+        try:
+            name = str(item.get("name", "")).strip()[:40]
+            if not name or not name.replace("_", "").replace("-", "").isalnum():
+                continue
+            proxy_type = str(item.get("proxy_type", "tcp")).lower()
+            if proxy_type not in ("tcp", "udp"):
+                continue
+            local_port = int(item.get("local_port", 0))
+            if not (1 <= local_port <= 65535):
+                continue
+            local_ip = str(item.get("local_ip", "127.0.0.1")).strip()[:60] or "127.0.0.1"
+            want = int(item.get("remote_port", 0) or 0)
+            port = want if want in free else (free[0] if free else 0)
+            if not port:
+                continue
+            free.remove(port)
+            conn.execute(
+                "INSERT INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (node_id, user["id"], name, proxy_type, local_ip, local_port, port, "", "", now()))
+            created.append({"name": name, "proxy_type": proxy_type, "local_port": local_port, "remote_port": port})
+        except Exception:
+            continue
+    return created
 
 
 def create_points_order(user: sqlite3.Row, points: int, provider: str = "") -> tuple[bool, str, dict[str, Any] | None]:
@@ -5451,6 +5490,26 @@ class Handler(BaseHTTPRequestHandler):
                 n["is_current"] = int(n["id"]) == current_node_id
             self.send_json({"ok": True, "nodes": nodes, "current_node_id": current_node_id})
             return
+        if path.startswith("/api/user/nodes/") and path.endswith("/free-ports"):
+            user_row = self.current_user
+            if not user_row:
+                self.send_json({"ok": False, "error": "unauthorized"}, 401)
+                return
+            try:
+                nid = int(path.split("/")[4])
+            except (IndexError, ValueError):
+                self.send_json({"ok": False, "error": "节点不存在"}, 400)
+                return
+            q = urllib.parse.parse_qs(urlparse(self.path).query)
+            try:
+                count = int((q.get("count") or ["1"])[0])
+            except ValueError:
+                count = 1
+            count = max(1, min(20, count))
+            with db() as conn:
+                rows = available_ports_for_assignment(conn, nid, count)
+            self.send_json({"ok": True, "ports": [int(r["port"]) for r in rows]})
+            return
         if path == "/api/license/status":
             with db() as conn:
                 self.send_json({"ok": True, "license": current_software_license(conn)})
@@ -5969,7 +6028,9 @@ class Handler(BaseHTTPRequestHandler):
                 node_id = int(data.get("node_id", 0) or 0)
             except (TypeError, ValueError):
                 node_id = 0
-            ok, msg, payload = create_order(user, plan_id, str(data.get("provider", "")), node_id)
+            raw_tunnels = data.get("tunnels")
+            tunnels = raw_tunnels if isinstance(raw_tunnels, list) else []
+            ok, msg, payload = create_order(user, plan_id, str(data.get("provider", "")), node_id, tunnels)
             if ok:
                 audit("order_create", user, None, None, "", f"套餐 {payload['plan_name']} 订单 {payload['order_no']}")
             self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "order": payload}, 200 if ok else 400)
