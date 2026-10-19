@@ -4156,6 +4156,8 @@ def save_plan(plan_id: int, name: str, price_cents: int, max_ports: int, traffic
         return False, "流量套餐必须填写流量额度"
     if billing_mode == "time" and duration_days <= 0:
         return False, "时间套餐必须填写有效期天数"
+    if billing_mode == "time" and duration_days > 30:
+        return False, "时间套餐单次最长 30 天（按月购买）"
     node_id = int(node_id or 0)
     with db() as conn:
         if node_id and not conn.execute("SELECT 1 FROM nodes WHERE id=?", (node_id,)).fetchone():
@@ -4470,6 +4472,9 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
         return False, "没有可用节点，请联系管理员"
     max_ports = int(order["max_ports"] or 0)
     duration_days = int(order["duration_days"] or 0)
+    existing = conn.execute(
+        "SELECT * FROM user_plans WHERE user_id=? AND plan_id=? AND node_id=? ORDER BY id DESC LIMIT 1",
+        (user["id"], order["plan_id"], node_id)).fetchone() if order["plan_id"] else None
     plan_row = conn.execute("SELECT billing_mode FROM plans WHERE id=?", (order["plan_id"],)).fetchone() if order["plan_id"] else None
     billing_mode = (row_val(plan_row, "billing_mode", "time") if plan_row else "time") or "time"
     quota_bytes = int(order["traffic_limit_bytes"] or 0)
@@ -4477,6 +4482,21 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
         expires_at = 0
     else:
         expires_at = 0 if duration_days <= 0 else now() + duration_days * 86400
+    if existing:
+        # 同一节点同一套餐重复购买：时间叠加、流量叠加，端口不增加
+        if billing_mode == "traffic":
+            conn.execute("UPDATE user_plans SET quota_bytes=quota_bytes+?, status='active', expires_at=0 WHERE id=?",
+                         (quota_bytes, existing["id"]))
+        else:
+            base = max(now(), int(existing["expires_at"] or 0))
+            conn.execute("UPDATE user_plans SET expires_at=?, status='active' WHERE id=?",
+                         (base + duration_days * 86400, existing["id"]))
+        conn.execute("UPDATE user_plan_ports SET release_at=0 WHERE user_plan_id=?", (existing["id"],))
+        conn.execute("UPDATE ports SET user_id=? WHERE node_id=? AND port IN (SELECT port FROM user_plan_ports WHERE user_plan_id=?)",
+                     (user["id"], node_id, existing["id"]))
+        conn.execute("UPDATE users SET node_id=? WHERE id=?", (node_id, user["id"]))
+        recalc_user_entitlements(conn, int(user["id"]))
+        return True, "已叠加到原套餐"
     conn.execute(
         "INSERT INTO user_plans(user_id, username, plan_id, plan_name, order_no, billing_mode, price_points, quota_bytes, used_bytes, usage_started_at, status, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, duration_days, node_id, starts_at, expires_at, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (user["id"], user["username"], order["plan_id"], order["plan_name"], order["order_no"],
@@ -4561,12 +4581,13 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
             conn.rollback()
             return False, msg, None
         conn.execute("UPDATE orders SET status='paid', paid_at=?, updated_at=? WHERE id=?", (now(), now(), order["id"]))
+        provision_msg = msg
     with db() as conn:
         row = conn.execute("SELECT * FROM orders WHERE order_no=?", (order_no,)).fetchone()
         balance = int(row_val(conn.execute("SELECT points FROM users WHERE id=?", (user["id"],)).fetchone(), "points", 0) or 0)
     payload = order_public(row)
     payload["balance"] = balance
-    return True, "购买成功，套餐已开通", payload
+    return True, ("购买成功，已叠加到原套餐" if provision_msg == "已叠加到原套餐" else "购买成功，套餐已开通"), payload
 
 
 def create_points_order(user: sqlite3.Row, points: int, provider: str = "") -> tuple[bool, str, dict[str, Any] | None]:
