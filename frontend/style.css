@@ -1789,3 +1789,4 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .node-crumb{display:flex;align-items:center;gap:8px;margin:0 0 14px;font-size:13px;color:var(--muted)}
 .node-crumb a{color:var(--accent);text-decoration:none}
 .node-crumb b{color:var(--text-strong)}
+.my-node-plan-name{font-size:12px;color:var(--muted)}

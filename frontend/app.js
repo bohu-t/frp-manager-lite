@@ -1451,36 +1451,38 @@ async function loadMyPlans(){
     const plans = groups[nodeId];
     const n = nodeById[Number(nodeId)] || {};
     const activePlans = plans.filter(p => p.status === 'active' && !p.expired);
+    const timePlans = activePlans.filter(p => p.billing_mode === 'time');
+    const primary = timePlans.length ? timePlans[timePlans.length - 1] : (activePlans[activePlans.length - 1] || plans[0]);
     const totalPorts = activePlans.reduce((sum, p) => sum + Number(p.max_ports || 0), 0);
-    const totalPaid = plans.reduce((sum, p) => sum + Number(p.price_points || 0), 0);
     const bw = Number(n.bandwidth_mbps || 0);
     const usedGb = Number(n.month_used_gb || 0);
     const limitGb = Number(n.monthly_traffic_gb || 0);
     const statusText = activePlans.length ? '运行中' : (plans.some(p => p.status === 'exhausted') ? '流量用尽' : '已到期');
     const statusClass = activePlans.length ? 'ok' : 'bad';
-    const planRows = plans.map(p => {
-      const pStatus = p.status === 'exhausted' ? '流量用尽' : (p.status === 'cancelled' ? '已退订' : (p.expired ? '已到期' : '生效中'));
-      const detail = p.billing_mode === 'traffic' ? `${p.used_gb} / ${p.quota_gb} GB` : (p.expires_at ? p.expires_text : '不限期');
-      return `<div class="my-node-plan">
-        <div><b>${esc(p.plan_name || '-')}</b><small>${esc(detail)}</small></div>
-        <span class="status-badge ${p.status === 'active' && !p.expired ? 'ok' : 'bad'}"><i></i>${pStatus}</span>
-        ${p.status === 'active' ? `<button type="button" class="node-action node-action-danger" onclick="event.stopPropagation();cancelPlan(${p.id}, '${esc(p.plan_name)}', ${Number(p.refund_points || 0)})">退订</button>` : ''}
-      </div>`;
-    }).join('');
+    const expireText = activePlans.length === 0
+      ? '已到期'
+      : (timePlans.length === 0
+          ? '按流量计费'
+          : (timePlans.some(p => !p.expires_at) ? '不限期' : fmtTs(Math.max(...timePlans.map(p => Number(p.expires_at))))));
+    const quotaTotal = activePlans.reduce((sum, p) => sum + Number(p.quota_gb || 0), 0);
+    const usedTotal = activePlans.reduce((sum, p) => sum + Number(p.used_gb || 0), 0);
+    const quotaText = quotaTotal > 0 ? `${usedTotal.toFixed(2)} / ${quotaTotal.toFixed(2)} GB` : '不限量';
     return `<article class="my-node-card" onclick="openNodeTunnels(${Number(nodeId)}, '${esc(n.name || '节点')}')">
       <div class="my-node-head">
-        <div class="my-node-title"><span class="my-node-region">${esc(n.region || '未分配')}</span><b>${esc(n.name || '节点 ' + nodeId)}</b><small>${plans.length} 个套餐</small></div>
+        <div class="my-node-title"><span class="my-node-region">${esc(n.region || '未分配')}</span><b>${esc(n.name || '节点 ' + nodeId)}</b></div>
         <span class="status-badge ${statusClass}"><i></i>${statusText}</span>
       </div>
       <div class="my-node-notice"><b>节点说明</b><span>${esc((n.note && n.note !== '自动创建的默认节点') ? n.note : '合理使用，禁止违规业务')}</span></div>
       <div class="my-node-specs">
         <div><span>可用端口</span><b>${totalPorts}</b></div>
-        <div><span>带宽 / 月流量</span><b>${bw > 0 ? bw + ' Mbps' : '不限'} / ${limitGb > 0 ? usedGb + '/' + limitGb + ' GB' : '不限'}</b></div>
+        <div><span>到期时间</span><b>${esc(expireText)}</b></div>
+        <div><span>流量</span><b>${esc(quotaText)}</b></div>
         <div><span>接入地址</span><b>${esc(n.server_addr || '-')}:${esc(n.server_port ?? '')}</b></div>
-        <div><span>已付</span><b>${totalPaid} 积分</b></div>
       </div>
-      <div class="my-node-plans">${planRows}</div>
-      <div class="my-node-foot"><span class="muted small">点击卡片进入隧道管理</span></div>
+      <div class="my-node-foot">
+        <span class="my-node-plan-name">套餐：${esc(primary ? primary.plan_name : '-')}</span>
+        ${primary && primary.status === 'active' ? `<button type="button" class="node-action node-action-danger" onclick="event.stopPropagation();cancelPlan(${primary.id}, '${esc(primary.plan_name)}', ${Number(primary.refund_points || 0)})">退订</button>` : ''}
+      </div>
     </article>`;
   };
   const grid = groupKeys.map(cardHtml).join('') || `<section class="card"><div class="empty-state"><strong>还没有节点</strong><p class="muted small">去「新建节点」购买套餐后，这里会显示你的节点。</p><button type="button" onclick="loadNewNode()">新建节点</button></div></section>`;
