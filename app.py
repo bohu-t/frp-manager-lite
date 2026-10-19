@@ -4131,7 +4131,22 @@ def list_plans(conn: sqlite3.Connection, active_only: bool = False) -> list[dict
     if active_only:
         sql += " AND active=1"
     sql += " ORDER BY sort_order, seq_no, id"
-    return [plan_public(r) for r in conn.execute(sql)]
+    items = [plan_public(r) for r in conn.execute(sql)]
+    for item in items:
+        need = int(item.get("max_ports") or 0)
+        if need <= 0:
+            stock = 1
+        elif item.get("node_id"):
+            free = conn.execute("SELECT COUNT(*) FROM ports WHERE node_id=? AND user_id IS NULL", (int(item["node_id"]),)).fetchone()[0]
+            stock = max(0, int(free) // need)
+        else:
+            free = conn.execute(
+                "SELECT COUNT(*) FROM ports p JOIN nodes n ON n.id=p.node_id WHERE n.active=1 AND p.user_id IS NULL").fetchone()[0]
+            stock = max(0, int(free) // need)
+        item["stock"] = stock
+        item["sold_out"] = stock <= 0
+        item["stock_text"] = "已售罄" if stock <= 0 else f"剩余 {stock}"
+    return items
 
 
 def save_plan(plan_id: int, name: str, price_cents: int, max_ports: int, traffic_limit_bytes: int,
@@ -4546,6 +4561,9 @@ def mark_order_paid(order_no: str, transaction_id: str = "", provider: str = "")
     return True, "已开通"
 
 
+MAX_PLANS_PER_NODE = max(1, int(os.getenv("FML_MAX_PLANS_PER_NODE", "2") or 2))
+
+
 def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: int = 0) -> tuple[bool, str, dict[str, Any] | None]:
     """积分购买套餐：用户自选节点，扣积分后立即开通。"""
     with db() as conn:
@@ -4560,6 +4578,11 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
         plan_node_id = int(row_val(plan, "node_id", 0) or 0)
         if plan_node_id and plan_node_id != int(node_id or 0):
             return False, "该套餐不适用于所选节点，请重新选择", None
+        others = conn.execute(
+            "SELECT COUNT(*) FROM user_plans WHERE user_id=? AND node_id=? AND status='active' AND (expires_at=0 OR expires_at>?) AND plan_id<>?",
+            (user["id"], int(node_id or 0), now(), int(plan["id"]))).fetchone()[0]
+        if int(others) >= MAX_PLANS_PER_NODE:
+            return False, f"同一节点最多同时持有 {MAX_PLANS_PER_NODE} 个套餐，请先退订后再购买", None
 
         cost = int(row_val(plan, "price_points", 0) or 0)
         balance = int(row_val(conn.execute("SELECT points FROM users WHERE id=?", (user["id"],)).fetchone(), "points", 0) or 0)

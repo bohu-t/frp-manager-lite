@@ -1315,12 +1315,14 @@ function renderNewNode(){
     const typeName = isTraffic ? '流量套餐' : (combo ? '组合套餐' : '时间套餐');
     const main = isTraffic ? `${p.traffic_limit_gb} GB` : `${p.duration_days} 天`;
     const sub = isTraffic ? `${p.max_ports} 端口` : `${hasQuota ? p.traffic_limit_gb + ' GB · ' : ''}${p.max_ports} 端口`;
-    return `<button type="button" class="nn-plan-card${active ? ' active' : ''}" onclick="nnPickPlan(${Number(p.id)})">
+    const soldOut = !!p.sold_out;
+    return `<button type="button" class="nn-plan-card${active ? ' active' : ''}${soldOut ? ' soldout' : ''}" ${soldOut ? 'disabled' : ''} onclick="nnPickPlan(${Number(p.id)})">
       <span class="nn-plan-icon">${planIcon(p.billing_mode, hasQuota, hasDays)}</span>
       <span class="nn-plan-type">${typeName}</span>
       <span class="nn-plan-name">${esc(p.name)}</span>
       <span class="nn-plan-title">${main}</span>
       <span class="nn-plan-sub">${sub}</span>
+      <span class="nn-plan-stock ${soldOut ? 'out' : ''}">${esc(p.stock_text || '')}</span>
       <span class="nn-plan-price"><b>${Number(p.price_points)}</b> 积分</span>
       <span class="nn-plan-foot">${hasQuota && !isTraffic ? '含流量额度' : (isTraffic ? '用完即止' : '不限流量')}</span>
     </button>`;

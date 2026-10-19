@@ -1790,3 +1790,7 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .node-crumb a{color:var(--accent);text-decoration:none}
 .node-crumb b{color:var(--text-strong)}
 .my-node-plan-name{font-size:12px;color:var(--muted)}
+.nn-plan-stock{align-self:flex-start;font-size:11px;font-weight:600;color:#16a34a;background:rgba(22,163,74,.10);padding:2px 8px;border-radius:999px}
+.nn-plan-stock.out{color:#dc2626;background:rgba(220,38,38,.10)}
+.nn-plan.soldout{opacity:.55;cursor:not-allowed}
+.nn-plan.soldout:hover{transform:none;box-shadow:none;border-color:var(--border)}
