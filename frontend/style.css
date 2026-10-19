@@ -1794,3 +1794,6 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .nn-plan-stock.out{color:#dc2626;background:rgba(220,38,38,.10)}
 .nn-plan.soldout{opacity:.55;cursor:not-allowed}
 .nn-plan.soldout:hover{transform:none;box-shadow:none;border-color:var(--border)}
+.my-node-speed{word-break:break-all}
+.my-node-speed a{color:#1677FF;text-decoration:none}
+.my-node-speed a:hover{text-decoration:underline}

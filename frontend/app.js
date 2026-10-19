@@ -1465,7 +1465,7 @@ async function loadMyPlans(){
         <div class="my-node-title"><span class="my-node-region">${esc(n.region || '未分配')}</span><b>${esc(n.name || '节点 ' + (p.node_id || ''))}</b></div>
         <span class="status-badge ${statusClass}"><i></i>${statusText}</span>
       </div>
-      <div class="my-node-notice"><b>节点说明</b><span>${esc((n.note && n.note !== '自动创建的默认节点') ? n.note : '合理使用，禁止违规业务')}</span></div>
+      <div class="my-node-notice"><b>节点说明</b><span>${esc((n.note && n.note !== '自动创建的默认节点') ? n.note : '合理使用，禁止违规业务')}</span>${n.server_addr ? `<span class="my-node-speed">测速：<a href="https://www.itdog.cn/ping/${encodeURIComponent(n.server_addr)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">https://www.itdog.cn/ping/${esc(n.server_addr)}</a></span>` : ''}</div>
       <div class="my-node-specs">
         <div><span>端口</span><b>${p.max_ports}</b></div>
         <div><span>${p.billing_mode === 'traffic' ? '流量' : '到期时间'}</span><b>${esc(p.billing_mode === 'traffic' ? quotaText : expireText)}</b></div>
