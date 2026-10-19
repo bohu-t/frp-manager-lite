@@ -1386,13 +1386,51 @@ function nnPickPlan(id){
 async function nnPay(){
   if(!nnState.region || !nnState.nodeId || !nnState.planId) return;
   const plan = ((window.__nnData || {}).plans || []).find(p => Number(p.id) === Number(nnState.planId)) || {};
-  if(!await appConfirm(`确认购买「${plan.name || ''}」？\n将扣除 ${Number(plan.price_points || 0)} 积分，并开通到所选节点。`, {title:'确认购买', okText:'确认支付'})) return;
-  try{
-    const r = await api('/api/user/orders', {method:'POST', body:{plan_id:nnState.planId, node_id:nnState.nodeId}});
-    await appAlert((r.message || '购买成功') + '\n\n10 分钟内且端口未产生流量，可全额退订。', {title:'开通成功'});
-    nnState = { region:'', nodeId:0, planId:0 };
-    await loadMyPlans();
-  }catch(err){ await appAlert(err.message, {title:'购买失败'}); }
+  const node = ((window.__nnData || {}).nodes || []).find(n => Number(n.id) === Number(nnState.nodeId)) || {};
+  document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="nnPayModal" role="dialog" aria-modal="true" onclick="if(event.target===this)nnPayClose()">
+    <section class="modal-page card app-dialog">
+      <div class="section-title modal-title"><div><h2>确认开通</h2><p>支付成功后立即生效</p></div></div>
+      <div class="nn-pay-modal-rows" id="nnPayRows">
+        <div><span>地区</span><b>${esc(nnState.region)}</b></div>
+        <div><span>节点</span><b>${esc(node.name || '')}</b></div>
+        <div><span>套餐</span><b>${esc(plan.name || '')}</b></div>
+        <div><span>应付</span><b class="nn-pay-amount">${Number(plan.price_points || 0)} 积分</b></div>
+      </div>
+      <p class="muted small" id="nnPayHint">10 分钟内且端口未产生流量，可全额退订。</p>
+      <div class="form-actions app-dialog-actions">
+        <button type="button" class="secondary" id="nnPayCancel" onclick="nnPayClose()">取消</button>
+        <button type="button" id="nnPayOk">确认支付</button>
+      </div>
+    </section>
+  </div>`);
+  const okBtn = document.querySelector('#nnPayOk');
+  okBtn.onclick = async () => {
+    okBtn.disabled = true;
+    okBtn.textContent = '支付中…';
+    try{
+      const r = await api('/api/user/orders', {method:'POST', body:{plan_id:nnState.planId, node_id:nnState.nodeId}});
+      document.querySelector('#nnPayRows').innerHTML = `<div class="nn-pay-done"><b>✅ ${esc(r.message || '购买成功')}</b><small>已跳转到「我的节点」，可查看套餐与端口。</small></div>`;
+      const hint = document.querySelector('#nnPayHint'); if(hint) hint.remove();
+      const cancel = document.querySelector('#nnPayCancel'); if(cancel) cancel.remove();
+      okBtn.disabled = false;
+      okBtn.textContent = '完成';
+      okBtn.onclick = () => {
+        nnPayClose();
+        nnState = { region:'', nodeId:0, planId:0 };
+        loadMyPlans();
+      };
+    }catch(err){
+      const hint = document.querySelector('#nnPayHint');
+      if(hint){ hint.textContent = err.message || '支付失败'; hint.className = 'bad small'; }
+      okBtn.disabled = false;
+      okBtn.textContent = '重试';
+    }
+  };
+}
+
+function nnPayClose(){
+  const el = document.querySelector('#nnPayModal');
+  if(el) el.remove();
 }
 
 async function loadMyPlans(){
