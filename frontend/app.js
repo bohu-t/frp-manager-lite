@@ -397,7 +397,9 @@ function nodeHealthPageSize(){
 
 function fmtTs(ts){
   if(!ts) return '-';
-  return new Date(ts * 1000).toLocaleString();
+  const d = new Date(ts * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 function navButton(label, action, cls='secondary', section=''){
