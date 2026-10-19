@@ -1330,10 +1330,11 @@ function renderNewNode(){
   const step3 = !nnState.nodeId ? emptyHint('请先选择节点，随后会显示该节点可购买的套餐') : `<div class="nn-plan-cards">${planCards}
     <div class="nn-tip-card">
       <span class="nn-tip-icon">💡</span>
-      <b>温馨提示</b>
+      <b>购买须知</b>
       <ul>
-        <li>购买后 10 分钟内且端口未产生流量，可全额退订。</li>
-        <li>超过 10 分钟按剩余比例退款，并扣除手续费。</li>
+        <li>资源托管：节点由不同托管方提供，购买时长代表预付周期，不代表绝对可用时长。</li>
+        <li>退款保障：节点持续异常或提前下架时，可随时退订，按剩余价值退回账户余额。</li>
+        <li>购买后 10 分钟内且端口未产生流量，可全额退订；超过按剩余比例退款并扣除手续费。</li>
       </ul>
     </div>
   </div>`;

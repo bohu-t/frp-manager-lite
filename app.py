@@ -4578,11 +4578,6 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
         plan_node_id = int(row_val(plan, "node_id", 0) or 0)
         if plan_node_id and plan_node_id != int(node_id or 0):
             return False, "该套餐不适用于所选节点，请重新选择", None
-        others = conn.execute(
-            "SELECT COUNT(*) FROM user_plans WHERE user_id=? AND node_id=? AND status='active' AND (expires_at=0 OR expires_at>?) AND plan_id<>?",
-            (user["id"], int(node_id or 0), now(), int(plan["id"]))).fetchone()[0]
-        if int(others) >= MAX_PLANS_PER_NODE:
-            return False, f"同一节点最多同时持有 {MAX_PLANS_PER_NODE} 个套餐，请先退订后再购买", None
 
         cost = int(row_val(plan, "price_points", 0) or 0)
         balance = int(row_val(conn.execute("SELECT points FROM users WHERE id=?", (user["id"],)).fetchone(), "points", 0) or 0)
