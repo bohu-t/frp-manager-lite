@@ -1469,13 +1469,13 @@ async function loadMyPlans(){
       <div class="my-node-notice"><b>节点说明</b><span>${esc((n.note && n.note !== '自动创建的默认节点') ? n.note : '合理使用，禁止违规业务')}</span>${n.server_addr ? `<span class="my-node-speed">测速：<a href="https://www.itdog.cn/ping/${encodeURIComponent(n.server_addr)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">https://www.itdog.cn/ping/${esc(n.server_addr)}</a></span>` : ''}</div>
       <div class="my-node-specs">
         <div><span>端口</span><b>${p.max_ports}</b></div>
-        <div><span>${p.billing_mode === 'traffic' ? '流量' : '到期时间'}</span><b>${esc(p.billing_mode === 'traffic' ? quotaText : expireText)}</b></div>
+        <div><span>流量</span><b>${esc(quotaText)}</b></div>
         <div><span>带宽 / 月流量</span><b>${bw > 0 ? bw + ' Mbps' : '不限'} / ${limitGb > 0 ? usedGb + '/' + limitGb + ' GB' : '不限'}</b></div>
         <div><span>接入地址</span><b>${esc(n.server_addr || '-')}:${esc(n.server_port ?? '')}</b></div>
       </div>
       <div class="my-node-foot">
         <div class="my-node-price"><span>续费价格</span><b>${Number((planById[Number(p.plan_id)] || {}).price_points ?? p.price_points ?? 0)} 积分</b></div>
-        <span class="muted small">${p.billing_mode === 'traffic' ? '按流量计费' : (p.expires_at ? '到期 ' + esc(p.expires_text) : '不限期')}</span>
+        <span class="muted small">${esc(p.billing_mode === 'traffic' ? '按流量计费' : (p.expires_at ? '到期 ' + p.expires_text : '不限期'))}</span>
       </div>
     </article>`;
   };
