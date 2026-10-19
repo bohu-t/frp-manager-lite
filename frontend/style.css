@@ -1768,5 +1768,14 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .my-node-specs{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px;border-radius:10px;background:rgba(148,163,184,.07)}
 .my-node-specs div{display:flex;flex-direction:column;gap:2px;min-width:0}
 .my-node-specs span{font-size:11px;color:var(--muted)}
-.my-node-specs b{font-size:13px;color:var(--text-strong);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.my-node-specs b{font-size:13px;color:var(--text-strong);white-space:normal;overflow-wrap:anywhere;line-height:1.45}
 .my-node-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px dashed var(--border);padding-top:10px}
+
+.my-node-title{display:flex;flex-direction:column;gap:6px;min-width:0}
+.my-node-title small{font-size:12px;color:var(--muted)}
+.my-node-notice{display:flex;flex-direction:column;gap:3px;padding:10px 12px;border-radius:10px;background:rgba(148,163,184,.07)}
+.my-node-notice b{font-size:11px;color:#1677FF}
+.my-node-notice span{font-size:12px;color:var(--muted)}
+.my-node-price{display:flex;flex-direction:column;gap:1px}
+.my-node-price span{font-size:11px;color:var(--muted)}
+.my-node-price b{font-size:15px;color:#1677FF}
