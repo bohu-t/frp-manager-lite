@@ -1442,65 +1442,52 @@ async function loadMyPlans(){
     return;
   }
   const myPlans = data.my_plans || [];
-  const active = myPlans.filter(p => !p.expired);
   const nodeById = {};
   nodes.forEach(n => { nodeById[Number(n.id)] = n; });
   const groups = {};
   myPlans.forEach(p => {
-    const key = Number(p.node_id || 0);
-    if(!groups[key]) groups[key] = [];
-    groups[key].push(p);
+    const n = nodeById[Number(p.node_id)] || {};
+    const key = n.region || '未分配地区';
+    (groups[key] = groups[key] || []).push(p);
   });
-  const groupKeys = Object.keys(groups);
-  const cardHtml = (nodeId) => {
-    const plans = groups[nodeId];
-    const n = nodeById[Number(nodeId)] || {};
-    const activePlans = plans.filter(p => p.status === 'active' && !p.expired);
-    const timePlans = activePlans.filter(p => p.billing_mode === 'time');
-    const primary = timePlans.length ? timePlans[timePlans.length - 1] : (activePlans[activePlans.length - 1] || plans[0]);
-    const totalPorts = activePlans.reduce((sum, p) => sum + Number(p.max_ports || 0), 0);
+  const regionNames = Object.keys(groups);
+  const cardHtml = (p) => {
+    const n = nodeById[Number(p.node_id)] || {};
+    const statusText = p.status === 'exhausted' ? '流量用尽' : (p.status === 'cancelled' ? '已退订' : (p.expired ? '已到期' : '运行中'));
+    const statusClass = p.status === 'active' && !p.expired ? 'ok' : 'bad';
     const bw = Number(n.bandwidth_mbps || 0);
     const usedGb = Number(n.month_used_gb || 0);
     const limitGb = Number(n.monthly_traffic_gb || 0);
-    const statusText = activePlans.length ? '运行中' : (plans.some(p => p.status === 'exhausted') ? '流量用尽' : '已到期');
-    const statusClass = activePlans.length ? 'ok' : 'bad';
-    const expireText = activePlans.length === 0
-      ? '已到期'
-      : (timePlans.length === 0
-          ? '按流量计费'
-          : (timePlans.some(p => !p.expires_at) ? '不限期' : fmtTs(Math.max(...timePlans.map(p => Number(p.expires_at))))));
-    const quotaTotal = activePlans.reduce((sum, p) => sum + Number(p.quota_gb || 0), 0);
-    const usedTotal = activePlans.reduce((sum, p) => sum + Number(p.used_gb || 0), 0);
-    const quotaText = quotaTotal > 0 ? `${usedTotal.toFixed(2)} / ${quotaTotal.toFixed(2)} GB` : '不限量';
-    return `<article class="my-node-card" onclick="openNodeTunnels(${Number(nodeId)}, '${esc(n.name || '节点')}')">
+    const quotaText = p.quota_gb > 0 ? `${p.used_gb} / ${p.quota_gb} GB` : '不限量';
+    const expireText = p.billing_mode === 'traffic' ? '按流量计费' : (p.expires_at ? p.expires_text : '不限期');
+    return `<article class="my-node-card" onclick="openNodeTunnels(${Number(p.node_id || 0)}, '${esc(n.name || '节点')}')">
       <div class="my-node-head">
-        <div class="my-node-title"><span class="my-node-region">${esc(n.region || '未分配')}</span><b>${esc(n.name || '节点 ' + nodeId)}</b></div>
+        <div class="my-node-title"><span class="my-node-region">${esc(n.region || '未分配')}</span><b>${esc(n.name || '节点 ' + (p.node_id || ''))}</b></div>
         <span class="status-badge ${statusClass}"><i></i>${statusText}</span>
       </div>
       <div class="my-node-notice"><b>节点说明</b><span>${esc((n.note && n.note !== '自动创建的默认节点') ? n.note : '合理使用，禁止违规业务')}</span></div>
       <div class="my-node-specs">
-        <div><span>可用端口</span><b>${totalPorts}</b></div>
-        <div><span>到期时间</span><b>${esc(expireText)}</b></div>
-        <div><span>流量</span><b>${esc(quotaText)}</b></div>
+        <div><span>端口</span><b>${p.max_ports}</b></div>
+        <div><span>${p.billing_mode === 'traffic' ? '流量' : '到期时间'}</span><b>${esc(p.billing_mode === 'traffic' ? quotaText : expireText)}</b></div>
+        <div><span>带宽 / 月流量</span><b>${bw > 0 ? bw + ' Mbps' : '不限'} / ${limitGb > 0 ? usedGb + '/' + limitGb + ' GB' : '不限'}</b></div>
         <div><span>接入地址</span><b>${esc(n.server_addr || '-')}:${esc(n.server_port ?? '')}</b></div>
       </div>
       <div class="my-node-foot">
-        <span class="my-node-plan-name">套餐：${esc(primary ? primary.plan_name : '-')}</span>
-        ${primary && primary.status === 'active' ? `<button type="button" class="node-action node-action-danger" onclick="event.stopPropagation();cancelPlan(${primary.id}, '${esc(primary.plan_name)}', ${Number(primary.refund_points || 0)})">退订</button>` : ''}
+        <span class="my-node-plan-name">套餐：${esc(p.plan_name || '-')}</span>
+        ${p.status === 'active' ? `<button type="button" class="node-action node-action-danger" onclick="event.stopPropagation();cancelPlan(${p.id}, '${esc(p.plan_name)}', ${Number(p.refund_points || 0)})">退订</button>` : ''}
       </div>
     </article>`;
   };
-  const grid = groupKeys.map(cardHtml).join('') || `<section class="card"><div class="empty-state"><strong>还没有节点</strong><p class="muted small">去「新建节点」购买套餐后，这里会显示你的节点。</p><button type="button" onclick="loadNewNode()">新建节点</button></div></section>`;
+  const sections = regionNames.map(region => `
+    <section class="card my-node-section">
+      <div class="section-title"><div><h2>${stIcon('node')}我的节点 <span class="my-node-sep">›</span> ${esc(region)}</h2></div></div>
+      <div class="my-node-grid">${groups[region].map(cardHtml).join('')}</div>
+    </section>`).join('') || `<section class="card"><div class="empty-state"><strong>还没有节点</strong><p class="muted small">去「新建节点」购买套餐后，这里会显示你的节点。</p><button type="button" onclick="loadNewNode()">新建节点</button></div></section>`;
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1>我的节点</h1></div>
       <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadNewNode()">新建节点</button></div></div>
-    <div class="my-node-grid">${grid}</div>
+    ${sections}
   `, 'dashboard-myplans', '我的节点');
-}
-
-function openNodeTunnels(nodeId, nodeName){
-  window.__selectedNode = { id: Number(nodeId || 0), name: nodeName || '' };
-  loadDashboard('tunnels');
 }
 
 function initProfilePoints(){
