@@ -1472,7 +1472,7 @@ async function loadMyPlans(){
         <div class="my-node-title"><span class="my-node-region">${esc(n.region || '未分配')}</span><b>${esc(n.name || '节点 ' + nodeId)}</b><small>${plans.length} 个套餐</small></div>
         <span class="status-badge ${statusClass}"><i></i>${statusText}</span>
       </div>
-      <div class="my-node-notice"><b>节点说明</b><span>${esc(n.note || '合理使用，禁止违规业务')}</span></div>
+      <div class="my-node-notice"><b>节点说明</b><span>${esc((n.note && n.note !== '自动创建的默认节点') ? n.note : '合理使用，禁止违规业务')}</span></div>
       <div class="my-node-specs">
         <div><span>可用端口</span><b>${totalPorts}</b></div>
         <div><span>带宽 / 月流量</span><b>${bw > 0 ? bw + ' Mbps' : '不限'} / ${limitGb > 0 ? usedGb + '/' + limitGb + ' GB' : '不限'}</b></div>
@@ -2079,7 +2079,6 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
           <div id="tunnelEditBanner" class="muted small hidden" style="grid-column:1/-1;margin:0">正在修改隧道 <b id="tunnelEditName"></b>（#<span id="tunnelEditId"></span>），保存后重新下载 frpc.toml 生效。</div>
           <div class="form-actions tunnel-form-actions"><button id="tunnelSubmitBtn">创建隧道</button><button type="button" class="secondary" onclick="resetTunnelForm()">清空重填</button><button type="button" class="secondary hidden" id="tunnelCancelEditBtn" onclick="cancelTunnelEdit()">取消修改</button></div>
         </form>
-        <p class="muted small">HTTP / HTTPS / TCPMUX 需要 frps 已配置 vhostHTTPPort / vhostHTTPSPort / tcpmuxHTTPConnectPort 等对应能力。</p>
       </section>
       <section class="card tunnel-list-section"><div class="section-title"><div><div class="section-kicker">TUNNELS</div><h2>${stIcon('tunnel')}隧道列表</h2><p>一张卡片对应一条映射；改完配置请重新下载 frpc.toml 并重启客户端。</p></div><span class="section-count">${data.tunnels.length} 条隧道</span></div><div class="tc-grid">${tunnelRows}</div></section>`, 'dashboard-tunnels', '我的隧道');
     bindUserTunnelForm();
