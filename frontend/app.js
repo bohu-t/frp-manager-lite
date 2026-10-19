@@ -1316,6 +1316,7 @@ function renderNewNode(){
     return `<button type="button" class="nn-plan-card${active ? ' active' : ''}" onclick="nnPickPlan(${Number(p.id)})">
       <span class="nn-plan-icon">${planIcon(p.billing_mode, hasQuota, hasDays)}</span>
       <span class="nn-plan-type">${typeName}</span>
+      <span class="nn-plan-name">${esc(p.name)}</span>
       <span class="nn-plan-title">${main}</span>
       <span class="nn-plan-sub">${sub}</span>
       <span class="nn-plan-price"><b>${Number(p.price_points)}</b> 积分</span>
@@ -1390,7 +1391,7 @@ async function nnPay(){
     const r = await api('/api/user/orders', {method:'POST', body:{plan_id:nnState.planId, node_id:nnState.nodeId}});
     await appAlert((r.message || '购买成功') + '\n\n10 分钟内且端口未产生流量，可全额退订。', {title:'开通成功'});
     nnState = { region:'', nodeId:0, planId:0 };
-    await loadNewNode();
+    await loadMyPlans();
   }catch(err){ await appAlert(err.message, {title:'购买失败'}); }
 }
 
