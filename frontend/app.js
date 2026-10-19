@@ -1474,9 +1474,9 @@ async function loadMyPlans(){
         <div><span>接入地址</span><b>${esc(n.server_addr || '-')}:${esc(n.server_port ?? '')}</b></div>
       </div>
       <div class="my-node-foot">
-        <div class="my-node-price"><span>续费价格</span><b>${Number((planById[Number(p.plan_id)] || {}).price_points ?? p.price_points ?? 0)} 积分</b></div>
-        <span class="my-node-auto">自动续费 <em>${p.auto_renew ? '已开启' : '未开启'}</em></span>
-        <span class="muted small">${esc(p.billing_mode === 'traffic' ? '按流量计费' : (p.expires_at ? '到期 ' + p.expires_text : '不限期'))}</span>
+        <div class="my-node-foot-row"><span>续费价格</span><b class="my-node-price-val">${Number((planById[Number(p.plan_id)] || {}).price_points ?? p.price_points ?? 0)} 积分</b></div>
+        <div class="my-node-foot-row"><span>自动续费</span><span class="my-node-auto">${p.auto_renew ? '已开启' : '未开启'}</span></div>
+        <div class="my-node-foot-row"><span>到期时间</span><b>${esc(p.billing_mode === 'traffic' ? '按流量计费' : (p.expires_at ? p.expires_text : '不限期'))}</b></div>
       </div>
     </article>`;
   };
