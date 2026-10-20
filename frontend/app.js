@@ -1555,7 +1555,7 @@ async function loadMyPlans(){
       <div class="my-node-specs">
         <div><span>端口</span><b>${p.max_ports}</b></div>
         <div><span>流量</span><b>${esc(quotaText)}</b></div>
-        <div><span>带宽 / 月流量</span><b>${bw > 0 ? bw + ' Mbps' : '不限'} / ${limitGb > 0 ? usedGb + '/' + limitGb + ' GB' : '不限'}</b></div>
+        <div><span>带宽 / 月流量上限</span><b>${bw > 0 ? bw + ' Mbps' : '不限'} / ${limitGb > 0 ? usedGb + '/' + limitGb + ' GB' : '不限'}</b></div>
         <div><span>接入地址</span><b>${esc(n.server_addr || '-')}:${esc(n.server_port ?? '')}</b></div>
       </div>
       <div class="my-node-foot">
