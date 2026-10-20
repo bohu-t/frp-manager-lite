@@ -1681,6 +1681,32 @@ def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int | None) 
             last_proxy_expr = "COALESCE(last_proxy_at, 0)" if "last_proxy_at" in old_tunnel_cols else "0"
             conn.execute(f"INSERT OR IGNORE INTO tunnels(id, node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at, last_proxy_at) SELECT id, node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at, {last_proxy_expr} FROM tunnels_old")
             conn.execute("DROP TABLE tunnels_old")
+    schema = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tunnels'").fetchone()["sql"] or ""
+    if "UNIQUE(user_id, name)" in schema:
+        # frp 的代理名在同一个 frps（节点）内全局唯一，改为按节点去重
+        conn.execute("ALTER TABLE tunnels RENAME TO tunnels_old")
+        conn.execute(
+            """
+            CREATE TABLE tunnels (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                proxy_type TEXT NOT NULL DEFAULT 'tcp',
+                local_ip TEXT NOT NULL DEFAULT '127.0.0.1',
+                local_port INTEGER NOT NULL,
+                remote_port INTEGER NOT NULL,
+                custom_domains TEXT NOT NULL DEFAULT '',
+                secret_key TEXT NOT NULL DEFAULT '',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL,
+                last_proxy_at INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(node_id, name)
+            );
+            """
+        )
+        conn.execute("INSERT OR IGNORE INTO tunnels(id, node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at, last_proxy_at) SELECT id, node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at, COALESCE(last_proxy_at, 0) FROM tunnels_old")
+        conn.execute("DROP TABLE tunnels_old")
     conn.execute("DROP INDEX IF EXISTS idx_tunnels_node_port")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tunnels_node_port_remote ON tunnels(node_id, remote_port) WHERE remote_port > 0")
 
@@ -4687,10 +4713,10 @@ def create_preconfigured_tunnels(conn: sqlite3.Connection, user: sqlite3.Row, no
                 continue
             free.remove(port)
             # 隧道名在同一账号内唯一，重名时自动加后缀，避免静默创建失败
-            if conn.execute("SELECT 1 FROM tunnels WHERE user_id=? AND name=?", (user["id"], name)).fetchone():
+            if conn.execute("SELECT 1 FROM tunnels WHERE node_id=? AND name=?", (node_id, name)).fetchone():
                 base = name[:36]
                 suffix = 2
-                while conn.execute("SELECT 1 FROM tunnels WHERE user_id=? AND name=?", (user["id"], f"{base}-{suffix}")).fetchone():
+                while conn.execute("SELECT 1 FROM tunnels WHERE node_id=? AND name=?", (node_id, f"{base}-{suffix}")).fetchone():
                     suffix += 1
                 name = f"{base}-{suffix}"
             conn.execute(
