@@ -1222,21 +1222,22 @@ async function loadHosts(){
       <div class="section-title"><div><h2>${stIcon('shield')}托管规则与准则</h2><p>提交前请确认可以遵守以下约定</p></div></div>
       <ol class="host-rule-list">${HOST_RULES.map(r => `<li>${esc(r)}</li>`).join('')}</ol>
     </section>
-    ${pNodes.length ? `<section class="card"><div class="section-title"><div><h2>${stIcon('node')}我的节点</h2><p>已接入平台的主机</p></div></div>
-      <div class="table-wrap"><table><thead><tr><th>序号</th><th>节点</th><th>地区</th><th>接入地址</th><th>端口（已用/总）</th><th>本月流量</th><th>实例</th><th>状态</th></tr></thead><tbody>
+
+    <section class="card"><div class="section-title"><div><h2>${stIcon('node')}我的节点</h2><p>${pNodes.length ? '已接入平台的主机' : '提交母鸡并通过审核后，这里会显示你的节点'}</p></div></div>
+      ${pNodes.length ? `<div class="table-wrap"><table><thead><tr><th>序号</th><th>节点</th><th>地区</th><th>接入地址</th><th>端口（已用/总）</th><th>本月流量</th><th>实例</th><th>状态</th></tr></thead><tbody>
         ${pNodes.map((n, i) => `<tr><td>${i + 1}</td><td><b>${esc(n.name)}</b></td><td>${esc(n.region)}</td><td>${esc(n.server_addr)}:${n.server_port}</td><td>${n.ports_used} / ${n.ports_total}</td><td>${fmtBytes(n.month_used_bytes)} / ${n.monthly_traffic_bytes > 0 ? fmtBytes(n.monthly_traffic_bytes) : '不限'}</td><td>${n.active_plans}</td><td><span class="status-badge ${n.active ? 'ok' : 'bad'}"><i></i>${n.active ? '在线' : '停用'}</span></td></tr>`).join('')}
-      </tbody></table></div>
-    </section>` : ''}
-    ${pNodes.length ? `<section class="card"><div class="section-title"><div><h2>${stIcon('bolt')}收益</h2><p>平台抽成 ${pct}%，结算后计入</p></div><span class="section-count">累计 ${pTotal} 积分</span></div>
+      </tbody></table></div>` : '<div class="empty-state"><strong>还没有节点</strong><p class="muted small">先在下方「添加母鸡」，审核通过后自动成为你的节点。</p></div>'}
+    </section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('bolt')}收益</h2><p>平台抽成 ${pct}%，结算后计入</p></div><span class="section-count">累计 ${pTotal} 积分</span></div>
       <div class="table-wrap"><table><thead><tr><th>订单</th><th>节点</th><th>成交</th><th>抽成</th><th>净收益</th><th>状态</th><th>时间</th></tr></thead><tbody>
       ${pEarn.length ? pEarn.slice(0, 20).map(e => `<tr><td>${esc(e.order_no)}</td><td>#${e.node_id}</td><td>${e.gross_points}</td><td>${e.commission_points}</td><td><b>${e.net_points}</b></td><td>${e.status === 'settled' ? '已结算' : '待结算'}</td><td>${fmtTs(e.created_at)}</td></tr>`).join('') : '<tr><td colspan="7" class="muted">暂无收益记录</td></tr>'}
       </tbody></table></div>
     </section>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}我的套餐</h2><p>上架后买家可在该节点购买</p></div><button type="button" onclick="providerPlanForm()">＋ 上架套餐</button></div>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}我的套餐</h2><p>${pNodes.length ? '上架后买家可在该节点购买' : '先有节点，才能上架套餐'}</p></div><button type="button" onclick="providerPlanForm()" ${pNodes.length ? '' : 'disabled'}>＋ 上架套餐</button></div>
       <div class="table-wrap"><table><thead><tr><th>序号</th><th>名称</th><th>节点</th><th>计费</th><th>价格</th><th>端口</th><th>时长/流量</th><th>状态</th><th>操作</th></tr></thead><tbody>
       ${pPlans.length ? pPlans.map((pl, i) => `<tr><td>${i + 1}</td><td><b>${esc(pl.name)}</b></td><td>${esc((pNodes.find(n => Number(n.id) === Number(pl.node_id)) || {}).name || ('#' + pl.node_id))}</td><td>${pl.billing_mode === 'traffic' ? '流量' : '时间'}</td><td>${pl.price_points} 积分</td><td>${pl.max_ports}</td><td>${pl.billing_mode === 'traffic' ? pl.traffic_limit_gb + ' GB' : pl.duration_days + ' 天'}</td><td><span class="status-badge ${pl.active ? 'ok' : 'bad'}"><i></i>${pl.active ? '在售' : '下架'}</span></td><td class="actions node-actions"><button type="button" class="node-action" onclick='providerPlanForm(${pl.id})'>编辑</button><button type="button" class="node-action node-action-danger" onclick="providerPlanDelete(${pl.id})">下架</button></td></tr>`).join('') : '<tr><td colspan="9" class="muted">还没有上架套餐</td></tr>'}
       </tbody></table></div>
-    </section>` : ''}
+    </section>
     <section class="card"><div class="section-title"><div><h2>${stIcon('cloud')}我的托管</h2><p>共 ${hosts.length} 条记录</p></div></div>
       <table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>配置</th><th>带宽 / 流量</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${hostRowsHtml(hosts, false)}</tbody></table>
     </section>`, 'dashboard-hosts', '托管中心');
