@@ -4425,9 +4425,13 @@ def release_plan_resources(conn: sqlite3.Connection, plan_row: sqlite3.Row, keep
     ports = conn.execute("SELECT node_id, port FROM user_plan_ports WHERE user_plan_id=?", (plan_row["id"],)).fetchall()
     for pr in ports:
         node_id, port = int(pr["node_id"]), int(pr["port"])
-        conn.execute("UPDATE tunnels SET enabled=0 WHERE user_id=? AND node_id=? AND remote_port=?",
-                     (plan_row["user_id"], node_id, port))
-        if not keep_ports:
+        if keep_ports:
+            conn.execute("UPDATE tunnels SET enabled=0 WHERE user_id=? AND node_id=? AND remote_port=?",
+                         (plan_row["user_id"], node_id, port))
+        else:
+            # 主动退订：隧道随套餐一起删除，避免残留记录占住端口
+            conn.execute("DELETE FROM tunnels WHERE user_id=? AND node_id=? AND remote_port=?",
+                         (plan_row["user_id"], node_id, port))
             conn.execute("UPDATE ports SET user_id=NULL WHERE node_id=? AND port=?", (node_id, port))
     if keep_ports:
         conn.execute("UPDATE user_plan_ports SET release_at=? WHERE user_plan_id=? AND release_at=0",
@@ -4438,8 +4442,10 @@ def release_plan_resources(conn: sqlite3.Connection, plan_row: sqlite3.Row, keep
 
 def reclaim_expired_plan_ports(conn: sqlite3.Connection) -> int:
     """回收保留期已过的套餐端口。"""
-    rows = conn.execute("SELECT id, node_id, port FROM user_plan_ports WHERE release_at>0 AND release_at<=?", (now(),)).fetchall()
+    rows = conn.execute("SELECT id, user_id, node_id, port FROM user_plan_ports WHERE release_at>0 AND release_at<=?", (now(),)).fetchall()
     for r in rows:
+        conn.execute("DELETE FROM tunnels WHERE user_id=? AND node_id=? AND remote_port=?",
+                     (int(r["user_id"]), int(r["node_id"]), int(r["port"])))
         conn.execute("UPDATE ports SET user_id=NULL WHERE node_id=? AND port=?", (int(r["node_id"]), int(r["port"])))
         conn.execute("DELETE FROM user_plan_ports WHERE id=?", (r["id"],))
     return len(rows)
