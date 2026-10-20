@@ -4539,6 +4539,20 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
         conn.execute("UPDATE user_plan_ports SET release_at=0 WHERE user_plan_id=?", (existing["id"],))
         conn.execute("UPDATE ports SET user_id=? WHERE node_id=? AND port IN (SELECT port FROM user_plan_ports WHERE user_plan_id=?)",
                      (user["id"], node_id, existing["id"]))
+        # 退订后重新购买会复用同一条记录，但端口已被回收：补齐端口
+        have_ports = [int(r["port"]) for r in conn.execute(
+            "SELECT port FROM user_plan_ports WHERE user_plan_id=? AND release_at=0", (existing["id"],)).fetchall()]
+        need_ports = max(0, max_ports - len(have_ports))
+        if need_ports:
+            free_ports = available_ports_for_assignment(conn, node_id, need_ports)
+            if len(free_ports) < need_ports:
+                conn.rollback()
+                return False, f"节点端口不足，只剩 {len(free_ports)} 个可用端口"
+            conn.executemany("UPDATE ports SET user_id=? WHERE node_id=? AND port=?",
+                             [(user["id"], node_id, r["port"]) for r in free_ports])
+            conn.executemany(
+                "INSERT OR IGNORE INTO user_plan_ports(user_plan_id, user_id, node_id, port, created_at) VALUES(?,?,?,?,?)",
+                [(existing["id"], user["id"], node_id, r["port"], now()) for r in free_ports])
         conn.execute("UPDATE users SET node_id=? WHERE id=?", (node_id, user["id"]))
         recalc_user_entitlements(conn, int(user["id"]))
         return True, "已叠加到原套餐"
