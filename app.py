@@ -4488,11 +4488,16 @@ def reclaim_expired_plan_ports(conn: sqlite3.Connection) -> int:
     return len(rows)
 
 
-def claim_retained_ports(conn: sqlite3.Connection, user_id: int, new_plan_id: int, wanted: int) -> list[sqlite3.Row]:
-    """续期时优先接管保留中的端口，并恢复对应隧道。"""
-    rows = conn.execute(
-        "SELECT id, node_id, port FROM user_plan_ports WHERE user_id=? AND release_at>0 ORDER BY release_at, id LIMIT ?",
-        (user_id, wanted)).fetchall()
+def claim_retained_ports(conn: sqlite3.Connection, user_id: int, new_plan_id: int, wanted: int, node_id: int = 0) -> list[sqlite3.Row]:
+    """续期时优先接管保留中的端口（必须同一节点），并恢复对应隧道。"""
+    if node_id:
+        rows = conn.execute(
+            "SELECT id, node_id, port FROM user_plan_ports WHERE user_id=? AND node_id=? AND release_at>0 ORDER BY release_at, id LIMIT ?",
+            (user_id, node_id, wanted)).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, node_id, port FROM user_plan_ports WHERE user_id=? AND release_at>0 ORDER BY release_at, id LIMIT ?",
+            (user_id, wanted)).fetchall()
     for r in rows:
         conn.execute("UPDATE user_plan_ports SET user_plan_id=?, release_at=0 WHERE id=?", (new_plan_id, r["id"]))
         conn.execute("UPDATE tunnels SET enabled=1 WHERE user_id=? AND node_id=? AND remote_port=?",
@@ -4634,7 +4639,7 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
     conn.execute("UPDATE users SET node_id=? WHERE id=?", (node_id, user["id"]))
     plan_id_new = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
     # 续期优先接管保留中的端口（三天宽限期内），恢复原隧道
-    claimed = claim_retained_ports(conn, int(user["id"]), plan_id_new, max_ports) if max_ports else []
+    claimed = claim_retained_ports(conn, int(user["id"]), plan_id_new, max_ports, node_id) if max_ports else []
     need = max(0, max_ports - len(claimed))
     free_ports = available_ports_for_assignment(conn, node_id, need) if need else []
     if need and len(free_ports) < need:
