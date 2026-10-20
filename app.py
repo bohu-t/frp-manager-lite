@@ -3512,14 +3512,16 @@ def rate_limit_check(key: str, limit: int, window: int = RATE_WINDOW) -> tuple[b
 
 
 def tunnel_config(user: sqlite3.Row, node: sqlite3.Row, tunnels: list[sqlite3.Row]) -> str:
+    def _ts(v):
+        return json.dumps(str(v) if v is not None else "", ensure_ascii=False)
     lines = [
-        f'serverAddr = "{node["server_addr"]}"',
+        f"serverAddr = {_ts(node['server_addr'])}",
         f"serverPort = {node['server_port']}",
         "",
-        "auth.method = \"token\"",
-        f'auth.token = "{node["auth_token"]}"',
-        f'user = "{user["username"]}"',
-        f'metadatas.panelToken = "{user["token"]}"',
+        'auth.method = "token"',
+        f"auth.token = {_ts(node['auth_token'])}",
+        f"user = {_ts(user['username'])}",
+        f"metadatas.panelToken = {_ts(user['token'])}",
         "",
         "transport.poolCount = 5",
         "transport.tcpMux = true",
@@ -3532,10 +3534,10 @@ def tunnel_config(user: sqlite3.Row, node: sqlite3.Row, tunnels: list[sqlite3.Ro
         lines.extend(
             [
                 "[[proxies]]",
-                f'name = {json.dumps(str(t["name"]), ensure_ascii=False)}',
+                f"name = {_ts(t['name'])}",
                 f'type = "{proxy_type}"',
-                f'localIP = "{t["local_ip"]}"',
-                f'localPort = {t["local_port"]}',
+                f"localIP = {_ts(t['local_ip'])}",
+                f"localPort = {t['local_port']}",
             ]
         )
         if proxy_type in REMOTE_PORT_PROXY_TYPES:
