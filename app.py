@@ -2100,7 +2100,15 @@ def normalize_frps_proxy(proxy: dict[str, Any], typ: str, node: sqlite3.Row | di
 
 def dashboard_nodes_for_user(conn: sqlite3.Connection, user: sqlite3.Row | None = None) -> list[sqlite3.Row]:
     if user is not None and user["role"] != "admin":
-        rows = conn.execute("SELECT * FROM nodes WHERE id=? AND active=1", (user["node_id"],)).fetchall()
+        rows = conn.execute(
+            """SELECT DISTINCT n.* FROM nodes n
+               WHERE n.active=1 AND (
+                 n.id=? OR n.id IN (
+                   SELECT up.node_id FROM user_plans up
+                   WHERE up.user_id=? AND up.status='active' AND (up.expires_at=0 OR up.expires_at>?)
+                 )
+               ) ORDER BY n.region, n.id""",
+            (int(user["node_id"] or 0), int(user["id"]), now())).fetchall()
     else:
         rows = conn.execute("SELECT * FROM nodes WHERE active=1 ORDER BY region, id").fetchall()
     return [r for r in rows if node_dashboard_url(r)]
@@ -4627,7 +4635,7 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
             conn.executemany(
                 "INSERT OR IGNORE INTO user_plan_ports(user_plan_id, user_id, node_id, port, created_at) VALUES(?,?,?,?,?)",
                 [(existing["id"], user["id"], node_id, r["port"], now()) for r in free_ports])
-        conn.execute("UPDATE users SET node_id=? WHERE id=?", (node_id, user["id"]))
+        conn.execute("UPDATE users SET node_id=? WHERE id=? AND (node_id IS NULL OR node_id=0)", (node_id, user["id"]))
         recalc_user_entitlements(conn, int(user["id"]))
         return True, "已叠加到原套餐"
     conn.execute(
@@ -4636,7 +4644,7 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
          billing_mode, int(order["points"] or 0), quota_bytes, 0, now(), "active",
          max_ports, int(order["traffic_limit_bytes"] or 0), int(order["bandwidth_limit_kbps"] or 0),
          duration_days, node_id, now(), expires_at, now()))
-    conn.execute("UPDATE users SET node_id=? WHERE id=?", (node_id, user["id"]))
+    conn.execute("UPDATE users SET node_id=? WHERE id=? AND (node_id IS NULL OR node_id=0)", (node_id, user["id"]))
     plan_id_new = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
     # 续期优先接管保留中的端口（三天宽限期内），恢复原隧道
     claimed = claim_retained_ports(conn, int(user["id"]), plan_id_new, max_ports, node_id) if max_ports else []
@@ -6537,6 +6545,8 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/user/node/switch":
+            self.send_json({"ok": False, "error": "该功能已停用，请在对应实例中操作"}, 410)
+            return
             if user["role"] == "admin":
                 self.send_json({"ok": False, "error": "管理员账号不能通过用户面板切换节点"}, 403)
                 return
