@@ -1094,6 +1094,34 @@ async function cancelPlan(id, name, refund){
   }catch(err){ show(err.message, true); }
 }
 
+function showTunnelForm(){
+  const card = document.querySelector('#tunnelCreateCard');
+  if(!card) return;
+  card.classList.remove('hidden');
+  card.scrollIntoView({behavior:'smooth', block:'start'});
+  setTimeout(() => { const inp = card.querySelector('input[name="name"]'); if(inp) inp.focus(); }, 250);
+}
+
+async function renewInstance(upid, planId, nodeId, price, name){
+  if(!planId){ show('该套餐已下架，无法延期', true); return; }
+  if(!await appConfirm(`确认延期「${name}」？\n将扣除 ${price} 积分，时长或流量会叠加到当前实例。`, {title:'延期', okText:'确认延期'})) return;
+  try{
+    const r = await api('/api/user/orders', {method:'POST', body:{plan_id:Number(planId), node_id:Number(nodeId)}});
+    show(r.message || '延期成功');
+    await loadDashboard('tunnels');
+  }catch(err){ show(err.message || '延期失败', true); }
+}
+
+async function toggleAutoRenew(upid, enabled){
+  try{
+    await api('/api/user/plans/auto-renew', {method:'POST', body:{id:Number(upid), enabled:!!enabled}});
+    show(enabled ? '已开启自动延期' : '已关闭自动延期');
+  }catch(err){
+    show(err.message || '设置失败', true);
+    await loadDashboard('tunnels');
+  }
+}
+
 async function resumePay(orderNo){
   try{
     const r = await api('/api/orders/status?order_no=' + encodeURIComponent(orderNo));
@@ -2122,23 +2150,43 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
   if(view === 'tunnels'){
     const selNode = window.__selectedNode;
     const crumb = selNode ? `<div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="loadMyPlans()">我的实例</a> <span class="crumb-inline">›</span> ${esc(selNode.name)}</h1></div></div>` : '';
+    const myPlans = (data.my_plans || []).filter(p => !selNode || Number(p.node_id) === Number(selNode.id));
+    const plan = myPlans.find(p => p.status === 'active' && !p.expired) || myPlans[0] || null;
+    const planValue = plan ? (plan.billing_mode === 'traffic' ? `${plan.used_gb} / ${plan.quota_gb} GB` : (plan.expires_at ? plan.expires_text : '不限期')) : '-';
+    const actionCard = plan ? `<section class="card instance-actions">
+        <div class="section-title"><div><div class="section-kicker">ACTIONS</div><h2>${stIcon('bolt')}操作</h2></div></div>
+        <div class="instance-action-meta">
+          <div><span>套餐</span><b>${esc(plan.plan_name || '-')}</b></div>
+          <div><span>${plan.billing_mode === 'traffic' ? '流量' : '到期时间'}</span><b>${esc(planValue)}</b></div>
+          <div><span>续费价格</span><b>${Number(plan.price_points || 0)} 积分</b></div>
+        </div>
+        <button type="button" class="instance-action-primary" onclick="showTunnelForm()">新建隧道</button>
+        <button type="button" class="secondary" onclick="renewInstance(${Number(plan.id)}, ${Number(plan.plan_id || 0)}, ${Number(selNode ? selNode.id : plan.node_id || 0)}, ${Number(plan.price_points || 0)}, '${esc(plan.plan_name || '')}')">延期</button>
+        <label class="instance-switch"><span>自动延期</span><input type="checkbox"${plan.auto_renew ? ' checked' : ''} onchange="toggleAutoRenew(${Number(plan.id)}, this.checked)"></label>
+        <button type="button" class="node-action node-action-danger instance-cancel" onclick="cancelPlan(${Number(plan.id)}, '${esc(plan.plan_name || '')}', ${Number(plan.refund_points || 0)})">退订</button>
+      </section>` : '';
     app.innerHTML = appLayoutHtml(`
       ${crumb}
-      <section class="card tunnel-create-card" id="tunnelCreateCard">
-        <div class="section-title"><div><div class="section-kicker">CREATE TUNNEL</div><h2 id="tunnelFormTitle">${stIcon('plus')}创建隧道</h2><p id="tunnelFormHint">填好本地服务和公网访问方式，创建后重新下载 frpc.toml 并重启客户端即可生效。</p></div></div>
-        <form id="tunnelForm" class="grid tunnel-create-form">
-          <div><label>名称</label><input name="name" value="${esc(tunnelFormDraft.name || '')}" placeholder="web" required></div>
-          <div><label>类型</label><select name="proxy_type" id="proxyTypeSelect">${proxyTypeOptions}</select></div>
-          <div><label>本地 IP</label><input name="local_ip" value="${esc(tunnelFormDraft.local_ip || '127.0.0.1')}" required></div>
-          <div><label>本地端口</label><input name="local_port" type="number" min="1" max="65535" value="${esc(tunnelFormDraft.local_port || '80')}" required></div>
-          <div class="remote-port-field"><label>公网端口</label>${remotePortField}</div>
-          <div class="domain-field hidden"><label>自定义域名</label><input name="custom_domains" value="${esc(tunnelFormDraft.custom_domains || '')}" placeholder="app.example.com,api.example.com"></div>
-          <div class="secret-field hidden"><label>访问密钥</label><input name="secret_key" value="${esc(tunnelFormDraft.secret_key || '')}" placeholder="留空自动生成"></div>
-          <div id="tunnelEditBanner" class="muted small hidden" style="grid-column:1/-1;margin:0">正在修改隧道 <b id="tunnelEditName"></b>（#<span id="tunnelEditId"></span>），保存后重新下载 frpc.toml 生效。</div>
-          <div class="form-actions tunnel-form-actions"><button id="tunnelSubmitBtn">创建隧道</button><button type="button" class="secondary" onclick="resetTunnelForm()">清空重填</button><button type="button" class="secondary hidden" id="tunnelCancelEditBtn" onclick="cancelTunnelEdit()">取消修改</button></div>
-        </form>
-      </section>
-      <section class="card tunnel-list-section"><div class="section-title"><div><div class="section-kicker">TUNNELS</div><h2>${stIcon('tunnel')}隧道列表</h2><p>一张卡片对应一条映射；改完配置请重新下载 frpc.toml 并重启客户端。</p></div><span class="section-count">${data.tunnels.length} 条隧道</span></div><div class="tc-grid">${tunnelRows}</div></section>`, 'dashboard-tunnels', '我的隧道');
+      <div class="instance-layout">
+        <div class="instance-main">
+          <section class="card tunnel-create-card${editingTunnelId ? '' : ' hidden'}" id="tunnelCreateCard">
+            <div class="section-title"><div><div class="section-kicker">CREATE TUNNEL</div><h2 id="tunnelFormTitle">${stIcon('plus')}创建隧道</h2><p id="tunnelFormHint">填好本地服务和公网访问方式，创建后重新下载 frpc.toml 并重启客户端即可生效。</p></div></div>
+            <form id="tunnelForm" class="grid tunnel-create-form">
+              <div><label>名称</label><input name="name" value="${esc(tunnelFormDraft.name || '')}" placeholder="web" required></div>
+              <div><label>类型</label><select name="proxy_type" id="proxyTypeSelect">${proxyTypeOptions}</select></div>
+              <div><label>本地 IP</label><input name="local_ip" value="${esc(tunnelFormDraft.local_ip || '127.0.0.1')}" required></div>
+              <div><label>本地端口</label><input name="local_port" type="number" min="1" max="65535" value="${esc(tunnelFormDraft.local_port || '80')}" required></div>
+              <div class="remote-port-field"><label>公网端口</label>${remotePortField}</div>
+              <div class="domain-field hidden"><label>自定义域名</label><input name="custom_domains" value="${esc(tunnelFormDraft.custom_domains || '')}" placeholder="app.example.com,api.example.com"></div>
+              <div class="secret-field hidden"><label>访问密钥</label><input name="secret_key" value="${esc(tunnelFormDraft.secret_key || '')}" placeholder="留空自动生成"></div>
+              <div id="tunnelEditBanner" class="muted small hidden" style="grid-column:1/-1;margin:0">正在修改隧道 <b id="tunnelEditName"></b>（#<span id="tunnelEditId"></span>），保存后重新下载 frpc.toml 生效。</div>
+              <div class="form-actions tunnel-form-actions"><button id="tunnelSubmitBtn">创建隧道</button><button type="button" class="secondary" onclick="resetTunnelForm()">清空重填</button><button type="button" class="secondary hidden" id="tunnelCancelEditBtn" onclick="cancelTunnelEdit()">取消修改</button></div>
+            </form>
+          </section>
+          <section class="card tunnel-list-section"><div class="section-title"><div><div class="section-kicker">TUNNELS</div><h2>${stIcon('tunnel')}隧道列表</h2><p>一张卡片对应一条映射；改完配置请重新下载 frpc.toml 并重启客户端。</p></div><span class="section-count">${data.tunnels.length} 条隧道</span></div><div class="tc-grid">${tunnelRows}</div></section>
+        </div>
+        <aside class="instance-side">${actionCard}</aside>
+      </div>`, 'dashboard-tunnels', '我的隧道');
     bindUserTunnelForm();
     return;
   }

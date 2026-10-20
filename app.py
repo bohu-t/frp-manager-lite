@@ -2868,6 +2868,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE user_plans ADD COLUMN used_bytes INTEGER NOT NULL DEFAULT 0")
         if "usage_started_at" not in up_cols:
             conn.execute("ALTER TABLE user_plans ADD COLUMN usage_started_at INTEGER NOT NULL DEFAULT 0")
+        if "auto_renew" not in up_cols:
+            conn.execute("ALTER TABLE user_plans ADD COLUMN auto_renew INTEGER NOT NULL DEFAULT 0")
         upp_cols = {r["name"] for r in conn.execute("PRAGMA table_info(user_plan_ports)").fetchall()}
         if "release_at" not in upp_cols:
             conn.execute("ALTER TABLE user_plan_ports ADD COLUMN release_at INTEGER NOT NULL DEFAULT 0")
@@ -5561,7 +5563,7 @@ class Handler(BaseHTTPRequestHandler):
                     if status == "active" and exp and exp <= now():
                         status = "expired"
                     my_plans.append({
-                        "id": r["id"], "plan_name": r["plan_name"], "node_id": int(r["node_id"] or 0), "max_ports": r["max_ports"],
+                        "id": r["id"], "plan_id": int(r["plan_id"] or 0), "plan_name": r["plan_name"], "node_id": int(r["node_id"] or 0), "max_ports": r["max_ports"],
                         "billing_mode": r["billing_mode"] or "time",
                         "quota_bytes": int(r["quota_bytes"] or 0), "used_bytes": int(r["used_bytes"] or 0),
                         "quota_gb": round(int(r["quota_bytes"] or 0) / 1024 / 1024 / 1024, 2),
@@ -5574,6 +5576,7 @@ class Handler(BaseHTTPRequestHandler):
                         "grace_until": int(conn.execute(
                             "SELECT COALESCE(MAX(release_at),0) FROM user_plan_ports WHERE user_plan_id=?", (r["id"],)).fetchone()[0] or 0),
                         "paused": False,
+                        "auto_renew": int(row_val(r, "auto_renew", 0) or 0),
                     })
             node_payload = node_public(node) if node else None
             if node_payload:
@@ -5978,6 +5981,25 @@ class Handler(BaseHTTPRequestHandler):
             if ok:
                 audit("plan_cancel", user, None, None, "", msg)
             self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "refund": info}, 200 if ok else 400)
+            return
+
+        if path == "/api/user/plans/auto-renew":
+            user = self.require_user()
+            if not user:
+                return
+            try:
+                upid = int(data.get("id", 0))
+            except (TypeError, ValueError):
+                upid = 0
+            enabled = 1 if data.get("enabled") else 0
+            with db() as conn:
+                row = conn.execute("SELECT id FROM user_plans WHERE id=? AND user_id=?", (upid, user["id"])).fetchone()
+                if not row:
+                    self.send_json({"ok": False, "error": "实例不存在"}, 404)
+                    return
+                conn.execute("UPDATE user_plans SET auto_renew=? WHERE id=?", (enabled, upid))
+            audit("plan_auto_renew", user, None, None, "", f"自动延期 {'开启' if enabled else '关闭'}")
+            self.send_json({"ok": True, "auto_renew": enabled})
             return
 
         if path == "/api/user/points/redeem":
