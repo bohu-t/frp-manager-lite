@@ -1502,7 +1502,7 @@ def node_month_traffic(conn: sqlite3.Connection, node_id: int) -> int:
     """统计某节点本自然月流量（按当前绑定该节点的用户汇总）。"""
     month = time.strftime("%Y-%m", time.localtime())
     row = conn.execute(
-        "SELECT COALESCE(SUM(ts.bytes),0) FROM traffic_samples ts JOIN users u ON u.id=ts.user_id WHERE u.node_id=? AND ts.day LIKE ?",
+        "SELECT COALESCE(SUM(bytes),0) FROM traffic_samples WHERE node_id=? AND day LIKE ?",
         (node_id, month + "%")).fetchone()
     return int(row[0] or 0) if row else 0
 
@@ -2938,6 +2938,12 @@ def init_db() -> None:
         if "points" not in order_cols:
             conn.execute("ALTER TABLE orders ADD COLUMN points INTEGER NOT NULL DEFAULT 0")
         node_cols = {r["name"] for r in conn.execute("PRAGMA table_info(nodes)").fetchall()}
+        if "owner_id" not in node_cols:
+            conn.execute("ALTER TABLE nodes ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 0")
+        conn.execute(
+            """UPDATE nodes SET owner_id=(SELECT h.user_id FROM hosts h WHERE h.node_id=nodes.id AND h.status='approved' ORDER BY h.id LIMIT 1)
+               WHERE owner_id=0 AND EXISTS (SELECT 1 FROM hosts h WHERE h.node_id=nodes.id AND h.status='approved')"""
+        )
         if "bandwidth_mbps" not in node_cols:
             conn.execute("ALTER TABLE nodes ADD COLUMN bandwidth_mbps INTEGER NOT NULL DEFAULT 0")
         invite_cols = {r["name"] for r in conn.execute("PRAGMA table_info(invite_keys)").fetchall()}
@@ -4948,6 +4954,32 @@ def host_public(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def provider_nodes_payload(conn: sqlite3.Connection, user_id: int) -> list[dict[str, Any]]:
+    """供给方视角：自己名下节点的容量、流量与实例数。"""
+    out: list[dict[str, Any]] = []
+    rows = conn.execute("SELECT * FROM nodes WHERE owner_id=? ORDER BY id DESC", (user_id,)).fetchall()
+    for n in rows:
+        nid = int(n["id"])
+        total_ports = conn.execute("SELECT COUNT(*) FROM ports WHERE node_id=?", (nid,)).fetchone()[0]
+        used_ports = conn.execute("SELECT COUNT(*) FROM ports WHERE node_id=? AND user_id IS NOT NULL", (nid,)).fetchone()[0]
+        active_plans = conn.execute(
+            "SELECT COUNT(*) FROM user_plans WHERE node_id=? AND status='active' AND (expires_at=0 OR expires_at>?)",
+            (nid, now())).fetchone()[0]
+        out.append({
+            "id": nid, "name": n["name"], "region": n["region"],
+            "server_addr": n["server_addr"], "server_port": int(n["server_port"] or 0),
+            "active": bool(n["active"]),
+            "port_start": int(n["port_start"] or 0), "port_end": int(n["port_end"] or 0),
+            "ports_total": int(total_ports), "ports_used": int(used_ports),
+            "ports_free": max(0, int(total_ports) - int(used_ports)),
+            "month_used_bytes": node_month_traffic(conn, nid),
+            "monthly_traffic_bytes": int(n["monthly_traffic_bytes"] or 0),
+            "active_plans": int(active_plans),
+            "bandwidth_mbps": int(n["bandwidth_mbps"] or 0),
+        })
+    return out
+
+
 def list_hosts(conn: sqlite3.Connection, user_id: int | None = None) -> list[dict[str, Any]]:
     if user_id is None:
         rows = conn.execute("SELECT * FROM hosts ORDER BY id DESC LIMIT 300").fetchall()
@@ -5022,11 +5054,11 @@ def review_host_application(admin: sqlite3.Row, host_id: int, action: str, reaso
             node_name = f"{base_name}-{suffix}"
         token = str(host["auth_token"] or "") or secrets.token_urlsafe(24)
         cur = conn.execute(
-            "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, monthly_traffic_bytes, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, monthly_traffic_bytes, active, note, created_at, owner_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (host["region"], node_name, host["server_addr"], int(host["server_port"]), token,
              int(host["port_start"]), int(host["port_end"]), 0, "", "", "", int(host["bandwidth_mbps"] or 0),
              int(float(host["monthly_traffic_gb"] or 0) * 1024 ** 3), 1,
-             f"托管：{host['username']} / {host['note'] or ''}".strip(), now()))
+             f"托管：{host['username']} / {host['note'] or ''}".strip(), now(), int(host["user_id"])))
         node_id = int(cur.lastrowid)
         conn.executemany("INSERT OR IGNORE INTO ports(node_id, port, created_at) VALUES(?,?,?)",
                          [(node_id, p, now()) for p in range(int(host["port_start"]), int(host["port_end"]) + 1)])
@@ -5692,6 +5724,10 @@ class Handler(BaseHTTPRequestHandler):
                 node_payload.update(health if health is not None else check_node_auth_port(node_payload))
                 node_payload["latency_ms"] = node_payload.get("auth_latency_ms")
             self.send_json({"ok": True, "version": APP_VERSION, "uptime_seconds": int(time.time() - SERVER_START_TS), "latest_version": panel_latest_version(), "update_link": PANEL_UPDATE_LINK, "user": public_user(user), "software_license": sw_license, "node": node_payload, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "my_plans": my_plans, "payment": payment_public(payment_config(conn)), "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
+            return
+        if path == "/api/user/provider/nodes":
+            with db() as conn:
+                self.send_json({"ok": True, "nodes": provider_nodes_payload(conn, int(user["id"]))})
             return
         if path == "/api/user/hosts":
             with db() as conn:

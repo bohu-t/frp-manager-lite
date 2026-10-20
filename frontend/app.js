@@ -1199,10 +1199,13 @@ function closeHostForm(){ const el = document.querySelector('#hostFormModal'); i
 
 async function loadHosts(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
-  let data;
-  try{ data = await api('/api/user/hosts'); }
+  let data, pdata;
+  try{
+    [data, pdata] = await Promise.all([api('/api/user/hosts'), api('/api/user/provider/nodes').catch(() => ({nodes: []}))]);
+  }
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
   const hosts = data.hosts || [];
+  const pNodes = pdata.nodes || [];
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">HOSTING</span><h1>托管中心</h1><p>登记并管理你的母鸡，审核通过后自动成为可用实例。</p></div>
       <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadHosts()">刷新</button><button type="button" onclick="hostFormModal()">＋ 添加母鸡</button></div></div>
@@ -1210,6 +1213,11 @@ async function loadHosts(){
       <div class="section-title"><div><h2>${stIcon('shield')}托管规则与准则</h2><p>提交前请确认可以遵守以下约定</p></div></div>
       <ol class="host-rule-list">${HOST_RULES.map(r => `<li>${esc(r)}</li>`).join('')}</ol>
     </section>
+    ${pNodes.length ? `<section class="card"><div class="section-title"><div><h2>${stIcon('node')}我的节点</h2><p>已接入平台的主机</p></div></div>
+      <div class="table-wrap"><table><thead><tr><th>序号</th><th>节点</th><th>地区</th><th>接入地址</th><th>端口（已用/总）</th><th>本月流量</th><th>实例</th><th>状态</th></tr></thead><tbody>
+        ${pNodes.map((n, i) => `<tr><td>${i + 1}</td><td><b>${esc(n.name)}</b></td><td>${esc(n.region)}</td><td>${esc(n.server_addr)}:${n.server_port}</td><td>${n.ports_used} / ${n.ports_total}</td><td>${fmtBytes(n.month_used_bytes)} / ${n.monthly_traffic_bytes > 0 ? fmtBytes(n.monthly_traffic_bytes) : '不限'}</td><td>${n.active_plans}</td><td><span class="status-badge ${n.active ? 'ok' : 'bad'}"><i></i>${n.active ? '在线' : '停用'}</span></td></tr>`).join('')}
+      </tbody></table></div>
+    </section>` : ''}
     <section class="card"><div class="section-title"><div><h2>${stIcon('cloud')}我的托管</h2><p>共 ${hosts.length} 条记录</p></div></div>
       <table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>配置</th><th>带宽 / 流量</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${hostRowsHtml(hosts, false)}</tbody></table>
     </section>`, 'dashboard-hosts', '托管中心');
