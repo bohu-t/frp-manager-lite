@@ -1527,7 +1527,7 @@ async function loadMyPlans(){
     show(err.message, true);
     return;
   }
-  const myPlans = data.my_plans || [];
+  const myPlans = (data.my_plans || []).filter(p => p.status !== 'cancelled');
   const nodeById = {};
   nodes.forEach(n => { nodeById[Number(n.id)] = n; });
   const groups = {};
