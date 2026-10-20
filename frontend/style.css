@@ -1826,3 +1826,5 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .ov-page-head h1{margin:0}
 .my-node-section{display:block;margin-bottom:18px}
 .my-node-section>.section-title{margin-bottom:12px}
+.config-node-pick{display:flex;align-items:center;gap:10px;margin-bottom:14px;font-size:13px;color:var(--muted)}
+.config-node-pick select{height:34px;border:1px solid var(--border);border-radius:8px;padding:0 10px;background:var(--surface);color:var(--text-strong)}

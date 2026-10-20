@@ -2039,6 +2039,35 @@ function bindUserTunnelForm(){
   applyTunnelFormMode();
 }
 
+function switchConfigNode(nodeId){
+  document.querySelectorAll('[data-cfg]').forEach(a => {
+    const base = a.getAttribute('data-cfg') === 'frpc' ? '/config/frpc.toml' : '/config/deploy-frpc.sh';
+    const token = a.getAttribute('data-token') || '';
+    a.href = base + '?node_id=' + encodeURIComponent(nodeId) + (token ? '&token=' + encodeURIComponent(token) : '');
+  });
+  const cmd = document.querySelector('#cfgCmd');
+  if(cmd){
+    const base = cmd.getAttribute('data-base') || '';
+    const next = base + (base.includes('?') ? '&' : '?') + 'node_id=' + encodeURIComponent(nodeId);
+    cmd.textContent = next;
+    const btn = cmd.parentElement && cmd.parentElement.querySelector('.copy-inline');
+    if(btn) btn.setAttribute('data-copy-address', next);
+  }
+}
+
+async function loadInstancePorts(nodeId){
+  const sel = document.querySelector('#tunnelForm select[name="remote_port"]');
+  if(!sel || !nodeId) return;
+  try{
+    const r = await api('/api/user/nodes/' + Number(nodeId) + '/ports');
+    const ports = r.ports || [];
+    const cur = sel.value;
+    sel.innerHTML = ports.length
+      ? ports.map(p => `<option value="${p.port}"${p.used ? ' disabled' : ''}${String(p.port) === String(cur) ? ' selected' : ''}>${p.port}${p.used ? '（已用）' : ''}</option>`).join('')
+      : '<option value="">该实例暂无端口</option>';
+  }catch(e){}
+}
+
 async function loadDashboard(view='overview'){
   clearAdminDashboardTimer();
   if(tunnelPreviewTimer){ clearInterval(tunnelPreviewTimer); tunnelPreviewTimer = null; }
@@ -2259,6 +2288,8 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
           <section class="card tunnel-create-card${editingTunnelId ? '' : ' hidden'}" id="tunnelCreateCard">
             <div class="section-title"><div><div class="section-kicker">CREATE TUNNEL</div><h2 id="tunnelFormTitle">${stIcon('plus')}创建隧道</h2><p id="tunnelFormHint">填好本地服务和公网访问方式，创建后重新下载 frpc.toml 并重启客户端即可生效。</p></div></div>
             <form id="tunnelForm" class="grid tunnel-create-form">
+              <input type="hidden" name="node_id" value="${selNode ? Number(selNode.id) : ''}">
+              <input type="hidden" name="plan_id" value="${selNode && selNode.planId ? Number(selNode.planId) : ''}">
               <div><label>名称</label><input name="name" value="${esc(tunnelFormDraft.name || '')}" placeholder="web" required></div>
               <div><label>类型</label><select name="proxy_type" id="proxyTypeSelect">${proxyTypeOptions}</select></div>
               <div><label>本地 IP</label><input name="local_ip" value="${esc(tunnelFormDraft.local_ip || '127.0.0.1')}" required></div>
@@ -2275,23 +2306,35 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         <aside class="instance-side">${actionCard}</aside>
       </div>`, 'dashboard-tunnels', '我的隧道');
     bindUserTunnelForm();
+    if(selNode && selNode.id) loadInstancePorts(Number(selNode.id));
     return;
   }
   if(view === 'config'){
+    let allNodes = [];
+    try{ allNodes = (await api('/api/user/nodes')).nodes || []; }catch(e){}
+    const cfgIds = [...new Set((data.my_plans || []).filter(p => p.status !== 'cancelled').map(p => Number(p.node_id)))].filter(Boolean);
+    const cfgNodes = allNodes.filter(n => cfgIds.includes(Number(n.id)));
+    const defaultNodeId = Number((cfgNodes.find(n => Number(n.id) === Number(data.node?.id)) || cfgNodes[0] || {}).id || 0);
+    const nodeSel = cfgNodes.length > 1
+      ? `<div class="config-node-pick"><label>实例节点</label><select id="cfgNodeSel" onchange="switchConfigNode(this.value)">${cfgNodes.map(n => `<option value="${n.id}"${Number(n.id) === defaultNodeId ? ' selected' : ''}>${esc(n.name)}（${esc(n.region || '')}）</option>`).join('')}</select></div>`
+      : '';
     const deployUrl = userDeployScriptUrl(data.user) || '/config/deploy-frpc.sh';
     const deployCmd = userDeployScriptCommand(data.user);
+    const cfgQuery = defaultNodeId ? ('?node_id=' + defaultNodeId) : '';
+    const deployQuery = defaultNodeId ? ('node_id=' + defaultNodeId) : '';
     app.innerHTML = appLayoutHtml(`
+      ${nodeSel}
       <div class="config-grid">
         <section class="card config-dl-card">
           <div class="section-title"><div><div class="section-kicker">FRPC</div><h2>${stIcon('file')}frpc.toml</h2></div></div>
-          <p class="muted small">包含你所有“已启用”隧道的完整配置，下载后覆盖客户端的 frpc.toml 即可。</p>
-          <a class="config-option" href="/config/frpc.toml"><span class="config-option-icon">${QICON_DOWNLOAD}</span><span class="config-option-copy"><b>下载 frpc 配置</b><small>frpc.toml · 覆盖即生效</small></span></a>
+          <p class="muted small">包含该节点下“已启用”隧道的配置，下载后覆盖客户端的 frpc.toml 即可。</p>
+          <a class="config-option" data-cfg="frpc" href="/config/frpc.toml${cfgQuery}"><span class="config-option-icon">${QICON_DOWNLOAD}</span><span class="config-option-copy"><b>下载 frpc 配置</b><small>frpc.toml · 覆盖即生效</small></span></a>
         </section>
         <section class="card config-dl-card">
           <div class="section-title"><div><div class="section-kicker">DEPLOY</div><h2>${stIcon('script')}部署脚本</h2></div></div>
           <p class="muted small">在客户端服务器上执行，自动安装 frpc、写入配置并注册服务。</p>
-          <a class="config-option" href="${esc(deployUrl)}"><span class="config-option-icon">${QICON_TUNNEL}</span><span class="config-option-copy"><b>下载 deploy-frpc.sh</b><small>一键安装并启动 frpc</small></span></a>
-          ${deployCmd ? `<div class="copy-line"><code>${esc(deployCmd)}</code><button type="button" class="copy-inline" data-copy-address="${esc(deployCmd)}">复制</button></div>` : ''}
+          <a class="config-option" data-cfg="deploy" data-token="${esc(data.user?.token || '')}" href="${esc(deployUrl)}${deployUrl.includes('?') ? '&' : '?'}${deployQuery}"><span class="config-option-icon">${QICON_TUNNEL}</span><span class="config-option-copy"><b>下载 deploy-frpc.sh</b><small>一键安装并启动 frpc</small></span></a>
+          ${deployCmd ? `<div class="copy-line"><code id="cfgCmd" data-base="${esc(deployCmd)}">${esc(deployCmd)}${deployQuery ? (deployCmd.includes('?') ? '&' : '?') + deployQuery : ''}</code><button type="button" class="copy-inline" data-copy-address="${esc(deployCmd)}${deployQuery ? (deployCmd.includes('?') ? '&' : '?') + deployQuery : ''}">复制</button></div>` : ''}
         </section>
       </div>
       <section class="card config-tip"><p class="muted small">想看/改具体内容？去 <button type="button" class="link-btn" onclick="loadDashboard('editor')">在线配置</button>，那里会根据你当前的隧道自动生成 frpc.toml。</p></section>`, 'dashboard-config', '配置下载');

@@ -1685,6 +1685,14 @@ def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int | None) 
             last_proxy_expr = "COALESCE(last_proxy_at, 0)" if "last_proxy_at" in old_tunnel_cols else "0"
             conn.execute(f"INSERT OR IGNORE INTO tunnels(id, node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at, last_proxy_at) SELECT id, node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at, {last_proxy_expr} FROM tunnels_old")
             conn.execute("DROP TABLE tunnels_old")
+    tunnel_cols2 = {r["name"] for r in conn.execute("PRAGMA table_info(tunnels)").fetchall()}
+    if "plan_id" not in tunnel_cols2:
+        conn.execute("ALTER TABLE tunnels ADD COLUMN plan_id INTEGER NOT NULL DEFAULT 0")
+    conn.execute(
+        """UPDATE tunnels SET plan_id=COALESCE((SELECT upp.user_plan_id FROM user_plan_ports upp
+           WHERE upp.user_id=tunnels.user_id AND upp.node_id=tunnels.node_id AND upp.port=tunnels.remote_port LIMIT 1), 0)
+           WHERE plan_id=0 AND remote_port>0"""
+    )
     schema = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tunnels'").fetchone()["sql"] or ""
     if "UNIQUE(user_id, name)" in schema:
         # frp 的代理名在同一个 frps（节点）内全局唯一，改为按节点去重
@@ -5791,6 +5799,26 @@ class Handler(BaseHTTPRequestHandler):
                 n["is_current"] = int(n["id"]) == current_node_id
             self.send_json({"ok": True, "nodes": nodes, "current_node_id": current_node_id})
             return
+        if path.startswith("/api/user/nodes/") and path.endswith("/ports"):
+            user_row = self.current_user
+            if not user_row:
+                self.send_json({"ok": False, "error": "unauthorized"}, 401)
+                return
+            try:
+                nid = int(path.split("/")[4])
+            except (IndexError, ValueError):
+                self.send_json({"ok": False, "error": "节点不存在"}, 400)
+                return
+            with db() as conn:
+                rows = conn.execute(
+                    """SELECT p.port,
+                              CASE WHEN t.id IS NULL THEN 0 ELSE 1 END AS used
+                       FROM ports p
+                       LEFT JOIN tunnels t ON t.node_id=p.node_id AND t.remote_port=p.port AND t.proxy_type IN ('tcp','udp')
+                       WHERE p.node_id=? AND p.user_id=? ORDER BY p.port""",
+                    (nid, int(user_row["id"]))).fetchall()
+            self.send_json({"ok": True, "ports": [{"port": int(r["port"]), "used": bool(r["used"])} for r in rows]})
+            return
         if path.startswith("/api/user/nodes/") and path.endswith("/free-ports"):
             user_row = self.current_user
             if not user_row:
@@ -6660,10 +6688,12 @@ class Handler(BaseHTTPRequestHandler):
             remote_port = int(data.get("remote_port", 0) or 0)
             custom_domains = ",".join([d.strip().lower() for d in str(data.get("custom_domains", "")).replace("\n", ",").split(",") if d.strip()])[:500]
             secret_key = str(data.get("secret_key", "")).strip()[:120]
+            node_id = int(data.get("node_id", 0) or 0) or int(node_id or 0)
+            plan_id = int(data.get("plan_id", 0) or 0)
             if not name or len(name) > 40 or not name.replace("_", "").replace("-", "").isalnum():
                 raise ValueError("隧道名称只能包含字母、数字、下划线、短横线，长度 1-40")
             if proxy_type not in ALLOWED_PROXY_TYPES:
-                audit("tunnel_rejected_protocol", user, user["node_id"], remote_port, proxy_type, "协议不在白名单")
+                audit("tunnel_rejected_protocol", user, node_id, remote_port, proxy_type, "协议不在白名单")
                 raise ValueError("协议不支持")
             if not (1 <= local_port <= 65535):
                 raise ValueError("本地端口不合法")
@@ -6679,7 +6709,21 @@ class Handler(BaseHTTPRequestHandler):
             if int(row_val(user, "banned_until", 0) or 0) > now():
                 raise ValueError("账号因异常占用带宽被封禁，暂时无法创建隧道")
             with db() as conn:
-                if user["node_id"] and node_traffic_exceeded(conn, int(user["node_id"])):
+                node_row = conn.execute("SELECT id, active FROM nodes WHERE id=?", (node_id,)).fetchone()
+                if not node_row or not int(node_row["active"] or 0):
+                    raise ValueError("实例所在节点不存在或已停用")
+                if plan_id:
+                    ok_plan = conn.execute(
+                        "SELECT 1 FROM user_plans WHERE id=? AND user_id=? AND node_id=? AND status='active'",
+                        (plan_id, user["id"], node_id)).fetchone()
+                    if not ok_plan:
+                        raise ValueError("实例不存在、已失效或不属于该节点")
+                else:
+                    pick = conn.execute(
+                        "SELECT id FROM user_plans WHERE user_id=? AND node_id=? AND status='active' ORDER BY id DESC LIMIT 1",
+                        (user["id"], node_id)).fetchone()
+                    plan_id = int(pick["id"]) if pick else 0
+                if node_id and node_traffic_exceeded(conn, int(node_id)):
                     raise ValueError("当前实例本月流量已用尽，暂时无法创建新隧道")
                 total_plans = conn.execute("SELECT COUNT(*) FROM user_plans WHERE user_id=?", (user["id"],)).fetchone()[0]
                 if total_plans and proxy_type in DOMAIN_PROXY_TYPES:
@@ -6700,28 +6744,28 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError("套餐已到期或流量已用尽，请先购买套餐")
                 if proxy_type in REMOTE_PORT_PROXY_TYPES:
                     if user["role"] != "admin":
-                        owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (user["node_id"], user["id"], remote_port)).fetchone()
+                        owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (node_id, user["id"], remote_port)).fetchone()
                         if not owned:
                             raise ValueError("这个公网端口不属于当前账号")
                     else:
                         # Admin: check port is in node range, not assigned to another user, and not already tunneled.
-                        port_row = conn.execute("SELECT user_id FROM ports WHERE node_id=? AND port=?", (user["node_id"], remote_port)).fetchone()
+                        port_row = conn.execute("SELECT user_id FROM ports WHERE node_id=? AND port=?", (node_id, remote_port)).fetchone()
                         if not port_row:
                             raise ValueError("端口不在当前节点的端口池范围内")
                         if port_row["user_id"] is not None and port_row["user_id"] != user["id"]:
                             raise ValueError("该端口已分配给其他用户")
-                        used = conn.execute("SELECT 1 FROM tunnels WHERE node_id=? AND remote_port=? AND proxy_type IN ('tcp','udp')", (user["node_id"], remote_port)).fetchone()
+                        used = conn.execute("SELECT 1 FROM tunnels WHERE node_id=? AND remote_port=? AND proxy_type IN ('tcp','udp')", (node_id, remote_port)).fetchone()
                         if used:
                             raise ValueError("该端口已被其他隧道使用")
-                        conn.execute("UPDATE ports SET user_id=? WHERE node_id=? AND port=? AND user_id IS NULL", (user["id"], user["node_id"], remote_port))
+                        conn.execute("UPDATE ports SET user_id=? WHERE node_id=? AND port=? AND user_id IS NULL", (user["id"], node_id, remote_port))
                 conn.execute(
-                    "INSERT INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (user["node_id"], user["id"], name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, now()),
+                    "INSERT INTO tunnels(node_id, user_id, plan_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (node_id, user["id"], plan_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, now()),
                 )
             detail = f"{name} -> {local_ip}:{local_port}"
             if custom_domains:
                 detail += f" domains={custom_domains}"
-            audit("tunnel_create", user, user["node_id"], remote_port or None, proxy_type, detail)
+            audit("tunnel_create", user, node_id, remote_port or None, proxy_type, detail)
             self.send_json({"ok": True})
         except sqlite3.IntegrityError:
             self.send_json({"ok": False, "error": "隧道名称或公网端口已被使用"}, 400)
@@ -7463,11 +7507,17 @@ class Handler(BaseHTTPRequestHandler):
         if user["role"] == "admin":
             self.send_json({"ok": False, "error": "管理员请在仪表盘下载模块为普通用户生成 frpc 配置"}, 403)
             return
+        q = urllib.parse.parse_qs(urlparse(self.path).query)
+        try:
+            node_id = int((q.get("node_id") or ["0"])[0] or 0)
+        except ValueError:
+            node_id = 0
+        node_id = node_id or int(user["node_id"] or 0)
         with db() as conn:
-            node = conn.execute("SELECT * FROM nodes WHERE id=?", (user["node_id"],)).fetchone()
-            tunnels = conn.execute("SELECT * FROM tunnels WHERE user_id=? ORDER BY id", (user["id"],)).fetchall()
+            node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
+            tunnels = conn.execute("SELECT * FROM tunnels WHERE user_id=? AND node_id=? ORDER BY id", (user["id"], node_id)).fetchall()
         if not node:
-            self.send_json({"ok": False, "error": "用户所属节点不存在"}, 400)
+            self.send_json({"ok": False, "error": "实例所在节点不存在"}, 400)
             return
         self.send_body(tunnel_config(user, node, tunnels).encode(), 200, "application/toml; charset=utf-8", {"Content-Disposition": 'attachment; filename="frpc.toml"'})
 
@@ -7487,11 +7537,17 @@ class Handler(BaseHTTPRequestHandler):
         if user["role"] == "admin":
             self.send_json({"ok": False, "error": "管理员请在仪表盘下载模块为普通用户生成部署脚本"}, 403)
             return
+        q = urllib.parse.parse_qs(urlparse(self.path).query)
+        try:
+            node_id = int((q.get("node_id") or ["0"])[0] or 0)
+        except ValueError:
+            node_id = 0
+        node_id = node_id or int(user["node_id"] or 0)
         with db() as conn:
-            node = conn.execute("SELECT * FROM nodes WHERE id=?", (user["node_id"],)).fetchone()
-            tunnels = conn.execute("SELECT * FROM tunnels WHERE user_id=? ORDER BY id", (user["id"],)).fetchall()
+            node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
+            tunnels = conn.execute("SELECT * FROM tunnels WHERE user_id=? AND node_id=? ORDER BY id", (user["id"], node_id)).fetchall()
         if not node:
-            self.send_json({"ok": False, "error": "用户所属节点不存在"}, 400)
+            self.send_json({"ok": False, "error": "实例所在节点不存在"}, 400)
             return
         cfg = tunnel_config(user, node, tunnels)
         script = frpc_deploy_script(cfg)
