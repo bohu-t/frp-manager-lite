@@ -4686,6 +4686,13 @@ def create_preconfigured_tunnels(conn: sqlite3.Connection, user: sqlite3.Row, no
             if not port:
                 continue
             free.remove(port)
+            # 隧道名在同一账号内唯一，重名时自动加后缀，避免静默创建失败
+            if conn.execute("SELECT 1 FROM tunnels WHERE user_id=? AND name=?", (user["id"], name)).fetchone():
+                base = name[:36]
+                suffix = 2
+                while conn.execute("SELECT 1 FROM tunnels WHERE user_id=? AND name=?", (user["id"], f"{base}-{suffix}")).fetchone():
+                    suffix += 1
+                name = f"{base}-{suffix}"
             conn.execute(
                 "INSERT INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (node_id, user["id"], name, proxy_type, local_ip, local_port, port, "", "", now()))
