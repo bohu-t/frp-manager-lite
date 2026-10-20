@@ -4528,7 +4528,7 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
     free_ports = available_ports_for_assignment(conn, node_id, need) if need else []
     if need and len(free_ports) < need:
         conn.rollback()
-        return False, f"节点端口不足，只剩 {len(free_ports)} 个可用端口"
+        return False, f"实例端口不足，只剩 {len(free_ports)} 个可用端口"
     if free_ports:
         conn.executemany("UPDATE ports SET user_id=? WHERE node_id=? AND port=?",
                          [(user["id"], node_id, r["port"]) for r in free_ports])
@@ -4574,7 +4574,7 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
         if node_id:
             chosen_node = conn.execute("SELECT id, name FROM nodes WHERE id=? AND active=1", (node_id,)).fetchone()
             if not chosen_node:
-                return False, "所选节点不存在或已停用", None
+                return False, "所选实例不存在或已停用", None
         plan_node_id = int(row_val(plan, "node_id", 0) or 0)
         if plan_node_id and plan_node_id != int(node_id or 0):
             return False, "该套餐不适用于所选节点，请重新选择", None
@@ -6312,7 +6312,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("账号因异常占用带宽被封禁，暂时无法创建隧道")
             with db() as conn:
                 if user["node_id"] and node_traffic_exceeded(conn, int(user["node_id"])):
-                    raise ValueError("当前节点本月流量已用尽，暂时无法创建新隧道")
+                    raise ValueError("当前实例本月流量已用尽，暂时无法创建新隧道")
                 total_plans = conn.execute("SELECT COUNT(*) FROM user_plans WHERE user_id=?", (user["id"],)).fetchone()[0]
                 if total_plans and proxy_type in DOMAIN_PROXY_TYPES:
                     quota_active = conn.execute(
