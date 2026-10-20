@@ -1824,3 +1824,5 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 @media (max-width:1000px){.instance-layout{grid-template-columns:1fr}.instance-side{position:static}}
 .ov-page-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
 .ov-page-head h1{margin:0}
+.my-node-section{display:block;margin-bottom:18px}
+.my-node-section>.section-title{margin-bottom:12px}

@@ -1566,7 +1566,7 @@ async function loadMyPlans(){
     </article>`;
   };
   const sections = regionNames.map(region => `
-    <section class="card my-node-section">
+    <section class="my-node-section">
       <div class="section-title"><div><h2>${stIcon('node')}${esc(region)}</h2></div></div>
       <div class="my-node-grid">${groups[region].map(cardHtml).join('')}</div>
     </section>`).join('') || `<section class="card"><div class="empty-state"><strong>还没有实例</strong><p class="muted small">去「新建实例」购买套餐后，这里会显示你的实例。</p><button type="button" onclick="loadNewNode()">新建实例</button></div></section>`;
