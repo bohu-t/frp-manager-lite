@@ -1583,7 +1583,7 @@ async function openNodeTunnels(nodeId, nodeName){
       <tbody>${rows}</tbody></table></div>` : `<div class="empty-state"><strong>这个节点还没有隧道</strong><p class="muted small">创建后即可通过公网端口访问本地服务。</p></div>`;
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1>我的节点</h1></div></div>
-    <nav class="page-crumbs"><a href="javascript:void(0)" onclick="loadMyPlans()">${stIcon('node')}我的节点</a><span class="crumb-sep">›</span><b>${esc(region)}</b></nav>
+    <nav class="page-crumbs"><a href="javascript:void(0)" onclick="loadMyPlans()">${stIcon('node')}我的节点</a><span class="crumb-sep">›</span><b>${esc(node.name || nodeName || '节点')}</b></nav>
     <section class="card">
       <div class="section-title"><div><h2>${stIcon('node')}${esc(node.name || nodeName || '节点')}</h2><p>${esc(node.server_addr || '')}${node.server_port ? ':' + esc(node.server_port) : ''}</p></div></div>
       <div class="my-node-specs">
