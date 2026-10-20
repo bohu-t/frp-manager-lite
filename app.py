@@ -2276,6 +2276,7 @@ def start_plan_usage_loop() -> None:
         time.sleep(20)
         while True:
             try:
+                auto_renew_plans_once()
                 expire_plans_once()
                 with db() as conn:
                     reclaim_expired_plan_ports(conn)
@@ -4428,6 +4429,31 @@ def claim_retained_ports(conn: sqlite3.Connection, user_id: int, new_plan_id: in
         conn.execute("UPDATE tunnels SET enabled=1 WHERE user_id=? AND node_id=? AND remote_port=?",
                      (user_id, int(r["node_id"]), int(r["port"])))
     return rows
+
+
+def auto_renew_plans_once() -> int:
+    """自动续期：套餐到期时扣积分延期；积分不足则关闭开关，让其正常到期。"""
+    renewed = 0
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM user_plans WHERE status='active' AND auto_renew=1 AND billing_mode='time' AND expires_at>0 AND expires_at<=?",
+            (now(),)).fetchall()
+        for r in rows:
+            plan = conn.execute("SELECT price_points, duration_days FROM plans WHERE id=? AND deleted=0", (r["plan_id"],)).fetchone()
+            cost = int(row_val(plan, "price_points", 0) or 0) if plan else int(r["price_points"] or 0)
+            days = int(row_val(plan, "duration_days", 0) or 0) if plan else int(r["duration_days"] or 0)
+            if days <= 0:
+                conn.execute("UPDATE user_plans SET auto_renew=0 WHERE id=?", (r["id"],))
+                continue
+            try:
+                if cost > 0:
+                    points_change(conn, int(r["user_id"]), -cost, "plan_auto_renew", f"up:{r['id']}", f"自动续期 {r['plan_name']}")
+                base = max(now(), int(r["expires_at"] or 0))
+                conn.execute("UPDATE user_plans SET expires_at=?, status='active' WHERE id=?", (base + days * 86400, r["id"]))
+                renewed += 1
+            except ValueError:
+                conn.execute("UPDATE user_plans SET auto_renew=0 WHERE id=?", (r["id"],))
+    return renewed
 
 
 def expire_plans_once() -> int:
