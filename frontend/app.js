@@ -222,12 +222,12 @@ function userDeployScriptCommand(user){
 
 function regionBadges(nodes){
   const regions = [...new Set((nodes || []).filter(n => n.active).map(n => n.region).filter(Boolean))].slice(0, 8);
-  if(!regions.length) return '<span>多地区节点</span>';
+  if(!regions.length) return '<span>多地区实例</span>';
   return regions.map(r => `<span>${esc(r)}</span>`).join('');
 }
 
 function authShell(title, subtitle, formHtml, footHtml='', nodes=[]){
-  const regionText = (nodes || []).filter(n => n.active).map(n => n.region).filter(Boolean).slice(0, 3).join('、') || '多地区节点';
+  const regionText = (nodes || []).filter(n => n.active).map(n => n.region).filter(Boolean).slice(0, 3).join('、') || '多地区实例';
   return `
     <div class="auth-page">
       <header class="auth-topbar">
@@ -914,7 +914,7 @@ async function measureClientLatency(){
   }
   [live, overviewLive].filter(Boolean).forEach(el => {
     el.textContent = `${Math.round(ms)} ms`;
-    el.title = {node:'用户→节点实测', cloudflare:'浏览器↔Cloudflare 就近节点', panel:'浏览器→面板'}[src] || '';
+    el.title = {node:'用户→实例实测', cloudflare:'浏览器↔Cloudflare 就近节点', panel:'浏览器→面板'}[src] || '';
   });
 }
 
@@ -934,7 +934,7 @@ async function fillNodeLatencies(){
   await Promise.all(addrs.map(async a => { results[a] = await measureNodeLatencyByAddr(a); }));
   els.forEach(e => {
     const ms = results[e.dataset.latencyNode];
-    if(ms != null){ e.textContent = `${Math.round(ms)} ms`; e.title = '用户→节点实测'; }
+    if(ms != null){ e.textContent = `${Math.round(ms)} ms`; e.title = '用户→实例实测'; }
   });
 }
 
@@ -1138,7 +1138,7 @@ function hostRowsHtml(hosts, admin){
 function hostFormModal(){
   document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="hostFormModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeHostForm()">
     <section class="modal-page card">
-      <div class="section-title modal-title"><div><h2>添加母鸡</h2><p>提交后由管理员审核，通过后自动创建节点。</p></div><button type="button" class="secondary modal-close" onclick="closeHostForm()">关闭 ×</button></div>
+      <div class="section-title modal-title"><div><h2>添加母鸡</h2><p>提交后由管理员审核，通过后自动创建实例。</p></div><button type="button" class="secondary modal-close" onclick="closeHostForm()">关闭 ×</button></div>
       <form id="hostForm" class="grid">
         <div><label>母鸡名称</label><input name="name" required placeholder="例如 wh-01"></div>
         <div><label>地区</label><input name="region" placeholder="例如 武汉" required></div>
@@ -1176,7 +1176,7 @@ async function loadHosts(){
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
   const hosts = data.hosts || [];
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">HOSTING</span><h1>托管中心</h1><p>登记并管理你的母鸡，审核通过后自动成为可用节点。</p></div>
+    <div class="ov-page-head"><div><span class="section-kicker">HOSTING</span><h1>托管中心</h1><p>登记并管理你的母鸡，审核通过后自动成为可用实例。</p></div>
       <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadHosts()">刷新</button><button type="button" onclick="hostFormModal()">＋ 添加母鸡</button></div></div>
     <section class="card host-rules">
       <div class="section-title"><div><h2>${stIcon('shield')}托管规则与准则</h2><p>提交前请确认可以遵守以下约定</p></div></div>
@@ -1564,7 +1564,7 @@ async function openNodeTunnels(nodeId, nodeName){
     return;
   }
   const node = nodes.find(n => Number(n.id) === Number(nodeId)) || {};
-  const region = node.region || '节点';
+  const region = node.region || '实例';
   const tunnels = (dash.tunnels || []).filter(t => Number(t.node_id) === Number(nodeId));
   const rows = tunnels.map((t, i) => `<tr>
       <td>${i + 1}</td>
@@ -1582,9 +1582,9 @@ async function openNodeTunnels(nodeId, nodeName){
       <thead><tr><th>序号</th><th>名称</th><th>协议</th><th>本地服务</th><th>公网端口</th><th>状态</th><th>操作</th></tr></thead>
       <tbody>${rows}</tbody></table></div>` : `<div class="empty-state"><strong>这个实例还没有隧道</strong><p class="muted small">创建后即可通过公网端口访问本地服务。</p></div>`;
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="loadMyPlans()">我的实例</a> <span class="crumb-inline">›</span> ${esc(node.name || nodeName || '节点')}</h1></div></div>
+    <div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="loadMyPlans()">我的实例</a> <span class="crumb-inline">›</span> ${esc(node.name || nodeName || '实例')}</h1></div></div>
     <section class="card">
-      <div class="section-title"><div><h2>${stIcon('node')}${esc(node.name || nodeName || '节点')}</h2><p>${esc(node.server_addr || '')}${node.server_port ? ':' + esc(node.server_port) : ''}</p></div></div>
+      <div class="section-title"><div><h2>${stIcon('node')}${esc(node.name || nodeName || '实例')}</h2><p>${esc(node.server_addr || '')}${node.server_port ? ':' + esc(node.server_port) : ''}</p></div></div>
       <div class="my-node-specs">
         <div><span>地区</span><b>${esc(region)}</b></div>
         <div><span>流量使用</span><b>${Number(node.month_used_gb || 0)} / ${Number(node.monthly_traffic_gb || 0) > 0 ? Number(node.monthly_traffic_gb) + ' GB' : '不限'}</b></div>
