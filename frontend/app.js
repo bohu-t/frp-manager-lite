@@ -1230,7 +1230,7 @@ async function loadHosts(){
     </section>
     <section class="card"><div class="section-title"><div><h2>${stIcon('bolt')}收益</h2><p>平台抽成 ${pct}%，结算后计入</p></div><span class="section-count">累计 ${pTotal} 积分</span></div>
       <div class="table-wrap"><table><thead><tr><th>订单</th><th>节点</th><th>成交</th><th>抽成</th><th>净收益</th><th>状态</th><th>时间</th></tr></thead><tbody>
-      ${pEarn.length ? pEarn.slice(0, 20).map(e => `<tr><td>${esc(e.order_no)}</td><td>#${e.node_id}</td><td>${e.gross_points}</td><td>${e.commission_points}</td><td><b>${e.net_points}</b></td><td>${e.status === 'settled' ? '已结算' : '待结算'}</td><td>${fmtTs(e.created_at)}</td></tr>`).join('') : '<tr><td colspan="7" class="muted">暂无收益记录</td></tr>'}
+      ${pEarn.length ? pEarn.slice(0, 20).map(e => `<tr><td>${esc(e.order_no)}</td><td>#${e.node_id}</td><td>${e.gross_points}</td><td>${e.commission_points}</td><td><b>${e.net_points}</b></td><td>${e.status === 'settled' ? '已结算' : (e.status === 'refunded' ? '已退款' : '待结算')}</td><td>${fmtTs(e.created_at)}</td></tr>`).join('') : '<tr><td colspan="7" class="muted">暂无收益记录</td></tr>'}
       </tbody></table></div>
     </section>
     <section class="card"><div class="section-title"><div><h2>${stIcon('license')}我的套餐</h2><p>${pNodes.length ? '上架后买家可在该节点购买' : '先有节点，才能上架套餐'}</p></div><button type="button" onclick="providerPlanForm()" ${pNodes.length ? '' : 'disabled'}>＋ 上架套餐</button></div>

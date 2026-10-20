@@ -81,6 +81,7 @@ RATE_WINDOW = 15 * 60
 LOGIN_RATE_LIMIT = 8
 HSTS_MAX_AGE = int(os.getenv("FML_HSTS_MAX_AGE", "0") or "0")
 PROVIDER_COMMISSION_PCT = float(os.getenv("FML_PROVIDER_COMMISSION", "10") or "10")
+PROVIDER_SETTLE_DAYS = float(os.getenv("FML_PROVIDER_SETTLE_DAYS", "7") or "7")
 REGISTER_RATE_LIMIT = 5
 # 开放注册：不要求邀请码；默认值由环境变量控制，dev 可开，生产保持关闭
 OPEN_REGISTRATION = os.getenv("FML_OPEN_REGISTRATION", "0").strip().lower() in ("1", "true", "yes", "on")
@@ -2306,6 +2307,7 @@ def start_plan_usage_loop() -> None:
         while True:
             try:
                 auto_renew_plans_once()
+                settle_provider_earnings_once()
                 expire_plans_once()
                 with db() as conn:
                     reclaim_expired_plan_ports(conn)
@@ -2750,6 +2752,11 @@ def init_db() -> None:
                 active INTEGER NOT NULL DEFAULT 1,
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS provider_debts (
+                owner_id INTEGER PRIMARY KEY,
+                points INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS provider_earnings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4660,6 +4667,73 @@ def mark_order_paid(order_no: str, transaction_id: str = "", provider: str = "")
 MAX_PLANS_PER_NODE = max(1, int(os.getenv("FML_MAX_PLANS_PER_NODE", "2") or 2))
 
 
+def refund_plans_on_node(conn: sqlite3.Connection, node_id: int, reason: str = "节点停用，按剩余价值退款") -> tuple[int, int]:
+    """节点故障/停用：按剩余天数或剩余额度退款并取消实例。"""
+    rows = conn.execute("SELECT * FROM user_plans WHERE node_id=? AND status='active'", (node_id,)).fetchall()
+    count = 0
+    total_refund = 0
+    users: set[int] = set()
+    for p in rows:
+        price = int(p["price_points"] or 0)
+        ratio = 1.0
+        if int(p["expires_at"] or 0):
+            total = max(1, int(p["duration_days"] or 0) * 86400)
+            ratio = max(0.0, min(1.0, (int(p["expires_at"]) - now()) / total))
+        elif int(p["quota_bytes"] or 0) > 0:
+            ratio = max(0.0, 1 - int(p["used_bytes"] or 0) / int(p["quota_bytes"]))
+        refund = int(round(price * ratio))
+        if refund > 0:
+            points_change(conn, int(p["user_id"]), refund, "plan_refund", f"node:{node_id}", reason)
+            total_refund += refund
+        conn.execute("UPDATE user_plans SET status='cancelled', expires_at=? WHERE id=?", (now(), p["id"]))
+        release_plan_resources(conn, p, keep_ports=False)
+        earn = conn.execute("SELECT * FROM provider_earnings WHERE order_no=?", (p["order_no"],)).fetchone()
+        if earn and earn["status"] == "settled":
+            net = int(earn["net_points"] or 0)
+            bal = int(conn.execute("SELECT points FROM users WHERE id=?", (int(earn["owner_id"]),)).fetchone()["points"] or 0)
+            deduct = min(net, bal)
+            if deduct > 0:
+                points_change(conn, int(earn["owner_id"]), -deduct, "provider_clawback", p["order_no"], f"节点 #{node_id} 退款扣回")
+            rest = net - deduct
+            if rest > 0:
+                conn.execute(
+                    "INSERT INTO provider_debts(owner_id, points, updated_at) VALUES(?,?,?) ON CONFLICT(owner_id) DO UPDATE SET points=points+excluded.points, updated_at=excluded.updated_at",
+                    (int(earn["owner_id"]), rest, now()))
+        if earn:
+            conn.execute("UPDATE provider_earnings SET status='refunded' WHERE id=?", (earn["id"],))
+        users.add(int(p["user_id"]))
+        count += 1
+    for uid in users:
+        recalc_user_entitlements(conn, uid)
+    return count, total_refund
+
+
+def settle_provider_earnings_once() -> int:
+    """把超过结算期的待结算收益转入供给方积分余额。"""
+    if PROVIDER_SETTLE_DAYS < 0:
+        return 0
+    cutoff = now() - int(PROVIDER_SETTLE_DAYS * 86400)
+    settled = 0
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM provider_earnings WHERE status='pending' AND created_at<=?", (cutoff,)).fetchall()
+        for r in rows:
+            net = int(r["net_points"] or 0)
+            owner = int(r["owner_id"])
+            debt_row = conn.execute("SELECT points FROM provider_debts WHERE owner_id=?", (owner,)).fetchone()
+            debt = int(debt_row["points"] or 0) if debt_row else 0
+            if debt > 0 and net > 0:
+                offset = min(net, debt)
+                net -= offset
+                debt -= offset
+                conn.execute("UPDATE provider_debts SET points=?, updated_at=? WHERE owner_id=?", (debt, now(), owner))
+            if net > 0:
+                points_change(conn, owner, net, "provider_income", r["order_no"], f"节点 #{r['node_id']} 收益")
+            conn.execute("UPDATE provider_earnings SET status='settled' WHERE id=?", (r["id"],))
+            settled += 1
+    return settled
+
+
 def record_provider_earning(conn: sqlite3.Connection, order_no: str, node_id: int, gross_points: int) -> None:
     """记录供给方收益（平台抽成后）。节点无归属（平台自营）时不记录。"""
     if not node_id or gross_points <= 0:
@@ -5129,6 +5203,7 @@ def review_host_application(admin: sqlite3.Row, host_id: int, action: str, reaso
                          (admin["id"], now(), now(), host_id))
             if host["node_id"]:
                 conn.execute("UPDATE nodes SET active=0 WHERE id=?", (int(host["node_id"]),))
+                refund_plans_on_node(conn, int(host["node_id"]), "节点被平台下架，按剩余价值退款")
             return True, "已加入黑名单"
         if host["status"] == "approved" and host["node_id"]:
             return False, "该申请已通过"
@@ -5822,8 +5897,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/user/provider/earnings":
             with db() as conn:
                 rows = conn.execute("SELECT * FROM provider_earnings WHERE owner_id=? ORDER BY id DESC LIMIT 100", (int(user["id"]),)).fetchall()
-                total = conn.execute("SELECT COALESCE(SUM(net_points),0) FROM provider_earnings WHERE owner_id=?", (int(user["id"]),)).fetchone()[0]
-                self.send_json({"ok": True, "earnings": [row_dict(r) for r in rows], "total_net": int(total or 0), "commission_pct": PROVIDER_COMMISSION_PCT})
+                total = conn.execute("SELECT COALESCE(SUM(net_points),0) FROM provider_earnings WHERE owner_id=? AND status IN ('pending','settled')", (int(user["id"]),)).fetchone()[0]
+                debt_row = conn.execute("SELECT points FROM provider_debts WHERE owner_id=?", (int(user["id"]),)).fetchone()
+                self.send_json({"ok": True, "earnings": [row_dict(r) for r in rows], "total_net": int(total or 0), "debt": int(row_val(debt_row, "points", 0) or 0), "commission_pct": PROVIDER_COMMISSION_PCT})
             return
         if path == "/api/user/provider/nodes":
             with db() as conn:
@@ -7355,6 +7431,9 @@ class Handler(BaseHTTPRequestHandler):
         node_id = int(data.get("id", 0))
         with db() as conn:
             conn.execute("UPDATE nodes SET active=CASE active WHEN 1 THEN 0 ELSE 1 END WHERE id=?", (node_id,))
+            row = conn.execute("SELECT active FROM nodes WHERE id=?", (node_id,)).fetchone()
+            if row and not int(row["active"] or 0):
+                refund_plans_on_node(conn, node_id)
         self.send_json({"ok": True})
 
     def admin_node_delete(self, data: dict[str, Any]) -> None:
