@@ -2154,7 +2154,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
     const myPlans = (data.my_plans || []).filter(p => !selNode || Number(p.node_id) === Number(selNode.id));
     const plan = (selNode && selNode.planId ? myPlans.find(p => Number(p.id) === Number(selNode.planId)) : null) || myPlans.find(p => p.status === 'active' && !p.expired) || myPlans[0] || null;
     const planPorts = plan && Array.isArray(plan.ports) ? plan.ports.map(Number) : [];
-    const visibleTunnels = planPorts.length
+    const visibleTunnels = plan
       ? (data.tunnels || []).filter(t => planPorts.includes(Number(t.remote_port || 0)))
       : (selNode ? (data.tunnels || []).filter(t => Number(t.node_id) === Number(selNode.id)) : (data.tunnels || []));
     const instanceTunnelRows = visibleTunnels.map(tunnelRowHtml).join('') || '<div class="empty-state"><strong>还没有隧道</strong><p class="muted small">点击右侧「新建隧道」创建第一条映射。</p></div>';
