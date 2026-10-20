@@ -4628,7 +4628,11 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
         if not ok:
             conn.rollback()
             return False, msg, None
-        created_tunnels = create_preconfigured_tunnels(conn, user, int(node_id or 0), tunnels or [], int(plan["max_ports"] or 0))
+        new_plan_row = conn.execute("SELECT id FROM user_plans WHERE order_no=? ORDER BY id DESC LIMIT 1", (order_no,)).fetchone()
+        allowed_ports = [int(x["port"]) for x in conn.execute(
+            "SELECT port FROM user_plan_ports WHERE user_plan_id=? AND release_at=0 ORDER BY port",
+            (new_plan_row["id"],)).fetchall()] if new_plan_row else []
+        created_tunnels = create_preconfigured_tunnels(conn, user, int(node_id or 0), tunnels or [], int(plan["max_ports"] or 0), allowed_ports)
         conn.execute("UPDATE orders SET status='paid', paid_at=?, updated_at=? WHERE id=?", (now(), now(), order["id"]))
         provision_msg = msg
     with db() as conn:
@@ -4640,11 +4644,11 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
     return True, ("购买成功，已叠加到原套餐" if provision_msg == "已叠加到原套餐" else "购买成功，套餐已开通"), payload
 
 
-def create_preconfigured_tunnels(conn: sqlite3.Connection, user: sqlite3.Row, node_id: int, items: list[dict[str, Any]], max_ports: int) -> list[dict[str, Any]]:
-    """开通后按用户预配置创建隧道，端口从该账号已分配端口中选择。"""
+def create_preconfigured_tunnels(conn: sqlite3.Connection, user: sqlite3.Row, node_id: int, items: list[dict[str, Any]], max_ports: int, allowed_ports: list[int] | None = None) -> list[dict[str, Any]]:
+    """开通后按用户预配置创建隧道，端口优先使用本次套餐分配的端口。"""
     if not items or not node_id:
         return []
-    owned = [int(r["port"]) for r in conn.execute(
+    owned = [int(p) for p in (allowed_ports or [])] or [int(r["port"]) for r in conn.execute(
         "SELECT port FROM ports WHERE node_id=? AND user_id=? ORDER BY port", (node_id, user["id"])).fetchall()]
     used = {int(r["remote_port"]) for r in conn.execute(
         "SELECT remote_port FROM tunnels WHERE node_id=? AND proxy_type IN ('tcp','udp') AND remote_port>0", (node_id,)).fetchall()}
@@ -5603,6 +5607,8 @@ class Handler(BaseHTTPRequestHandler):
                             "SELECT COALESCE(MAX(release_at),0) FROM user_plan_ports WHERE user_plan_id=?", (r["id"],)).fetchone()[0] or 0),
                         "paused": False,
                         "auto_renew": int(row_val(r, "auto_renew", 0) or 0),
+                        "ports": [int(x["port"]) for x in conn.execute(
+                            "SELECT port FROM user_plan_ports WHERE user_plan_id=? AND release_at=0 ORDER BY port", (r["id"],)).fetchall()],
                     })
             node_payload = node_public(node) if node else None
             if node_payload:

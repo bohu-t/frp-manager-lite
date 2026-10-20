@@ -1546,7 +1546,7 @@ async function loadMyPlans(){
     const limitGb = Number(n.monthly_traffic_gb || 0);
     const quotaText = p.quota_gb > 0 ? `${p.used_gb} / ${p.quota_gb} GB` : '不限量';
     const expireText = p.billing_mode === 'traffic' ? '按流量计费' : (p.expires_at ? p.expires_text : '不限期');
-    return `<article class="my-node-card" onclick="openInstanceTunnels(${Number(p.node_id || 0)}, '${esc(n.name || '实例')}')">
+    return `<article class="my-node-card" onclick="openInstanceTunnels(${Number(p.node_id || 0)}, '${esc(n.name || '实例')}', ${Number(p.id)}, '${esc(p.plan_name || '')}')">
       <div class="my-node-head">
         <div class="my-node-title"><span class="my-node-region">${esc(n.region || '未分配')}</span><b>${esc(n.name || '实例 ' + (p.node_id || ''))}</b><small>${esc(p.plan_name || '')}</small></div>
         <span class="status-badge ${statusClass}"><i></i>${statusText}</span>
@@ -1577,8 +1577,8 @@ async function loadMyPlans(){
   `, 'dashboard-myplans', '我的实例');
 }
 
-function openInstanceTunnels(nodeId, nodeName){
-  window.__selectedNode = { id: Number(nodeId || 0), name: nodeName || '' };
+function openInstanceTunnels(nodeId, nodeName, planId, planName){
+  window.__selectedNode = { id: Number(nodeId || 0), name: nodeName || '', planId: Number(planId || 0), planName: planName || '' };
   loadDashboard('tunnels');
 }
 
@@ -1992,7 +1992,7 @@ async function loadDashboard(view='overview'){
       ${usedPorts ? `<div><strong>已用的端口：</strong>${usedPorts}</div>` : '<p class="muted small">暂无已使用的端口</p>'}`;
   }
   lastTunnels = data.tunnels || [];
-  const tunnelRows = data.tunnels.map(t => {
+  const tunnelRowHtml = (t) => {
     const endpointRaw = tunnelEndpointText(t, data.frps);
     const endpointScheme = t.proxy_type === 'https' ? 'https://' : (['http','tcp'].includes(t.proxy_type) ? 'http://' : '');
     const endpointShown = (endpointScheme && endpointRaw && endpointRaw !== '-') ? endpointScheme + endpointRaw : endpointRaw;
@@ -2022,7 +2022,8 @@ async function loadDashboard(view='overview'){
         </span>
       </footer>
     </article>`;
-  }).join('') || `<div class="empty-state"><strong>还没有隧道</strong><p class="muted small">创建第一个隧道后，就能在这里查看本地服务、公网入口和运行状态。</p><button onclick="loadDashboard('tunnels')">新建隧道</button></div>`;
+  };
+  const tunnelRows = data.tunnels.map(tunnelRowHtml).join('') || `<div class="empty-state"><strong>还没有隧道</strong><p class="muted small">创建第一个隧道后，就能在这里查看本地服务、公网入口和运行状态。</p><button onclick="loadDashboard('tunnels')">新建隧道</button></div>`;
   const tunnelPreviewRows = data.tunnels.map(t => {
     const endpointRaw = tunnelEndpointText(t, data.frps);
     const endpointScheme = t.proxy_type === 'https' ? 'https://' : (['http','tcp'].includes(t.proxy_type) ? 'http://' : '');
@@ -2149,9 +2150,14 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
   }
   if(view === 'tunnels'){
     const selNode = window.__selectedNode;
-    const crumb = selNode ? `<div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="loadMyPlans()">我的实例</a> <span class="crumb-inline">›</span> ${esc(selNode.name)}</h1></div></div>` : '';
+    const crumb = selNode ? `<div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="loadMyPlans()">我的实例</a> <span class="crumb-inline">›</span> ${esc(selNode.name)}</h1>${selNode.planName ? `<p class="muted small" style="margin:4px 0 0">套餐：${esc(selNode.planName)}</p>` : ''}</div></div>` : '';
     const myPlans = (data.my_plans || []).filter(p => !selNode || Number(p.node_id) === Number(selNode.id));
-    const plan = myPlans.find(p => p.status === 'active' && !p.expired) || myPlans[0] || null;
+    const plan = (selNode && selNode.planId ? myPlans.find(p => Number(p.id) === Number(selNode.planId)) : null) || myPlans.find(p => p.status === 'active' && !p.expired) || myPlans[0] || null;
+    const planPorts = plan && Array.isArray(plan.ports) ? plan.ports.map(Number) : [];
+    const visibleTunnels = planPorts.length
+      ? (data.tunnels || []).filter(t => planPorts.includes(Number(t.remote_port || 0)))
+      : (selNode ? (data.tunnels || []).filter(t => Number(t.node_id) === Number(selNode.id)) : (data.tunnels || []));
+    const instanceTunnelRows = visibleTunnels.map(tunnelRowHtml).join('') || '<div class="empty-state"><strong>还没有隧道</strong><p class="muted small">点击右侧「新建隧道」创建第一条映射。</p></div>';
     const planValue = plan ? (plan.billing_mode === 'traffic' ? `${plan.used_gb} / ${plan.quota_gb} GB` : (plan.expires_at ? plan.expires_text : '不限期')) : '-';
     const actionCard = plan ? `<section class="card instance-actions">
         <div class="section-title"><div><div class="section-kicker">ACTIONS</div><h2>${stIcon('bolt')}操作</h2></div></div>
@@ -2183,7 +2189,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
               <div class="form-actions tunnel-form-actions"><button id="tunnelSubmitBtn">创建隧道</button><button type="button" class="secondary" onclick="resetTunnelForm()">清空重填</button><button type="button" class="secondary hidden" id="tunnelCancelEditBtn" onclick="cancelTunnelEdit()">取消修改</button></div>
             </form>
           </section>
-          <section class="card tunnel-list-section"><div class="section-title"><div><div class="section-kicker">TUNNELS</div><h2>${stIcon('tunnel')}隧道列表</h2><p>一张卡片对应一条映射；改完配置请重新下载 frpc.toml 并重启客户端。</p></div><span class="section-count">${data.tunnels.length} 条隧道</span></div><div class="tc-grid">${tunnelRows}</div></section>
+          <section class="card tunnel-list-section"><div class="section-title"><div><div class="section-kicker">TUNNELS</div><h2>${stIcon('tunnel')}隧道列表</h2><p>一张卡片对应一条映射；改完配置请重新下载 frpc.toml 并重启客户端。</p></div><span class="section-count">${visibleTunnels.length} 条隧道</span></div><div class="tc-grid">${instanceTunnelRows}</div></section>
         </div>
         <aside class="instance-side">${actionCard}</aside>
       </div>`, 'dashboard-tunnels', '我的隧道');
