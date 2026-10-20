@@ -1572,7 +1572,7 @@ async function loadMyPlans(){
     </section>`).join('') || `<section class="card"><div class="empty-state"><strong>还没有实例</strong><p class="muted small">去「新建实例」购买套餐后，这里会显示你的实例。</p><button type="button" onclick="loadNewNode()">新建实例</button></div></section>`;
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1>我的实例</h1></div>
-      <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadNewNode()">新建实例</button></div></div>
+      <div class="row" style="gap:10px;margin-left:auto"><button type="button" onclick="loadNewNode()">新建实例</button></div></div>
     ${sections}
   `, 'dashboard-myplans', '我的实例');
 }

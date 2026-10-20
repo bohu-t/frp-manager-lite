@@ -1822,3 +1822,5 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .instance-switch input{width:18px;height:18px}
 .instance-cancel{width:100%}
 @media (max-width:1000px){.instance-layout{grid-template-columns:1fr}.instance-side{position:static}}
+.ov-page-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+.ov-page-head h1{margin:0}
