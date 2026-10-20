@@ -80,6 +80,7 @@ SOFTWARE_LICENSE_REQUIRED = True  # always enforced — no env-var off switch
 RATE_WINDOW = 15 * 60
 LOGIN_RATE_LIMIT = 8
 HSTS_MAX_AGE = int(os.getenv("FML_HSTS_MAX_AGE", "0") or "0")
+PROVIDER_COMMISSION_PCT = float(os.getenv("FML_PROVIDER_COMMISSION", "10") or "10")
 REGISTER_RATE_LIMIT = 5
 # 开放注册：不要求邀请码；默认值由环境变量控制，dev 可开，生产保持关闭
 OPEN_REGISTRATION = os.getenv("FML_OPEN_REGISTRATION", "0").strip().lower() in ("1", "true", "yes", "on")
@@ -2750,6 +2751,17 @@ def init_db() -> None:
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS provider_earnings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_no TEXT NOT NULL UNIQUE,
+                node_id INTEGER NOT NULL,
+                owner_id INTEGER NOT NULL,
+                gross_points INTEGER NOT NULL DEFAULT 0,
+                commission_points INTEGER NOT NULL DEFAULT 0,
+                net_points INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at INTEGER NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 order_no TEXT NOT NULL UNIQUE,
@@ -4648,6 +4660,22 @@ def mark_order_paid(order_no: str, transaction_id: str = "", provider: str = "")
 MAX_PLANS_PER_NODE = max(1, int(os.getenv("FML_MAX_PLANS_PER_NODE", "2") or 2))
 
 
+def record_provider_earning(conn: sqlite3.Connection, order_no: str, node_id: int, gross_points: int) -> None:
+    """记录供给方收益（平台抽成后）。节点无归属（平台自营）时不记录。"""
+    if not node_id or gross_points <= 0:
+        return
+    node = conn.execute("SELECT owner_id FROM nodes WHERE id=?", (node_id,)).fetchone()
+    owner_id = int(row_val(node, "owner_id", 0) or 0) if node else 0
+    if owner_id <= 0:
+        return
+    pct = max(0.0, min(100.0, PROVIDER_COMMISSION_PCT))
+    commission = int(round(gross_points * pct / 100))
+    net = max(0, gross_points - commission)
+    conn.execute(
+        "INSERT OR IGNORE INTO provider_earnings(order_no, node_id, owner_id, gross_points, commission_points, net_points, status, created_at) VALUES(?,?,?,?,?,?,?,?)",
+        (order_no, node_id, owner_id, gross_points, commission, net, "pending", now()))
+
+
 def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: int = 0, tunnels: list[dict[str, Any]] | None = None) -> tuple[bool, str, dict[str, Any] | None]:
     """积分购买套餐：用户自选节点，扣积分后立即开通。"""
     with db() as conn:
@@ -4689,6 +4717,7 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
             "SELECT port FROM user_plan_ports WHERE user_plan_id=? AND release_at=0 ORDER BY port",
             (new_plan_row["id"],)).fetchall()] if new_plan_row else []
         created_tunnels = create_preconfigured_tunnels(conn, user, int(node_id or 0), tunnels or [], int(plan["max_ports"] or 0), allowed_ports)
+        record_provider_earning(conn, order_no, int(node_id or 0), int(plan["price_points"] or 0))
         conn.execute("UPDATE orders SET status='paid', paid_at=?, updated_at=? WHERE id=?", (now(), now(), order["id"]))
         provision_msg = msg
     with db() as conn:
@@ -4952,6 +4981,64 @@ def host_public(row: sqlite3.Row) -> dict[str, Any]:
         "reviewed_at": int(row["reviewed_at"] or 0),
         "created_at": int(row["created_at"] or 0),
     }
+
+
+def provider_plan_save(user: sqlite3.Row, data: dict[str, Any]) -> tuple[bool, str]:
+    """供给方在自己的节点上架/修改套餐（写入 plans 表，绑定节点）。"""
+    try:
+        pid = int(data.get("id", 0) or 0)
+        node_id = int(data.get("node_id", 0) or 0)
+        price = int(data.get("price_points", 0) or 0)
+        max_ports = int(data.get("max_ports", 1) or 0)
+        days = int(data.get("duration_days", 0) or 0)
+        traffic_gb = float(data.get("traffic_limit_gb", 0) or 0)
+        bandwidth = int(data.get("bandwidth_limit_mbps", 0) or 0)
+    except (TypeError, ValueError):
+        return False, "表单数值格式不正确"
+    name = str(data.get("name", "")).strip()
+    mode = str(data.get("billing_mode", "time") or "time").lower()
+    if mode not in ("time", "traffic"):
+        return False, "计费方式不合法"
+    if not name or len(name) > 40:
+        return False, "套餐名称不能为空且不超过 40 字"
+    if price < 0 or price > 1_000_000:
+        return False, "价格必须在 0-1000000 积分之间"
+    if max_ports < 1 or max_ports > 100:
+        return False, "端口数量必须在 1-100 之间"
+    if mode == "time":
+        if days < 1 or days > 30:
+            return False, "时间套餐时长必须在 1-30 天之间"
+        traffic_gb = 0
+    else:
+        days = 0
+        if traffic_gb <= 0 or traffic_gb > 1_000_000:
+            return False, "流量套餐必须填写大于 0 的流量额度"
+    if bandwidth < 0 or bandwidth > 10_000:
+        return False, "带宽上限不合法"
+    traffic_bytes = int(traffic_gb * 1024 ** 3)
+    with db() as conn:
+        node = conn.execute("SELECT id, owner_id FROM nodes WHERE id=?", (node_id,)).fetchone()
+        if not node or int(node["owner_id"] or 0) != int(user["id"]):
+            return False, "只能在自己的节点上架套餐"
+        if pid:
+            row = conn.execute(
+                "SELECT p.id FROM plans p JOIN nodes n ON n.id=p.node_id WHERE p.id=? AND n.owner_id=? AND p.deleted=0",
+                (pid, int(user["id"]))).fetchone()
+            if not row:
+                return False, "套餐不存在或无权修改"
+            conn.execute(
+                """UPDATE plans SET name=?, billing_mode=?, price_points=?, max_ports=?, traffic_limit_bytes=?,
+                   bandwidth_limit_kbps=?, duration_days=?, node_id=?, active=? WHERE id=?""",
+                (name, mode, price, max_ports, traffic_bytes, bandwidth * 1000 // 8, days, node_id,
+                 1 if data.get("active", True) else 0, pid))
+            return True, "套餐已更新"
+        conn.execute(
+            """INSERT INTO plans(seq_no, deleted, name, billing_mode, price_cents, price_points, max_ports,
+               traffic_limit_bytes, bandwidth_limit_kbps, duration_days, node_id, note, fair_use_note, active, sort_order, created_at)
+               VALUES(0,0,?,?,0,?,?,?,?,?,?,?,?,?,0,?)""",
+            (name, mode, price, max_ports, traffic_bytes, bandwidth * 1000 // 8, days, node_id,
+             f"供给方套餐（{user['username']}）", "", 1 if data.get("active", True) else 0, now()))
+        return True, "套餐已上架"
 
 
 def provider_nodes_payload(conn: sqlite3.Connection, user_id: int) -> list[dict[str, Any]]:
@@ -5725,6 +5812,19 @@ class Handler(BaseHTTPRequestHandler):
                 node_payload["latency_ms"] = node_payload.get("auth_latency_ms")
             self.send_json({"ok": True, "version": APP_VERSION, "uptime_seconds": int(time.time() - SERVER_START_TS), "latest_version": panel_latest_version(), "update_link": PANEL_UPDATE_LINK, "user": public_user(user), "software_license": sw_license, "node": node_payload, "ports": ports_display, "port_stats": port_stats, "tunnels": tunnel_rows, "my_plans": my_plans, "payment": payment_public(payment_config(conn)), "frps_user_dashboard": user_dashboard, "allowed_proxy_types": PROXY_TYPE_ORDER, "frps": {"addr": node["server_addr"] if node else FRP_SERVER_ADDR, "port": node["server_port"] if node else FRP_SERVER_PORT}})
             return
+        if path == "/api/user/provider/plans":
+            with db() as conn:
+                rows = conn.execute(
+                    """SELECT p.* FROM plans p JOIN nodes n ON n.id=p.node_id
+                       WHERE n.owner_id=? AND p.deleted=0 ORDER BY p.id DESC""", (int(user["id"]),)).fetchall()
+                self.send_json({"ok": True, "plans": [plan_public(r) for r in rows]})
+            return
+        if path == "/api/user/provider/earnings":
+            with db() as conn:
+                rows = conn.execute("SELECT * FROM provider_earnings WHERE owner_id=? ORDER BY id DESC LIMIT 100", (int(user["id"]),)).fetchall()
+                total = conn.execute("SELECT COALESCE(SUM(net_points),0) FROM provider_earnings WHERE owner_id=?", (int(user["id"]),)).fetchone()[0]
+                self.send_json({"ok": True, "earnings": [row_dict(r) for r in rows], "total_net": int(total or 0), "commission_pct": PROVIDER_COMMISSION_PCT})
+            return
         if path == "/api/user/provider/nodes":
             with db() as conn:
                 self.send_json({"ok": True, "nodes": provider_nodes_payload(conn, int(user["id"]))})
@@ -6110,6 +6210,33 @@ class Handler(BaseHTTPRequestHandler):
             if ok:
                 audit("host_apply", user, None, None, "", str(data.get("name", "")))
             self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg}, 200 if ok else 400)
+            return
+
+        if path == "/api/user/provider/plans/save":
+            user = self.require_user()
+            if not user:
+                return
+            ok, msg = provider_plan_save(user, data)
+            self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg}, 200 if ok else 400)
+            return
+
+        if path == "/api/user/provider/plans/delete":
+            user = self.require_user()
+            if not user:
+                return
+            try:
+                pid = int(data.get("id", 0))
+            except (TypeError, ValueError):
+                pid = 0
+            with db() as conn:
+                row = conn.execute(
+                    "SELECT p.id FROM plans p JOIN nodes n ON n.id=p.node_id WHERE p.id=? AND n.owner_id=? AND p.deleted=0",
+                    (pid, int(user["id"]))).fetchone()
+                if not row:
+                    self.send_json({"ok": False, "error": "套餐不存在或无权操作"}, 404)
+                    return
+                conn.execute("UPDATE plans SET deleted=1, active=0 WHERE id=?", (pid,))
+            self.send_json({"ok": True, "message": "套餐已下架"})
             return
 
         if path == "/api/user/plans/cancel":

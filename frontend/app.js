@@ -1199,13 +1199,22 @@ function closeHostForm(){ const el = document.querySelector('#hostFormModal'); i
 
 async function loadHosts(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
-  let data, pdata;
+  let data, pdata, plData, eData;
   try{
-    [data, pdata] = await Promise.all([api('/api/user/hosts'), api('/api/user/provider/nodes').catch(() => ({nodes: []}))]);
+    [data, pdata, plData, eData] = await Promise.all([
+      api('/api/user/hosts'),
+      api('/api/user/provider/nodes').catch(() => ({nodes: []})),
+      api('/api/user/provider/plans').catch(() => ({plans: []})),
+      api('/api/user/provider/earnings').catch(() => ({earnings: [], total_net: 0, commission_pct: 10}))
+    ]);
   }
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
   const hosts = data.hosts || [];
   const pNodes = pdata.nodes || [];
+  const pPlans = plData.plans || [];
+  const pEarn = eData.earnings || [];
+  const pTotal = Number(eData.total_net || 0);
+  const pct = Number(eData.commission_pct ?? 10);
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">HOSTING</span><h1>托管中心</h1><p>登记并管理你的母鸡，审核通过后自动成为可用实例。</p></div>
       <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadHosts()">刷新</button><button type="button" onclick="hostFormModal()">＋ 添加母鸡</button></div></div>
@@ -1218,9 +1227,72 @@ async function loadHosts(){
         ${pNodes.map((n, i) => `<tr><td>${i + 1}</td><td><b>${esc(n.name)}</b></td><td>${esc(n.region)}</td><td>${esc(n.server_addr)}:${n.server_port}</td><td>${n.ports_used} / ${n.ports_total}</td><td>${fmtBytes(n.month_used_bytes)} / ${n.monthly_traffic_bytes > 0 ? fmtBytes(n.monthly_traffic_bytes) : '不限'}</td><td>${n.active_plans}</td><td><span class="status-badge ${n.active ? 'ok' : 'bad'}"><i></i>${n.active ? '在线' : '停用'}</span></td></tr>`).join('')}
       </tbody></table></div>
     </section>` : ''}
+    ${pNodes.length ? `<section class="card"><div class="section-title"><div><h2>${stIcon('bolt')}收益</h2><p>平台抽成 ${pct}%，结算后计入</p></div><span class="section-count">累计 ${pTotal} 积分</span></div>
+      <div class="table-wrap"><table><thead><tr><th>订单</th><th>节点</th><th>成交</th><th>抽成</th><th>净收益</th><th>状态</th><th>时间</th></tr></thead><tbody>
+      ${pEarn.length ? pEarn.slice(0, 20).map(e => `<tr><td>${esc(e.order_no)}</td><td>#${e.node_id}</td><td>${e.gross_points}</td><td>${e.commission_points}</td><td><b>${e.net_points}</b></td><td>${e.status === 'settled' ? '已结算' : '待结算'}</td><td>${fmtTs(e.created_at)}</td></tr>`).join('') : '<tr><td colspan="7" class="muted">暂无收益记录</td></tr>'}
+      </tbody></table></div>
+    </section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}我的套餐</h2><p>上架后买家可在该节点购买</p></div><button type="button" onclick="providerPlanForm()">＋ 上架套餐</button></div>
+      <div class="table-wrap"><table><thead><tr><th>序号</th><th>名称</th><th>节点</th><th>计费</th><th>价格</th><th>端口</th><th>时长/流量</th><th>状态</th><th>操作</th></tr></thead><tbody>
+      ${pPlans.length ? pPlans.map((pl, i) => `<tr><td>${i + 1}</td><td><b>${esc(pl.name)}</b></td><td>${esc((pNodes.find(n => Number(n.id) === Number(pl.node_id)) || {}).name || ('#' + pl.node_id))}</td><td>${pl.billing_mode === 'traffic' ? '流量' : '时间'}</td><td>${pl.price_points} 积分</td><td>${pl.max_ports}</td><td>${pl.billing_mode === 'traffic' ? pl.traffic_limit_gb + ' GB' : pl.duration_days + ' 天'}</td><td><span class="status-badge ${pl.active ? 'ok' : 'bad'}"><i></i>${pl.active ? '在售' : '下架'}</span></td><td class="actions node-actions"><button type="button" class="node-action" onclick='providerPlanForm(${pl.id})'>编辑</button><button type="button" class="node-action node-action-danger" onclick="providerPlanDelete(${pl.id})">下架</button></td></tr>`).join('') : '<tr><td colspan="9" class="muted">还没有上架套餐</td></tr>'}
+      </tbody></table></div>
+    </section>` : ''}
     <section class="card"><div class="section-title"><div><h2>${stIcon('cloud')}我的托管</h2><p>共 ${hosts.length} 条记录</p></div></div>
       <table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>配置</th><th>带宽 / 流量</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${hostRowsHtml(hosts, false)}</tbody></table>
     </section>`, 'dashboard-hosts', '托管中心');
+}
+
+async function providerPlanForm(id){
+  let nodes = [];
+  try{ nodes = (await api('/api/user/provider/nodes')).nodes || []; }catch(e){ show(e.message, true); return; }
+  if(!nodes.length){ show('还没有已接入的节点', true); return; }
+  let plan = { id: 0, name: '', node_id: nodes[0].id, price_points: 10, max_ports: 1, billing_mode: 'time', duration_days: 30, traffic_limit_gb: 0, bandwidth_limit_mbps: 0, active: 1 };
+  if(id){
+    const all = (await api('/api/user/provider/plans')).plans || [];
+    plan = all.find(p => Number(p.id) === Number(id)) || plan;
+  }
+  const nodeOpts = nodes.map(n => `<option value="${n.id}"${Number(plan.node_id) === Number(n.id) ? ' selected' : ''}>${esc(n.name)}（${esc(n.region)}）</option>`).join('');
+  document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="providerPlanModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeProviderPlan()">
+    <section class="modal-page card app-dialog">
+      <div class="section-title modal-title"><div><h2>${id ? '编辑套餐' : '上架套餐'}</h2><p>价格由你定，平台抽成见收益页</p></div></div>
+      <form id="providerPlanForm" class="grid">
+        <div><label>节点</label><select name="node_id">${nodeOpts}</select></div>
+        <div><label>名称</label><input name="name" value="${esc(plan.name || '')}" maxlength="40" required></div>
+        <div><label>价格（积分）</label><input name="price_points" type="number" min="0" value="${Number(plan.price_points || 0)}" required></div>
+        <div><label>端口数</label><input name="max_ports" type="number" min="1" max="100" value="${Number(plan.max_ports || 1)}" required></div>
+        <div><label>计费方式</label><select name="billing_mode" id="ppMode"><option value="time"${plan.billing_mode !== 'traffic' ? ' selected' : ''}>时间</option><option value="traffic"${plan.billing_mode === 'traffic' ? ' selected' : ''}>流量</option></select></div>
+        <div id="ppDays"><label>时长（天，≤30）</label><input name="duration_days" type="number" min="1" max="30" value="${Number(plan.duration_days || 30)}"></div>
+        <div id="ppTraffic" class="hidden"><label>流量额度（GB）</label><input name="traffic_limit_gb" type="number" min="1" value="${Number(plan.traffic_limit_gb || 0)}"></div>
+        <div><label>带宽（Mbps，0 不限）</label><input name="bandwidth_limit_mbps" type="number" min="0" value="${Number(plan.bandwidth_limit_mbps || 0)}"></div>
+        <div class="form-actions" style="grid-column:1/-1"><button type="button" class="secondary" onclick="closeProviderPlan()">取消</button><button type="submit">保存</button></div>
+      </form>
+    </section></div>`);
+  const form = document.querySelector('#providerPlanForm');
+  const modeSel = form.querySelector('#ppMode');
+  const syncMode = () => {
+    const traffic = modeSel.value === 'traffic';
+    form.querySelector('#ppDays').classList.toggle('hidden', traffic);
+    form.querySelector('#ppTraffic').classList.toggle('hidden', !traffic);
+  };
+  modeSel.onchange = syncMode; syncMode();
+  form.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const fd = Object.fromEntries(new FormData(form));
+    const body = { id: Number(id || 0), ...fd };
+    body.active = 1;
+    try{
+      const r = await api('/api/user/provider/plans/save', {method:'POST', body});
+      closeProviderPlan(); show(r.message || '已保存'); await loadHosts();
+    }catch(err){ show(err.message || '保存失败', true); }
+  };
+}
+
+function closeProviderPlan(){ const el = document.querySelector('#providerPlanModal'); if(el) el.remove(); }
+
+async function providerPlanDelete(id){
+  if(!await appConfirm('下架后买家将无法购买该套餐，确认下架？', {title:'下架套餐', okText:'确认下架', danger:true})) return;
+  try{ const r = await api('/api/user/provider/plans/delete', {method:'POST', body:{id:Number(id)}}); show(r.message || '已下架'); await loadHosts(); }
+  catch(err){ show(err.message || '操作失败', true); }
 }
 
 async function loadAdminHosts(){
