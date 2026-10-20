@@ -1518,7 +1518,7 @@ async function loadMyPlans(){
     const limitGb = Number(n.monthly_traffic_gb || 0);
     const quotaText = p.quota_gb > 0 ? `${p.used_gb} / ${p.quota_gb} GB` : '不限量';
     const expireText = p.billing_mode === 'traffic' ? '按流量计费' : (p.expires_at ? p.expires_text : '不限期');
-    return `<article class="my-node-card" onclick="openNodeTunnels(${Number(p.node_id || 0)}, '${esc(n.name || '实例')}')">
+    return `<article class="my-node-card" onclick="openInstanceTunnels(${Number(p.node_id || 0)}, '${esc(n.name || '实例')}')">
       <div class="my-node-head">
         <div class="my-node-title"><span class="my-node-region">${esc(n.region || '未分配')}</span><b>${esc(n.name || '实例 ' + (p.node_id || ''))}</b><small>${esc(p.plan_name || '')}</small></div>
         <span class="status-badge ${statusClass}"><i></i>${statusText}</span>
@@ -1549,66 +1549,9 @@ async function loadMyPlans(){
   `, 'dashboard-myplans', '我的实例');
 }
 
-let currentNodeView = { id: 0, name: '' };
-
-async function openNodeTunnels(nodeId, nodeName){
-  hideFlash(); clearAdminDashboardTimer(); setNav();
-  currentNodeView = { id: Number(nodeId || 0), name: nodeName || '' };
-  let dash, nodes = [];
-  try{
-    const [d, nres] = await Promise.all([api('/api/dashboard'), api('/api/user/nodes').catch(() => ({nodes:[]}))]);
-    dash = d; nodes = nres.nodes || [];
-  }catch(err){
-    if(err.message === 'unauthorized') return renderLogin();
-    show(err.message, true);
-    return;
-  }
-  const node = nodes.find(n => Number(n.id) === Number(nodeId)) || {};
-  const region = node.region || '实例';
-  const tunnels = (dash.tunnels || []).filter(t => Number(t.node_id) === Number(nodeId));
-  const rows = tunnels.map((t, i) => `<tr>
-      <td>${i + 1}</td>
-      <td><b>${esc(t.name || '')}</b></td>
-      <td>${esc((t.proxy_type || '').toUpperCase())}</td>
-      <td>${esc(t.local_ip || '')}:${esc(t.local_port ?? '')}</td>
-      <td>${t.remote_port ? esc(t.remote_port) : '-'}</td>
-      <td><span class="status-badge ${t.enabled ? 'ok' : 'bad'}"><i></i>${t.enabled ? '运行中' : '已停用'}</span></td>
-      <td class="actions node-actions">
-        <button type="button" class="node-action" onclick="nodeTunnelToggle(${Number(t.id)})">${t.enabled ? '停用' : '启用'}</button>
-        <button type="button" class="node-action node-action-danger" onclick="nodeTunnelDelete(${Number(t.id)})">删除</button>
-      </td>
-    </tr>`).join('');
-  const table = tunnels.length ? `<div class="table-wrap"><table class="table">
-      <thead><tr><th>序号</th><th>名称</th><th>协议</th><th>本地服务</th><th>公网端口</th><th>状态</th><th>操作</th></tr></thead>
-      <tbody>${rows}</tbody></table></div>` : `<div class="empty-state"><strong>这个实例还没有隧道</strong><p class="muted small">创建后即可通过公网端口访问本地服务。</p></div>`;
-  app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="loadMyPlans()">我的实例</a> <span class="crumb-inline">›</span> ${esc(node.name || nodeName || '实例')}</h1></div></div>
-    <section class="card">
-      <div class="section-title"><div><h2>${stIcon('node')}${esc(node.name || nodeName || '实例')}</h2><p>${esc(node.server_addr || '')}${node.server_port ? ':' + esc(node.server_port) : ''}</p></div></div>
-      <div class="my-node-specs">
-        <div><span>地区</span><b>${esc(region)}</b></div>
-        <div><span>流量使用</span><b>${Number(node.month_used_gb || 0)} / ${Number(node.monthly_traffic_gb || 0) > 0 ? Number(node.monthly_traffic_gb) + ' GB' : '不限'}</b></div>
-        <div><span>隧道数量</span><b>${tunnels.length}</b></div>
-        <div><span>空闲端口</span><b>${Number(node.free_count || 0)}/${Number(node.port_count || 0)}</b></div>
-      </div>
-    </section>
-    <section class="card">
-      <div class="section-title"><div><h2>隧道</h2><p>该实例下的映射</p></div><button type="button" onclick="loadDashboard('tunnels')">新建隧道</button></div>
-      ${table}
-    </section>
-  `, 'dashboard-myplans', '我的实例');
-}
-
-async function nodeTunnelToggle(id){
-  try{ await api('/api/tunnels/toggle', {method:'POST', body:{id:Number(id)}}); await openNodeTunnels(currentNodeView.id, currentNodeView.name); }
-  catch(err){ show(err.message || '操作失败', true); }
-}
-
-async function nodeTunnelDelete(id){
-  const ok = await appConfirm('删除后无法恢复，确认删除这条隧道？');
-  if(!ok) return;
-  try{ await api('/api/tunnels/delete', {method:'POST', body:{id:Number(id)}}); show('已删除'); await openNodeTunnels(currentNodeView.id, currentNodeView.name); }
-  catch(err){ show(err.message || '删除失败', true); }
+function openInstanceTunnels(nodeId, nodeName){
+  window.__selectedNode = { id: Number(nodeId || 0), name: nodeName || '' };
+  loadDashboard('tunnels');
 }
 
 function initProfilePoints(){
@@ -2178,7 +2121,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
   }
   if(view === 'tunnels'){
     const selNode = window.__selectedNode;
-    const crumb = selNode ? `<div class="node-crumb"><a href="#" onclick="loadMyPlans();return false;">我的实例</a><span>›</span><b>${esc(selNode.name)}</b></div>` : '';
+    const crumb = selNode ? `<div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="loadMyPlans()">我的实例</a> <span class="crumb-inline">›</span> ${esc(selNode.name)}</h1></div></div>` : '';
     app.innerHTML = appLayoutHtml(`
       ${crumb}
       <section class="card tunnel-create-card" id="tunnelCreateCard">
