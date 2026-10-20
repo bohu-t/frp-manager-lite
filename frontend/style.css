@@ -1808,3 +1808,6 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .page-crumbs a:hover{text-decoration:underline}
 .page-crumbs b{color:var(--text-strong);font-weight:600}
 .page-crumbs .crumb-sep{color:var(--border-strong)}
+.crumb-link{color:inherit;text-decoration:none}
+.crumb-link:hover{color:#1677FF}
+.crumb-inline{color:var(--muted);font-weight:400;margin:0 2px}
