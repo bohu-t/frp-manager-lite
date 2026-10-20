@@ -1803,3 +1803,8 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .my-node-speed a:hover{text-decoration:underline}
 .my-node-auto{font-size:11px;line-height:1;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:4px 9px;white-space:nowrap}
 .my-node-auto em{font-style:normal;color:var(--text-strong)}
+.page-crumbs{display:flex;align-items:center;gap:8px;font-size:13px;margin:-6px 0 14px;color:var(--muted)}
+.page-crumbs a{display:inline-flex;align-items:center;gap:5px;color:#1677FF;text-decoration:none}
+.page-crumbs a:hover{text-decoration:underline}
+.page-crumbs b{color:var(--text-strong);font-weight:600}
+.page-crumbs .crumb-sep{color:var(--border-strong)}
