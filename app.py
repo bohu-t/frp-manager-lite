@@ -20,6 +20,7 @@ import os
 import re
 import secrets
 import socket
+import ssl
 import sqlite3
 import sys
 import time
@@ -78,6 +79,7 @@ SOFTWARE_LICENSE_AUTHORITY = False
 SOFTWARE_LICENSE_REQUIRED = True  # always enforced — no env-var off switch
 RATE_WINDOW = 15 * 60
 LOGIN_RATE_LIMIT = 8
+HSTS_MAX_AGE = int(os.getenv("FML_HSTS_MAX_AGE", "0") or "0")
 REGISTER_RATE_LIMIT = 5
 # 开放注册：不要求邀请码；默认值由环境变量控制，dev 可开，生产保持关闭
 OPEN_REGISTRATION = os.getenv("FML_OPEN_REGISTRATION", "0").strip().lower() in ("1", "true", "yes", "on")
@@ -5044,6 +5046,22 @@ class Handler(BaseHTTPRequestHandler):
     def current_user(self) -> sqlite3.Row | None:
         return session_user(self.headers.get("Cookie"))
 
+    def request_is_https(self) -> bool:
+        """判断当前请求是否经 HTTPS（直连 TLS 或反向代理头）。"""
+        if isinstance(self.connection, ssl.SSLSocket):
+            return True
+        proto = (self.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+        if proto == "https":
+            return True
+        if (self.headers.get("X-Forwarded-Ssl") or "").strip().lower() == "on":
+            return True
+        if (self.headers.get("Front-End-Https") or "").strip().lower() == "on":
+            return True
+        return False
+
+    def secure_cookie_suffix(self) -> str:
+        return "; Secure" if self.request_is_https() else ""
+
     def send_body(self, body: bytes, status: int = 200, content_type: str = "application/octet-stream", headers: dict[str, str] | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -5052,6 +5070,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Cache-Control", "no-store")
+        if HSTS_MAX_AGE > 0 and self.request_is_https():
+            self.send_header("Strict-Transport-Security", f"max-age={HSTS_MAX_AGE}; includeSubDomains")
         for k, v in (headers or {}).items():
             self.send_header(k, v)
         self.end_headers()
@@ -5508,7 +5528,7 @@ class Handler(BaseHTTPRequestHandler):
     def api_get(self, path: str) -> None:
         if path == "/api/csrf":
             token = make_csrf_token()
-            self.send_json({"ok": True, "csrf_token": token}, headers={"Set-Cookie": f"fml_csrf={token}; SameSite=Lax; Path=/; Max-Age={CSRF_TTL}"})
+            self.send_json({"ok": True, "csrf_token": token}, headers={"Set-Cookie": f"fml_csrf={token}; SameSite=Lax; Path=/; Max-Age={CSRF_TTL}{self.secure_cookie_suffix()}"})
             return
         if path == "/api/ping":
             # Lightweight client-side latency probe (no DB / no auth work).
@@ -5989,7 +6009,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             token = make_session(user["id"])
             audit("login", user, user["node_id"], None, "", "面板登录")
-            self.send_json({"ok": True, "user": public_user(user)}, headers={"Set-Cookie": f"fml_session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_TTL}"})
+            self.send_json({"ok": True, "user": public_user(user)}, headers={"Set-Cookie": f"fml_session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_TTL}{self.secure_cookie_suffix()}"})
             return
 
         if path == "/api/register/request-code":
@@ -6147,7 +6167,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/logout":
             clear_session(self.headers.get("Cookie"))
-            self.send_json({"ok": True}, headers={"Set-Cookie": "fml_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0"})
+            self.send_json({"ok": True}, headers={"Set-Cookie": f"fml_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{self.secure_cookie_suffix()}"})
             return
 
         if path == "/api/password/reset":

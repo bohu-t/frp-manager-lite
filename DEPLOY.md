@@ -202,6 +202,8 @@ cd dist/obfuscated && docker compose down && docker compose up -d --build
 ## 七、安全建议
 
 1. 面板必须挂 HTTPS（Nginx/Caddy 反代 + Let's Encrypt）
+   - 反代需透传 `X-Forwarded-Proto: https`，面板据此自动给 Cookie 加 `Secure`
+   - 确认 HTTPS 稳定后，可设置 `FML_HSTS_MAX_AGE=63072000` 开启 HSTS（一旦下发，浏览器在该时长内强制 HTTPS，撤回需等待过期）
 2. `FML_SETUP_KEY` 部署后不要泄露
 3. frps 仪表盘建议仅监听 127.0.0.1
 4. 定期备份 `dist/obfuscated/` 目录下的 `.env` 和 Docker volume 数据
