@@ -1933,3 +1933,33 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .side-subnav{display:none;flex-direction:column}
 .side-subnav.open{display:flex}
 .side-subnav .side-link{width:100%}
+.maint-tools{margin-bottom:16px}
+.maint-tool-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.maint-tool{display:flex;align-items:center;gap:12px;text-align:left;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--panel);cursor:pointer;transition:border-color .15s,transform .15s}
+.maint-tool:hover{border-color:var(--accent);transform:translateY(-1px)}
+.maint-tool-icon{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;flex:0 0 38px}
+.maint-tool-icon.blue{background:rgba(56,189,248,.12);color:var(--accent)}
+.maint-tool-icon.green{background:rgba(52,211,153,.12);color:var(--ok)}
+.maint-tool-copy{display:flex;flex-direction:column;gap:2px;min-width:0}
+.maint-tool-copy b{font-size:14px;color:var(--text)}
+.maint-tool-copy small{font-size:12px;color:var(--muted)}
+.maint-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;align-items:start}
+.maint-panel{display:flex;flex-direction:column;min-width:0}
+.maint-form{display:flex;flex-direction:column;gap:8px;margin:4px 0 14px}
+.maint-form input,.maint-form textarea{border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:var(--panel);color:var(--text);font-size:13px;outline:none}
+.maint-form input:focus,.maint-form textarea:focus{border-color:var(--accent)}
+.maint-form textarea{resize:vertical;min-height:64px}
+.maint-form-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.maint-form-actions{display:flex;justify-content:flex-end}
+.maint-form-actions button{height:34px;padding:0 16px;border:0;border-radius:9px;background:var(--accent2);color:#fff;font-size:13px;cursor:pointer}
+.maint-table{max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+.maint-table table{margin:0}
+.maint-table th{position:sticky;top:0;background:var(--panel2);z-index:1}
+.maint-table td,.maint-table th{font-size:12px;padding:8px 10px}
+@media(max-width:720px){.maint-form-row{grid-template-columns:1fr}}
+.maint-form-row label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted)}
+.maint-form-row label input{width:100%}
+.maint-table{overflow:auto}
+.maint-table table{width:100%;min-width:460px;table-layout:auto}
+.maint-table th,.maint-table td{white-space:nowrap}
+.maint-table td:nth-child(2){white-space:normal}

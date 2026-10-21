@@ -1685,29 +1685,50 @@ async function loadAdminOps(){
     const [a, b] = await Promise.all([api('/api/admin/announcements'), api('/api/admin/recharge-keys')]);
     anns = a.announcements || []; keys = b.recharge_keys || [];
   }catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
-  const annRows = anns.map((a, i) => `<tr><td>${i + 1}</td><td><b>${esc(a.title)}</b></td><td>${esc(String(a.content || '').replace(/<[^>]+>/g, '').slice(0, 50))}</td><td><span class="status-badge ${a.active ? 'ok' : 'bad'}"><i></i>${a.active ? '展示中' : '已下架'}</span></td><td>${fmtTs(a.created_at)}</td><td class="actions node-actions">${a.active ? `<button class="node-action node-action-danger" onclick="deleteAnnouncement(${a.id})">下架</button>` : '<span class="muted small">—</span>'}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">暂无公告</td></tr>';
-  const keyRows = keys.map((k, i) => `<tr><td>${i + 1}</td><td><code class="token">${esc(k.key)}</code></td><td>${k.points}</td><td>${esc(k.note || '—')}</td><td>${k.used_by ? '<span class="bad">已使用</span>' : (k.active ? '<span class="ok">可用</span>' : '<span class="bad">停用</span>')}</td><td>${fmtTs(k.created_at)}</td><td class="actions node-actions">${k.used_by ? '<span class="muted small">已使用</span>' : `<button type="button" class="node-action" onclick="rechargeKeyToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button type="button" class="node-action node-action-danger" onclick="rechargeKeyDelete(${k.id})">删除</button>`}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">还没有充值密钥</td></tr>';
+  const annRows = anns.map((a, i) => `<tr><td>${i + 1}</td><td><b>${esc(a.title)}</b><br><span class="muted small">${esc(String(a.content || '').replace(/<[^>]+>/g, '').slice(0, 40))}</span></td><td><span class="status-badge ${a.active ? 'ok' : 'bad'}"><i></i>${a.active ? '展示中' : '已下架'}</span></td><td>${fmtTs(a.created_at)}</td><td class="actions node-actions">${a.active ? `<button class="node-action node-action-danger" onclick="deleteAnnouncement(${a.id})">下架</button>` : '—'}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">暂无公告</td></tr>';
+  const keyRows = keys.map((k, i) => `<tr><td>${i + 1}</td><td><code class="token">${esc(k.key)}</code></td><td>${k.points}</td><td><span class="status-badge ${k.used_by ? 'bad' : (k.active ? 'ok' : '')}"><i></i>${k.used_by ? '已使用' : (k.active ? '可用' : '停用')}</span></td><td>${fmtTs(k.created_at)}</td><td class="actions node-actions">${k.used_by ? '—' : `<button type="button" class="node-action" onclick="rechargeKeyToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button type="button" class="node-action node-action-danger" onclick="rechargeKeyDelete(${k.id})">删除</button>`}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">还没有充值密钥</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">MAINTENANCE</span><h1>平台维护</h1><p>运维工具、系统公告与积分充值密钥</p></div></div>
-    ${adminOpsCardHtml()}
-    <section class="card"><div class="section-title"><div><h2>${stIcon('bell')}系统公告</h2><p>发布后显示在用户的「通知中心 › 系统公告」</p></div><span class="section-count">共 ${anns.length} 条</span></div>
-      <form id="annForm" class="grid" style="margin-bottom:16px">
-        <div class="span-2"><label>标题</label><input name="title" maxlength="120" required></div>
-        <div class="span-2"><label>内容</label><textarea name="content" rows="3" required placeholder="支持简单格式文本"></textarea></div>
-        <div class="form-actions span-2"><button type="submit">发布公告</button></div>
-      </form>
-      <div class="table-wrap"><table><thead><tr><th>序号</th><th>标题</th><th>内容</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${annRows}</tbody></table></div>
+
+    <section class="card maint-tools">
+      <div class="section-title"><div><h2>${stIcon('tools')}运维工具</h2><p>日常维护快捷入口</p></div></div>
+      <div class="maint-tool-grid">
+        <button type="button" class="maint-tool" onclick="openAdminFrpcModal()">
+          <span class="maint-tool-icon blue">${stIcon('file')}</span>
+          <span class="maint-tool-copy"><b>生成 frpc 配置</b><small>选择用户、添加隧道，下载配置与部署脚本</small></span>
+        </button>
+        <button type="button" class="maint-tool" onclick="openPwdModal()">
+          <span class="maint-tool-icon green">${stIcon('key')}</span>
+          <span class="maint-tool-copy"><b>修改登录密码</b><small>修改当前管理员账号的登录密码</small></span>
+        </button>
+      </div>
     </section>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('key')}积分充值密钥</h2><p>生成后发给用户，在「积分充值」页兑换；每枚只能使用一次</p></div><span class="section-count">可用 ${keys.filter(k => !k.used_by && k.active).length}</span></div>
-      <form id="rechargeKeyForm" class="grid" style="margin-bottom:16px">
-        <div><label>每枚积分</label><input name="points" type="number" value="100" min="1" step="1"></div>
-        <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
-        <div><label>有效期（天）</label><input name="duration_days" type="number" value="0" min="0" max="3650"><span class="muted small">0 表示长期有效</span></div>
-        <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
-        <div class="form-actions" style="grid-column:1/-1;justify-content:flex-end"><button>生成充值密钥</button></div>
-      </form>
-      <div class="table-wrap"><table><thead><tr><th>序号</th><th>密钥</th><th>积分</th><th>备注</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table></div>
-    </section>
+
+    <div class="maint-grid">
+      <section class="card maint-panel">
+        <div class="section-title"><div><h2>${stIcon('bell')}系统公告</h2><p>发布后显示在用户通知中心</p></div><span class="section-count">${anns.length} 条</span></div>
+        <form id="annForm" class="maint-form">
+          <input name="title" maxlength="120" placeholder="公告标题" required>
+          <textarea name="content" rows="3" placeholder="公告内容" required></textarea>
+          <div class="maint-form-actions"><button type="submit">发布公告</button></div>
+        </form>
+        <div class="maint-table"><table><thead><tr><th>#</th><th>公告</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${annRows}</tbody></table></div>
+      </section>
+
+      <section class="card maint-panel">
+        <div class="section-title"><div><h2>${stIcon('key')}积分充值密钥</h2><p>生成后发给用户兑换积分</p></div><span class="section-count">可用 ${keys.filter(k => !k.used_by && k.active).length}</span></div>
+        <form id="rechargeKeyForm" class="maint-form">
+          <div class="maint-form-row">
+            <label><span>每枚积分</span><input name="points" type="number" min="1" value="100"></label>
+            <label><span>生成数量</span><input name="count" type="number" min="1" max="500" value="1"></label>
+            <label><span>有效期（天）</span><input name="duration_days" type="number" min="0" max="3650" value="0"></label>
+          </div>
+          <input name="note" placeholder="备注（订单号 / 客户名）">
+          <div class="maint-form-actions"><button type="submit">生成密钥</button></div>
+        </form>
+        <div class="maint-table"><table><thead><tr><th>#</th><th>密钥</th><th>积分</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table></div>
+      </section>
+    </div>
   `, 'admin-ops', '平台维护');
   const annForm = document.querySelector('#annForm');
   annForm.onsubmit = async (e) => {
