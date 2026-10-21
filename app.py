@@ -4823,7 +4823,7 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
         allowed_ports = [int(x["port"]) for x in conn.execute(
             "SELECT port FROM user_plan_ports WHERE user_plan_id=? AND release_at=0 ORDER BY port",
             (new_plan_row["id"],)).fetchall()] if new_plan_row else []
-        created_tunnels = create_preconfigured_tunnels(conn, user, int(node_id or 0), tunnels or [], int(plan["max_ports"] or 0), allowed_ports)
+        created_tunnels = create_preconfigured_tunnels(conn, user, int(node_id or 0), tunnels or [], int(plan["max_ports"] or 0), allowed_ports, int(new_plan_row["id"]) if new_plan_row else 0)
         record_provider_earning(conn, order_no, int(node_id or 0), int(plan["price_points"] or 0))
         conn.execute("UPDATE orders SET status='paid', paid_at=?, updated_at=? WHERE id=?", (now(), now(), order["id"]))
         provision_msg = msg
@@ -4836,7 +4836,7 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
     return True, ("购买成功，已叠加到原套餐" if provision_msg == "已叠加到原套餐" else "购买成功，套餐已开通"), payload
 
 
-def create_preconfigured_tunnels(conn: sqlite3.Connection, user: sqlite3.Row, node_id: int, items: list[dict[str, Any]], max_ports: int, allowed_ports: list[int] | None = None) -> list[dict[str, Any]]:
+def create_preconfigured_tunnels(conn: sqlite3.Connection, user: sqlite3.Row, node_id: int, items: list[dict[str, Any]], max_ports: int, allowed_ports: list[int] | None = None, plan_id: int = 0) -> list[dict[str, Any]]:
     """开通后按用户预配置创建隧道，端口优先使用本次套餐分配的端口。"""
     if not items or not node_id:
         return []
@@ -4867,8 +4867,8 @@ def create_preconfigured_tunnels(conn: sqlite3.Connection, user: sqlite3.Row, no
             if conn.execute("SELECT 1 FROM tunnels WHERE node_id=? AND name=?", (node_id, name)).fetchone():
                 continue
             conn.execute(
-                "INSERT INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (node_id, user["id"], name, proxy_type, local_ip, local_port, port, "", "", now()))
+                "INSERT INTO tunnels(node_id, user_id, plan_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (node_id, user["id"], int(plan_id or 0), name, proxy_type, local_ip, local_port, port, "", "", now()))
             created.append({"name": name, "proxy_type": proxy_type, "local_port": local_port, "remote_port": port})
         except Exception:
             continue
