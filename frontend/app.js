@@ -746,9 +746,9 @@ function appSidebarHtml(kind='dashboard'){
   const isAdmin = currentUser?.role === 'admin';
   const username = currentUser?.username || '用户';
   const items = isAdmin ? [
-    ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','chart','订单','orders'],['admin-hosts','cloud','托管中心'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
+    ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','chart','订单','orders'],['admin-hosts','cloud','托管中心'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin-tickets','log','工单'],['admin-payouts','key','提现'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
   ] : [
-    ['dashboard','home','概览'],['dashboard-nodes','node','新建实例'],['dashboard-myplans','license','我的实例'],['dashboard-hosts','cloud','托管中心'],['dashboard-points','bolt','账单与充值'],['dashboard-profile','user','个人中心']
+    ['dashboard','home','概览'],['dashboard-nodes','node','新建实例'],['dashboard-myplans','license','我的实例'],['dashboard-hosts','cloud','托管中心'],['dashboard-points','bolt','账单与充值'],['dashboard-tickets','log','工单'],['dashboard-profile','user','个人中心']
   ];
   const links = items.map(([action, icon, label, section]) => {
     const active = kind === action || (section && kind === section) ? ' active' : '';
@@ -865,6 +865,9 @@ app.addEventListener('click', async (e) => {
     if(action === 'dashboard-profile') return loadDashboard('profile');
     if(action === 'dashboard-plans') return loadPlans();
     if(action === 'dashboard-points') return loadPoints();
+    if(action === 'dashboard-tickets') return loadTickets();
+    if(action === 'admin-tickets') return loadAdminTickets();
+    if(action === 'admin-payouts') return loadAdminPayouts();
     if(action === 'dashboard-myplans') return loadMyPlans();
     if(action === 'dashboard-hosts') return loadHosts();
     if(action === 'admin-hosts') return loadAdminHosts();
@@ -1215,6 +1218,8 @@ async function loadHosts(){
   const pEarn = eData.plans || [];
   const pTotal = Number(eData.total_paid || 0);
   const pGuarantee = Number(eData.guarantee || 0);
+  const pIncome = Number(eData.income || 0);
+  window.__providerIncome = pIncome;
   const pct = Number(eData.commission_pct ?? 10);
   const tab = hostsTab || 'nodes';
   const nodesSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('node')}我的节点</h2><p>${pNodes.length ? '已接入平台的主机' : '提交母鸡并通过审核后，这里会显示你的节点'}</p></div></div>
@@ -1228,6 +1233,11 @@ async function loadHosts(){
       </tbody></table></div>
     </section>`;
   const earnSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('bolt')}收益</h2><p>按服务进度结算：${100 - pct}% 到账，${pct}% 留存为保证金</p></div><span class="section-count">已结算 ${pTotal} 积分 · 保证金 ${pGuarantee}</span></div>
+      <div class="row" style="gap:10px;align-items:center;margin:6px 0 12px">
+        <span class="muted small">可提现收益</span><b style="font-size:18px">${pIncome} 积分</b>
+        <button type="button" class="secondary" onclick="providerWithdraw('balance')" ${pIncome > 0 ? '' : 'disabled'}>转入余额</button>
+        <button type="button" onclick="providerWithdraw('external')" ${pIncome > 0 ? '' : 'disabled'}>提现到收款账户</button>
+      </div>
       <div class="table-wrap"><table><thead><tr><th>实例</th><th>节点</th><th>套餐价</th><th>已结算</th><th>保证金</th><th>进度</th><th>状态</th></tr></thead><tbody>
       ${pEarn.length ? pEarn.map(e => `<tr><td><b>${esc(e.plan_name || '-')}</b></td><td>${esc(e.node_name || ('#' + e.node_id))}</td><td>${e.price_points}</td><td><b>${e.paid_points}</b></td><td>${e.guarantee_points}</td><td>${Math.round(Number(e.progress || 0) * 100)}%</td><td>${e.status === 'active' ? '服务中' : (e.status === 'expired' ? '已到期' : (e.status === 'exhausted' ? '流量用尽' : '已退订'))}</td></tr>`).join('') : '<tr><td colspan="7" class="muted">暂无收益记录</td></tr>'}
       </tbody></table></div>
@@ -1254,6 +1264,153 @@ async function loadHosts(){
 function switchHostsTab(tab){
   hostsTab = tab;
   loadHosts();
+}
+
+let ticketsTab = 'mine';
+const TICKET_STATUS = { open: '待处理', processing: '处理中', closed: '已关闭', rejected: '已拒绝' };
+const TICKET_KIND = { issue: '问题工单', withdraw: '提现工单' };
+
+async function loadTickets(){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
+  let mine = [], received = [], nodes = [], plans = [];
+  try{
+    const [a, b, c, d] = await Promise.all([
+      api('/api/user/tickets'),
+      api('/api/provider/tickets').catch(() => ({tickets: []})),
+      api('/api/user/nodes').catch(() => ({nodes: []})),
+      api('/api/dashboard').catch(() => ({my_plans: []}))
+    ]);
+    mine = a.tickets || []; received = b.tickets || []; nodes = c.nodes || []; plans = d.my_plans || [];
+  }catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
+  const nodeById = {}; nodes.forEach(n => { nodeById[Number(n.id)] = n; });
+  const myNodeIds = [...new Set(plans.filter(p => p.status !== 'cancelled').map(p => Number(p.node_id)))].filter(Boolean);
+  window.__ticketNodes = myNodeIds.map(id => ({ id, name: (nodeById[id] || {}).name || ('#' + id), region: (nodeById[id] || {}).region || '' }));
+  const list = ticketsTab === 'mine' ? mine : received;
+  const rows = list.map((t, i) => `<tr>
+      <td>${i + 1}</td>
+      <td>${esc(t.ticket_no)}</td>
+      <td>${TICKET_KIND[t.kind] || t.kind}</td>
+      <td>${esc(t.title)}</td>
+      <td>${t.node_id ? esc((nodeById[Number(t.node_id)] || {}).name || ('#' + t.node_id)) : '-'}</td>
+      <td><span class="status-badge ${t.status === 'closed' ? '' : (t.status === 'open' ? 'warn' : 'ok')}"><i></i>${TICKET_STATUS[t.status] || t.status}</span></td>
+      <td>${fmtTs(t.created_at)}</td>
+      <td class="actions node-actions"><button type="button" class="node-action" onclick="openTicket(${t.id})">查看</button></td>
+    </tr>`).join('') || `<tr><td colspan="8" class="muted">${ticketsTab === 'mine' ? '还没有提交过工单' : '还没有收到工单'}</td></tr>`;
+  app.innerHTML = appLayoutHtml(`
+    <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>工单</h1><p>母鸡故障、服务异常可以提交工单通知机主。</p></div>
+      <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadTickets()">刷新</button><button type="button" onclick="ticketFormModal()">＋ 新建工单</button></div></div>
+    <nav class="seg-tabs">
+      <button type="button" class="seg-tab${ticketsTab === 'mine' ? ' active' : ''}" onclick="switchTicketsTab('mine')">我提交的${mine.length ? `<span>${mine.length}</span>` : ''}</button>
+      <button type="button" class="seg-tab${ticketsTab === 'received' ? ' active' : ''}" onclick="switchTicketsTab('received')">我收到的${received.length ? `<span>${received.length}</span>` : ''}</button>
+    </nav>
+    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>编号</th><th>类型</th><th>标题</th><th>节点</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+  `, 'dashboard-tickets', '工单');
+}
+
+function switchTicketsTab(tab){ ticketsTab = tab; loadTickets(); }
+
+function ticketFormModal(){
+  const nodes = window.__ticketNodes || [];
+  if(!nodes.length){ appAlert('你还没有购买实例，暂时无法提交节点工单', {title:'无法提交'}); return; }
+  const opts = nodes.map(n => `<option value="${n.id}">${esc(n.name)}（${esc(n.region || '')}）</option>`).join('');
+  document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="ticketFormModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeTicketForm()">
+    <section class="modal-page card app-dialog">
+      <div class="section-title modal-title"><div><h2>新建工单</h2><p>提交后会通知节点机主处理</p></div></div>
+      <form id="ticketForm" class="grid">
+        <div><label>节点</label><select name="node_id">${opts}</select></div>
+        <div><label>标题</label><input name="title" maxlength="80" required placeholder="例如：节点无法连接"></div>
+        <div class="span-2"><label>问题描述</label><textarea name="content" rows="5" maxlength="2000" required placeholder="出现时间、现象、已尝试的操作"></textarea></div>
+        <div class="form-actions span-2"><button type="button" class="secondary" onclick="closeTicketForm()">取消</button><button type="submit">提交工单</button></div>
+      </form>
+    </section></div>`);
+  const form = document.querySelector('#ticketForm');
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    try{
+      const fd = Object.fromEntries(new FormData(form));
+      const r = await api('/api/user/tickets/create', {method:'POST', body:fd});
+      closeTicketForm(); show(r.message || '已提交'); await loadTickets();
+    }catch(err){ show(err.message || '提交失败', true); }
+  };
+}
+function closeTicketForm(){ const el = document.querySelector('#ticketFormModal'); if(el) el.remove(); }
+
+async function openTicket(id){
+  let data;
+  try{ data = await api('/api/user/tickets?id=' + Number(id)); }
+  catch(err){ show(err.message, true); return; }
+  const t = data.ticket || {};
+  const msgs = data.messages || [];
+  const thread = msgs.map(m => `<div class="ticket-msg ${m.role}"><div class="ticket-msg-head"><b>${esc(m.username)}</b><span>${m.role === 'owner' ? '机主' : (m.role === 'admin' ? '管理员' : '用户')} · ${fmtTs(m.created_at)}</span></div><p>${esc(m.content).replace(/\n/g,'<br>')}</p></div>`).join('') || '<p class="muted">暂无回复</p>';
+  document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="ticketModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeTicketModal()">
+    <section class="modal-page card app-dialog">
+      <div class="section-title modal-title"><div><h2>${esc(t.title || '工单')}</h2><p>${esc(t.ticket_no || '')} · ${TICKET_STATUS[t.status] || ''}</p></div></div>
+      <div class="ticket-thread">
+        <div class="ticket-msg user"><div class="ticket-msg-head"><b>${esc(t.username || '')}</b><span>用户 · ${fmtTs(t.created_at)}</span></div><p>${esc(t.content || '').replace(/\n/g,'<br>')}</p></div>
+        ${thread}
+      </div>
+      ${t.status !== 'closed' ? `<form id="ticketReplyForm" class="grid"><div class="span-2"><label>回复</label><textarea name="content" rows="3" maxlength="2000" required placeholder="补充信息或回复机主"></textarea></div><div class="form-actions span-2"><button type="button" class="secondary" onclick="closeTicketModal()">关闭窗口</button><button type="button" class="secondary" onclick="closeTicket(${Number(t.id)})">结束工单</button><button type="submit">发送回复</button></div></form>` : '<p class="muted small">该工单已关闭</p>'}
+    </section></div>`);
+  const form = document.querySelector('#ticketReplyForm');
+  if(form) form.onsubmit = async (e) => {
+    e.preventDefault();
+    try{
+      await api('/api/user/tickets/reply', {method:'POST', body:{id:Number(t.id), content:form.elements.content.value}});
+      closeTicketModal(); await openTicket(t.id);
+    }catch(err){ show(err.message, true); }
+  };
+}
+function closeTicketModal(){ const el = document.querySelector('#ticketModal'); if(el) el.remove(); }
+async function closeTicket(id){
+  if(!await appConfirm('确认结束这个工单？', {title:'结束工单', okText:'确认结束'})) return;
+  try{ await api('/api/user/tickets/close', {method:'POST', body:{id:Number(id)}}); closeTicketModal(); show('工单已结束'); await loadTickets(); }
+  catch(err){ show(err.message, true); }
+}
+
+async function loadAdminTickets(){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
+  let tickets = [];
+  try{ tickets = (await api('/api/admin/tickets')).tickets || []; }
+  catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
+  const rows = tickets.map((t, i) => `<tr><td>${i + 1}</td><td>${esc(t.ticket_no)}</td><td>${TICKET_KIND[t.kind] || t.kind}</td><td>${esc(t.title)}</td><td>${esc(t.username)}</td><td>${t.node_id ? '#' + t.node_id : '-'}</td><td><span class="status-badge ${t.status === 'closed' ? '' : (t.status === 'open' ? 'warn' : 'ok')}"><i></i>${TICKET_STATUS[t.status] || t.status}</span></td><td>${fmtTs(t.created_at)}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">暂无工单</td></tr>';
+  app.innerHTML = appLayoutHtml(`
+    <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>工单</h1><p>全部用户提交的工单</p></div></div>
+    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>编号</th><th>类型</th><th>标题</th><th>提交人</th><th>节点</th><th>状态</th><th>时间</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+  `, 'admin-tickets', '工单');
+}
+
+async function loadAdminPayouts(){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
+  let payouts = [];
+  try{ payouts = (await api('/api/admin/payouts')).payouts || []; }
+  catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
+  const rows = payouts.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td>${esc(p.username)}</td><td><b>${p.points}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${esc(p.holder)}</td><td><span class="status-badge ${p.status === 'paid' ? 'ok' : (p.status === 'pending' ? 'warn' : 'bad')}"><i></i>${p.status === 'paid' ? '已打款' : (p.status === 'pending' ? '待处理' : '已拒绝')}</span></td><td>${fmtTs(p.created_at)}</td><td class="actions node-actions">${p.status === 'pending' ? `<button class="node-action" onclick="reviewPayout(${p.id}, 'paid')">标记已打款</button><button class="node-action node-action-danger" onclick="reviewPayout(${p.id}, 'reject')">拒绝</button>` : '<span class="muted small">—</span>'}</td></tr>`).join('') || '<tr><td colspan="10" class="muted">暂无提现申请</td></tr>';
+  app.innerHTML = appLayoutHtml(`
+    <div class="ov-page-head"><div><span class="section-kicker">PAYOUTS</span><h1>提现</h1><p>处理供给方的收款提现申请</p></div><button type="button" class="secondary" onclick="loadAdminPayouts()">刷新</button></div>
+    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>用户</th><th>积分</th><th>方式</th><th>账号</th><th>姓名</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+  `, 'admin-payouts', '提现');
+}
+
+async function reviewPayout(id, action){
+  if(!await appConfirm(action === 'paid' ? '确认已打款？' : '确认拒绝并退回收益？', {title:'处理提现', okText:'确认', danger: action === 'reject'})) return;
+  try{ const r = await api('/api/admin/payouts/review', {method:'POST', body:{id:Number(id), action}}); show(r.message || '已处理'); await loadAdminPayouts(); }
+  catch(err){ show(err.message, true); }
+}
+
+async function providerWithdraw(mode){
+  const income = Number(window.__providerIncome || 0);
+  if(income <= 0){ show('暂无可提现收益', true); return; }
+  const label = mode === 'balance' ? '转入余额的积分数量' : '提现积分数量';
+  const val = await appPrompt(label, String(income), {title: mode === 'balance' ? '收益转入余额' : '提现申请'});
+  if(val === null) return;
+  const points = Number(val);
+  if(!Number.isFinite(points) || points <= 0){ show('请输入正确的积分数量', true); return; }
+  if(points > income){ show(`最多可提现 ${income} 积分`, true); return; }
+  try{
+    const r = await api('/api/user/withdraw', {method:'POST', body:{mode, points}});
+    show(r.message || '已提交');
+    await loadHosts();
+  }catch(err){ show(err.message || '提现失败', true); }
 }
 
 async function providerPlanForm(id){
@@ -1679,6 +1836,18 @@ async function loadMyPlans(){
 function openInstanceTunnels(nodeId, nodeName, planId, planName){
   window.__selectedNode = { id: Number(nodeId || 0), name: nodeName || '', planId: Number(planId || 0), planName: planName || '' };
   loadDashboard('tunnels');
+}
+
+function initPayoutAccountForm(){
+  const form = document.querySelector('#payoutAccountForm');
+  if(!form) return;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    try{
+      const r = await api('/api/user/payout-account/save', {method:'POST', body:Object.fromEntries(new FormData(form))});
+      show(r.message || '已保存');
+    }catch(err){ show(err.message || '保存失败', true); }
+  };
 }
 
 function initProfilePoints(){
@@ -2386,6 +2555,8 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         <td>${p.status === 'exhausted' ? '<span class="bad">流量用尽</span>' : (p.status === 'cancelled' ? '<span class="muted">已退订</span>' : (p.expired ? '<span class="bad">已到期</span>' : (p.paused ? '<span class="muted">已暂停</span>' : '<span class="ok">生效中</span>')))}${p.grace_until && p.status !== 'active' ? `<br><span class="muted small">端口保留至 ${fmtTs(p.grace_until)}</span>` : ''}</td>
         <td class="actions node-actions">${p.status === 'active' ? `<button type="button" class="node-action node-action-danger" onclick="cancelPlan(${p.id}, '${esc(p.plan_name)}', ${Number(p.refund_points || 0)})">退订</button>` : '<span class="muted small">—</span>'}</td>
       </tr>`).join('') || '<tr><td colspan="7" class="muted">还没有购买过套餐</td></tr>';
+    let payoutAcc = { method: 'alipay', account: '', holder: '' };
+    try{ payoutAcc = (await api('/api/user/payout-account')).account || payoutAcc; }catch(e){}
     const latestExpiry = activePlans.length
       ? (activePlans.every(p => p.billing_mode === 'traffic')
           ? '按流量计费'
@@ -2416,8 +2587,18 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
           <div class="section-title"><div><div class="section-kicker">SECURITY</div><h2>${stIcon('key')}修改登录密码</h2><p>修改当前账号的登录密码，下次登录请使用新密码。</p></div></div>
           <form id="profilePwdForm" class="grid">${passwordFieldsHtml()}<div class="form-actions" style="grid-column:1/-1"><button type="submit">保存新密码</button></div></form>
         </section>
-      </div>`, 'dashboard-profile', '个人中心');
+      </div>
+      <section class="card" style="margin-top:16px">
+        <div class="section-title"><div><div class="section-kicker">PAYOUT</div><h2>${stIcon('key')}收款信息</h2><p>用于提现收益到你的支付宝 / 微信 / 银行卡</p></div></div>
+        <form id="payoutAccountForm" class="grid">
+          <div><label>收款方式</label><select name="method"><option value="alipay"${payoutAcc.method === 'alipay' ? ' selected' : ''}>支付宝</option><option value="wechat"${payoutAcc.method === 'wechat' ? ' selected' : ''}>微信</option><option value="bank"${payoutAcc.method === 'bank' ? ' selected' : ''}>银行卡</option></select></div>
+          <div><label>收款账号</label><input name="account" value="${esc(payoutAcc.account || '')}" required placeholder="支付宝账号 / 微信号 / 银行卡号"></div>
+          <div><label>姓名</label><input name="holder" value="${esc(payoutAcc.holder || '')}" required placeholder="收款人姓名"></div>
+          <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存收款信息</button></div>
+        </form>
+      </section>`, 'dashboard-profile', '个人中心');
     initUserEmailForm();
+    initPayoutAccountForm();
     initPasswordForm();
     return;
   }

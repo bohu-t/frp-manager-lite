@@ -2820,6 +2820,55 @@ def init_db() -> None:
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS provider_income (
+                owner_id INTEGER PRIMARY KEY,
+                points INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS payout_accounts (
+                user_id INTEGER PRIMARY KEY,
+                method TEXT NOT NULL DEFAULT 'alipay',
+                account TEXT NOT NULL DEFAULT '',
+                holder TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS payouts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                payout_no TEXT NOT NULL UNIQUE,
+                user_id INTEGER NOT NULL,
+                username TEXT NOT NULL DEFAULT '',
+                points INTEGER NOT NULL DEFAULT 0,
+                method TEXT NOT NULL DEFAULT 'alipay',
+                account TEXT NOT NULL DEFAULT '',
+                holder TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                note TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS tickets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticket_no TEXT NOT NULL UNIQUE,
+                user_id INTEGER NOT NULL,
+                username TEXT NOT NULL DEFAULT '',
+                kind TEXT NOT NULL DEFAULT 'issue',
+                status TEXT NOT NULL DEFAULT 'open',
+                node_id INTEGER NOT NULL DEFAULT 0,
+                owner_id INTEGER NOT NULL DEFAULT 0,
+                title TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS ticket_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticket_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL DEFAULT 0,
+                username TEXT NOT NULL DEFAULT '',
+                role TEXT NOT NULL DEFAULT 'user',
+                content TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS provider_guarantee (
                 owner_id INTEGER PRIMARY KEY,
                 points INTEGER NOT NULL DEFAULT 0,
@@ -3552,6 +3601,47 @@ def clear_session(cookie_header: str | None) -> None:
     if morsel:
         with db() as conn:
             conn.execute("DELETE FROM sessions WHERE token=?", (morsel.value,))
+
+
+def provider_income_balance(conn: sqlite3.Connection, owner_id: int) -> int:
+    row = conn.execute("SELECT points FROM provider_income WHERE owner_id=?", (owner_id,)).fetchone()
+    return int(row["points"] or 0) if row else 0
+
+
+def provider_income_consume(conn: sqlite3.Connection, owner_id: int, points: int) -> None:
+    points = int(points)
+    if points <= 0:
+        raise ValueError("提现金额必须大于 0")
+    have = provider_income_balance(conn, owner_id)
+    if points > have:
+        raise ValueError(f"可提现收益不足，当前 {have} 积分")
+    conn.execute("UPDATE provider_income SET points=points-?, updated_at=? WHERE owner_id=?", (points, now(), owner_id))
+
+
+def new_ticket_no() -> str:
+    return "TK" + time.strftime("%Y%m%d%H%M%S", time.localtime()) + secrets.token_hex(2).upper()
+
+
+def new_payout_no() -> str:
+    return "PO" + time.strftime("%Y%m%d%H%M%S", time.localtime()) + secrets.token_hex(2).upper()
+
+
+def ticket_public(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": int(row["id"]), "ticket_no": row["ticket_no"], "kind": row["kind"], "status": row["status"],
+        "user_id": int(row["user_id"]), "username": row["username"], "node_id": int(row["node_id"] or 0),
+        "owner_id": int(row["owner_id"] or 0), "title": row["title"], "content": row["content"],
+        "created_at": int(row["created_at"] or 0), "updated_at": int(row["updated_at"] or 0),
+    }
+
+
+def payout_public(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": int(row["id"]), "payout_no": row["payout_no"], "user_id": int(row["user_id"]),
+        "username": row["username"], "points": int(row["points"] or 0), "method": row["method"],
+        "account": row["account"], "holder": row["holder"], "status": row["status"],
+        "note": row["note"], "created_at": int(row["created_at"] or 0), "updated_at": int(row["updated_at"] or 0),
+    }
 
 
 def make_csrf_token() -> str:
@@ -4879,7 +4969,9 @@ def accrue_provider_income_once() -> int:
             pay = delta * 90 // 100
             keep = delta - pay
             if pay > 0:
-                points_change(conn, owner, pay, "provider_income", up["order_no"], f"实例 {up['plan_name']} 按进度结算")
+                conn.execute(
+                    "INSERT INTO provider_income(owner_id, points, updated_at) VALUES(?,?,?) ON CONFLICT(owner_id) DO UPDATE SET points=points+excluded.points, updated_at=excluded.updated_at",
+                    (owner, pay, now()))
             conn.execute(
                 "UPDATE user_plans SET provider_paid_points=provider_paid_points+?, guarantee_points=guarantee_points+?, provider_id=? WHERE id=?",
                 (pay, keep, owner, up["id"]))
@@ -6132,6 +6224,60 @@ class Handler(BaseHTTPRequestHandler):
                        WHERE n.owner_id=? AND p.deleted=0 ORDER BY p.id DESC""", (int(user["id"]),)).fetchall()
                 self.send_json({"ok": True, "plans": [plan_public(r) for r in rows]})
             return
+        if path == "/api/user/payout-account":
+            with db() as conn:
+                row = conn.execute("SELECT * FROM payout_accounts WHERE user_id=?", (int(user["id"]),)).fetchone()
+            self.send_json({"ok": True, "account": {
+                "method": row["method"] if row else "alipay",
+                "account": row["account"] if row else "",
+                "holder": row["holder"] if row else "",
+            }})
+            return
+        if path == "/api/user/payouts":
+            with db() as conn:
+                rows = conn.execute("SELECT * FROM payouts WHERE user_id=? ORDER BY id DESC LIMIT 50", (int(user["id"]),)).fetchall()
+            self.send_json({"ok": True, "payouts": [payout_public(r) for r in rows], "income": provider_income_balance(conn, int(user["id"]))})
+            return
+        if path == "/api/user/tickets":
+            qs = urllib.parse.parse_qs(urlparse(self.path).query)
+            tid = int_or_none((qs.get("id") or [""])[0])
+            with db() as conn:
+                if tid:
+                    row = conn.execute("SELECT * FROM tickets WHERE id=?", (tid,)).fetchone()
+                    if not row:
+                        self.send_json({"ok": False, "error": "工单不存在"}, 404)
+                        return
+                    is_owner = int(row["owner_id"] or 0) == int(user["id"])
+                    if int(row["user_id"]) != int(user["id"]) and not is_owner and user["role"] != "admin":
+                        self.send_json({"ok": False, "error": "无权查看该工单"}, 403)
+                        return
+                    msgs = conn.execute("SELECT * FROM ticket_messages WHERE ticket_id=? ORDER BY id", (tid,)).fetchall()
+                    self.send_json({"ok": True, "ticket": ticket_public(row), "messages": [dict(m) for m in msgs]})
+                    return
+                rows = conn.execute("SELECT * FROM tickets WHERE user_id=? ORDER BY id DESC LIMIT 100", (int(user["id"]),)).fetchall()
+            self.send_json({"ok": True, "tickets": [ticket_public(r) for r in rows]})
+            return
+        if path == "/api/provider/tickets":
+            with db() as conn:
+                rows = conn.execute(
+                    """SELECT t.* FROM tickets t JOIN nodes n ON n.id=t.node_id
+                       WHERE n.owner_id=? ORDER BY t.id DESC LIMIT 100""", (int(user["id"]),)).fetchall()
+            self.send_json({"ok": True, "tickets": [ticket_public(r) for r in rows]})
+            return
+        if path == "/api/admin/payouts":
+            if not self.require_admin():
+                return
+            with db() as conn:
+                rows = conn.execute("SELECT * FROM payouts ORDER BY id DESC LIMIT 200").fetchall()
+            self.send_json({"ok": True, "payouts": [payout_public(r) for r in rows]})
+            return
+        if path == "/api/admin/tickets":
+            if not self.require_admin():
+                return
+            with db() as conn:
+                rows = conn.execute("SELECT * FROM tickets ORDER BY id DESC LIMIT 200").fetchall()
+            self.send_json({"ok": True, "tickets": [ticket_public(r) for r in rows]})
+            return
         if path == "/api/user/provider/earnings":
             with db() as conn:
                 rows = conn.execute(
@@ -6154,10 +6300,12 @@ class Handler(BaseHTTPRequestHandler):
                         "progress": round(plan_progress(r), 4), "status": r["status"],
                     })
                 g = conn.execute("SELECT points FROM provider_guarantee WHERE owner_id=?", (int(user["id"]),)).fetchone()
+                inc = conn.execute("SELECT points FROM provider_income WHERE owner_id=?", (int(user["id"]),)).fetchone()
                 debt_row = conn.execute("SELECT points FROM provider_debts WHERE owner_id=?", (int(user["id"]),)).fetchone()
                 self.send_json({
                     "ok": True, "plans": plans,
                     "total_paid": paid_total, "guarantee": int(g["points"] or 0) if g else 0,
+                    "income": int(row_val(inc, "points", 0) or 0) if inc else 0,
                     "debt": int(debt_row["points"] or 0) if debt_row else 0,
                     "commission_pct": PROVIDER_COMMISSION_PCT,
                 })
@@ -6574,6 +6722,178 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 conn.execute("UPDATE plans SET deleted=1, active=0 WHERE id=?", (pid,))
             self.send_json({"ok": True, "message": "套餐已下架"})
+            return
+
+        if path == "/api/user/payout-account/save":
+            user = self.require_user()
+            if not user:
+                return
+            method = str(data.get("method", "alipay")).strip().lower()
+            account = str(data.get("account", "")).strip()[:120]
+            holder = str(data.get("holder", "")).strip()[:60]
+            if method not in ("alipay", "wechat", "bank"):
+                self.send_json({"ok": False, "error": "收款方式不支持"}, 400)
+                return
+            if not account or not holder:
+                self.send_json({"ok": False, "error": "请填写收款账号和姓名"}, 400)
+                return
+            with db() as conn:
+                conn.execute(
+                    "INSERT INTO payout_accounts(user_id, method, account, holder, updated_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET method=excluded.method, account=excluded.account, holder=excluded.holder, updated_at=excluded.updated_at",
+                    (int(user["id"]), method, account, holder, now()))
+            self.send_json({"ok": True, "message": "收款信息已保存"})
+            return
+
+        if path == "/api/user/withdraw":
+            user = self.require_user()
+            if not user:
+                return
+            ok_rate, retry = rate_limit_check(f"withdraw:{user['id']}", 5)
+            if not ok_rate:
+                self.send_json({"ok": False, "error": f"操作过于频繁，请 {retry} 秒后再试"}, 429)
+                return
+            mode = str(data.get("mode", "balance")).strip().lower()
+            try:
+                points = int(data.get("points", 0) or 0)
+            except (TypeError, ValueError):
+                points = 0
+            try:
+                with db() as conn:
+                    provider_income_consume(conn, int(user["id"]), points)
+                    if mode == "balance":
+                        points_change(conn, int(user["id"]), points, "provider_withdraw", "balance", "收益转入余额")
+                        self.send_json({"ok": True, "message": f"{points} 积分已转入余额"})
+                        return
+                    if mode != "external":
+                        raise ValueError("未知提现方式")
+                    acc = conn.execute("SELECT * FROM payout_accounts WHERE user_id=?", (int(user["id"]),)).fetchone()
+                    if not acc or not acc["account"]:
+                        raise ValueError("请先在个人中心配置收款信息")
+                    pno = new_payout_no()
+                    conn.execute(
+                        "INSERT INTO payouts(payout_no, user_id, username, points, method, account, holder, status, note, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        (pno, int(user["id"]), user["username"], points, acc["method"], acc["account"], acc["holder"], "pending", "", now(), now()))
+                    conn.execute(
+                        "INSERT INTO tickets(ticket_no, user_id, username, kind, status, node_id, owner_id, title, content, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        (new_ticket_no(), int(user["id"]), user["username"], "withdraw", "open", 0, 0,
+                         f"提现 {points} 积分", f"提现单号 {pno}，方式 {acc['method']}，账号 {acc['account']}，姓名 {acc['holder']}", now(), now()))
+                self.send_json({"ok": True, "message": "提现申请已提交，等待管理员处理"})
+            except ValueError as e:
+                self.send_json({"ok": False, "error": str(e)}, 400)
+            return
+
+        if path == "/api/user/tickets/create":
+            user = self.require_user()
+            if not user:
+                return
+            ok_rate, retry = rate_limit_check(f"ticket:{user['id']}", 10)
+            if not ok_rate:
+                self.send_json({"ok": False, "error": f"提交过于频繁，请 {retry} 秒后再试"}, 429)
+                return
+            title = str(data.get("title", "")).strip()[:80]
+            content = str(data.get("content", "")).strip()[:2000]
+            try:
+                node_id = int(data.get("node_id", 0) or 0)
+            except (TypeError, ValueError):
+                node_id = 0
+            if not title or not content:
+                self.send_json({"ok": False, "error": "请填写标题和问题描述"}, 400)
+                return
+            with db() as conn:
+                owner_id = 0
+                if node_id:
+                    node = conn.execute("SELECT id, owner_id FROM nodes WHERE id=?", (node_id,)).fetchone()
+                    if not node:
+                        self.send_json({"ok": False, "error": "节点不存在"}, 400)
+                        return
+                    owns = conn.execute("SELECT 1 FROM user_plans WHERE user_id=? AND node_id=? LIMIT 1", (int(user["id"]), node_id)).fetchone()
+                    if not owns:
+                        self.send_json({"ok": False, "error": "只能对已购买的实例提交工单"}, 400)
+                        return
+                    owner_id = int(node["owner_id"] or 0)
+                tno = new_ticket_no()
+                conn.execute(
+                    "INSERT INTO tickets(ticket_no, user_id, username, kind, status, node_id, owner_id, title, content, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (tno, int(user["id"]), user["username"], "issue", "open", node_id, owner_id, title, content, now(), now()))
+            self.send_json({"ok": True, "message": "工单已提交"})
+            return
+
+        if path == "/api/user/tickets/reply":
+            user = self.require_user()
+            if not user:
+                return
+            try:
+                tid = int(data.get("id", 0))
+            except (TypeError, ValueError):
+                tid = 0
+            content = str(data.get("content", "")).strip()[:2000]
+            if not content:
+                self.send_json({"ok": False, "error": "回复内容不能为空"}, 400)
+                return
+            with db() as conn:
+                row = conn.execute("SELECT * FROM tickets WHERE id=?", (tid,)).fetchone()
+                if not row:
+                    self.send_json({"ok": False, "error": "工单不存在"}, 404)
+                    return
+                role = "user"
+                if int(row["owner_id"] or 0) == int(user["id"]) and int(row["user_id"]) != int(user["id"]):
+                    role = "owner"
+                elif user["role"] == "admin":
+                    role = "admin"
+                elif int(row["user_id"]) != int(user["id"]):
+                    self.send_json({"ok": False, "error": "无权回复该工单"}, 403)
+                    return
+                conn.execute(
+                    "INSERT INTO ticket_messages(ticket_id, user_id, username, role, content, created_at) VALUES(?,?,?,?,?,?)",
+                    (tid, int(user["id"]), user["username"], role, content, now()))
+                conn.execute("UPDATE tickets SET status=CASE WHEN status='open' THEN 'processing' ELSE status END, updated_at=? WHERE id=?", (now(), tid))
+            self.send_json({"ok": True, "message": "已回复"})
+            return
+
+        if path == "/api/user/tickets/close":
+            user = self.require_user()
+            if not user:
+                return
+            try:
+                tid = int(data.get("id", 0))
+            except (TypeError, ValueError):
+                tid = 0
+            with db() as conn:
+                row = conn.execute("SELECT * FROM tickets WHERE id=?", (tid,)).fetchone()
+                if not row:
+                    self.send_json({"ok": False, "error": "工单不存在"}, 404)
+                    return
+                if int(row["user_id"]) != int(user["id"]) and int(row["owner_id"] or 0) != int(user["id"]) and user["role"] != "admin":
+                    self.send_json({"ok": False, "error": "无权关闭该工单"}, 403)
+                    return
+                conn.execute("UPDATE tickets SET status='closed', updated_at=? WHERE id=?", (now(), tid))
+            self.send_json({"ok": True, "message": "工单已关闭"})
+            return
+
+        if path == "/api/admin/payouts/review":
+            if not self.require_admin():
+                return
+            try:
+                pid = int(data.get("id", 0))
+            except (TypeError, ValueError):
+                pid = 0
+            action = str(data.get("action", "")).strip().lower()
+            if action not in ("paid", "reject"):
+                self.send_json({"ok": False, "error": "未知操作"}, 400)
+                return
+            with db() as conn:
+                row = conn.execute("SELECT * FROM payouts WHERE id=?", (pid,)).fetchone()
+                if not row or row["status"] != "pending":
+                    self.send_json({"ok": False, "error": "提现单不存在或已处理"}, 404)
+                    return
+                if action == "paid":
+                    conn.execute("UPDATE payouts SET status='paid', updated_at=? WHERE id=?", (now(), pid))
+                else:
+                    conn.execute("UPDATE payouts SET status='rejected', updated_at=? WHERE id=?", (now(), pid))
+                    conn.execute(
+                        "INSERT INTO provider_income(owner_id, points, updated_at) VALUES(?,?,?) ON CONFLICT(owner_id) DO UPDATE SET points=points+excluded.points, updated_at=excluded.updated_at",
+                        (int(row["user_id"]), int(row["points"] or 0), now()))
+            self.send_json({"ok": True, "message": "已处理"})
             return
 
         if path == "/api/user/plans/cancel":
