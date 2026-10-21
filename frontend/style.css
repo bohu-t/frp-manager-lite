@@ -1895,3 +1895,8 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .notif-item b{font-size:13px;color:var(--text-strong)}
 .notif-item span{font-size:12px;color:var(--muted)}
 .notif-item small{font-size:11px;color:var(--muted)}
+.topbar-bell-wrap.floating{position:fixed;top:16px;right:20px;z-index:400}
+.topbar-bell-wrap.floating .topbar-bell{width:40px;height:40px;border-radius:50%;background:var(--card);border:1px solid var(--border);box-shadow:0 6px 18px rgba(0,0,0,.12);display:grid;place-items:center;color:var(--text-strong);cursor:pointer}
+.topbar-bell-wrap.floating .topbar-bell svg{width:20px;height:20px}
+.topbar-bell-wrap.floating .notif-panel{top:48px;right:0}
+@media(max-width:720px){.topbar-bell-wrap.floating{top:10px;right:10px}.topbar-bell-wrap.floating .notif-panel{width:min(92vw,320px)}}
