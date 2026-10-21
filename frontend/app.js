@@ -1325,6 +1325,36 @@ function tkCmd(cmd){
   if(ed) ed.focus();
 }
 
+async function uploadImage(file, kind){
+  if(!file || !file.type.startsWith('image/')) throw new Error('请选择图片文件');
+  if(file.size > 3 * 1024 * 1024) throw new Error('图片不能超过 3MB');
+  const dataUrl = await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(new Error('读取图片失败'));
+    fr.readAsDataURL(file);
+  });
+  const r = await api('/api/user/upload', {method:'POST', body:{kind, mime:file.type, data:dataUrl}});
+  return r.token;
+}
+
+function renderTicketAtts(){
+  const box = document.querySelector('#tkAtts');
+  if(!box) return;
+  const list = window.__tkAtts || [];
+  box.innerHTML = list.map((tok, i) => `<span class="tk-att"><img src="/api/upload/${encodeURIComponent(tok)}" alt=""><button type="button" onclick="removeTicketAtt(${i})">×</button></span>`).join('');
+}
+function removeTicketAtt(i){
+  (window.__tkAtts || []).splice(i, 1);
+  renderTicketAtts();
+}
+
+function attsHtml(tokens){
+  const list = Array.isArray(tokens) ? tokens : [];
+  if(!list.length) return '';
+  return `<div class="ticket-atts">${list.map(t => `<a href="/api/upload/${encodeURIComponent(t)}" target="_blank" rel="noopener"><img src="/api/upload/${encodeURIComponent(t)}" alt="附件"></a>`).join('')}</div>`;
+}
+
 async function loadTicketNew(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
   let nodes = [], plans = [], income = 0, acc = { method: 'alipay', account: '', holder: '' };
@@ -1353,10 +1383,13 @@ async function loadTicketNew(){
             <button type="button" title="斜体" onclick="tkCmd('italic')"><i>I</i></button>
             <button type="button" title="下划线" onclick="tkCmd('underline')"><u>U</u></button>
             <button type="button" title="列表" onclick="tkCmd('insertUnorderedList')">• 列表</button>
+            <button type="button" title="插入图片" onclick="document.querySelector('#tkFile').click()">🖼 图片</button>
+            <input type="file" id="tkFile" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
           </div>
           <div id="tkEditor" class="tk-editor" contenteditable="true" data-placeholder="详细描述您的问题..."></div>
         </div>
       </div>
+      <div id="tkAtts" class="tk-atts"></div>
       <button type="button" class="tk-submit" id="tkSubmit">提交</button>
     </section>`;
   const withdrawPanel = `
@@ -1380,6 +1413,19 @@ async function loadTicketNew(){
     </div>
     ${ticketNewKind === 'issue' ? issuePanel : withdrawPanel}
   `, 'dashboard-tickets', '工单');
+  window.__tkAtts = [];
+  const fileInput = document.querySelector('#tkFile');
+  if(fileInput) fileInput.onchange = async () => {
+    for(const f of Array.from(fileInput.files || [])){
+      try{
+        const token = await uploadImage(f, 'ticket');
+        window.__tkAtts.push(token);
+      }catch(err){ show(err.message || '图片上传失败', true); }
+    }
+    fileInput.value = '';
+    renderTicketAtts();
+  };
+  renderTicketAtts();
   const submit = document.querySelector('#tkSubmit');
   if(ticketNewKind === 'issue'){
     submit.onclick = async () => {
@@ -1390,7 +1436,7 @@ async function loadTicketNew(){
       if(!ed.innerText.trim()){ show('请填写沟通内容', true); return; }
       submit.disabled = true;
       try{
-        const r = await api('/api/user/tickets/create', {method:'POST', body:{node_id:nodeId, title, content:ed.innerHTML}});
+        const r = await api('/api/user/tickets/create', {method:'POST', body:{node_id:nodeId, title, content:ed.innerHTML, attachments:window.__tkAtts || []}});
         show(r.message || '已提交'); await loadTickets();
       }catch(err){ show(err.message || '提交失败', true); submit.disabled = false; }
     };
@@ -1414,12 +1460,12 @@ async function openTicket(id){
   catch(err){ show(err.message, true); return; }
   const t = data.ticket || {};
   const msgs = data.messages || [];
-  const thread = msgs.map(m => `<div class="ticket-msg ${m.role}"><div class="ticket-msg-head"><b>${esc(m.username)}</b><span>${m.role === 'owner' ? '机主' : (m.role === 'admin' ? '管理员' : '用户')} · ${fmtTs(m.created_at)}</span></div><p>${ticketBodyHtml(m.content)}</p></div>`).join('');
+  const thread = msgs.map(m => `<div class="ticket-msg ${m.role}"><div class="ticket-msg-head"><b>${esc(m.username)}</b><span>${m.role === 'owner' ? '机主' : (m.role === 'admin' ? '管理员' : '用户')} · ${fmtTs(m.created_at)}</span></div><p>${ticketBodyHtml(m.content)}</p>${attsHtml(m.attachments)}</div>`).join('');
   document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="ticketModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeTicketModal()">
     <section class="modal-page card app-dialog">
       <div class="section-title modal-title"><div><h2>${esc(t.title || '工单')}</h2><p>${esc(t.ticket_no || '')} · ${TICKET_STATUS[t.status] || ''}</p></div></div>
       <div class="ticket-thread">
-        <div class="ticket-msg user"><div class="ticket-msg-head"><b>${esc(t.username || '')}</b><span>用户 · ${fmtTs(t.created_at)}</span></div><p>${ticketBodyHtml(t.content)}</p></div>
+        <div class="ticket-msg user"><div class="ticket-msg-head"><b>${esc(t.username || '')}</b><span>用户 · ${fmtTs(t.created_at)}</span></div><p>${ticketBodyHtml(t.content)}</p>${attsHtml(t.attachments)}</div>
         ${thread}
       </div>
       ${t.status !== 'closed' ? `<form id="ticketReplyForm" class="grid"><div class="span-2"><label>回复</label><textarea name="content" rows="3" maxlength="2000" required placeholder="补充信息或回复机主"></textarea></div><div class="form-actions span-2"><button type="button" class="secondary" onclick="closeTicketModal()">关闭窗口</button><button type="button" class="secondary" onclick="closeTicket(${Number(t.id)})">结束工单</button><button type="submit">发送回复</button></div></form>` : '<p class="muted small">该工单已关闭</p>'}
@@ -1458,10 +1504,10 @@ async function loadAdminPayouts(){
   let payouts = [];
   try{ payouts = (await api('/api/admin/payouts')).payouts || []; }
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
-  const rows = payouts.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td>${esc(p.username)}</td><td><b>${p.points}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${esc(p.holder)}</td><td><span class="status-badge ${p.status === 'paid' ? 'ok' : (p.status === 'pending' ? 'warn' : 'bad')}"><i></i>${p.status === 'paid' ? '已打款' : (p.status === 'pending' ? '待处理' : '已拒绝')}</span></td><td>${fmtTs(p.created_at)}</td><td class="actions node-actions">${p.status === 'pending' ? `<button class="node-action" onclick="reviewPayout(${p.id}, 'paid')">标记已打款</button><button class="node-action node-action-danger" onclick="reviewPayout(${p.id}, 'reject')">拒绝</button>` : '<span class="muted small">—</span>'}</td></tr>`).join('') || '<tr><td colspan="10" class="muted">暂无提现申请</td></tr>';
+  const rows = payouts.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td>${esc(p.username)}</td><td><b>${p.points}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${esc(p.holder)}</td><td>${p.qr_token ? `<a href="/api/upload/${encodeURIComponent(p.qr_token)}" target="_blank" rel="noopener"><img class="qr-thumb" src="/api/upload/${encodeURIComponent(p.qr_token)}" alt="收款码"></a>` : '-'}</td><td><span class="status-badge ${p.status === 'paid' ? 'ok' : (p.status === 'pending' ? 'warn' : 'bad')}"><i></i>${p.status === 'paid' ? '已打款' : (p.status === 'pending' ? '待处理' : '已拒绝')}</span></td><td>${fmtTs(p.created_at)}</td><td class="actions node-actions">${p.status === 'pending' ? `<button class="node-action" onclick="reviewPayout(${p.id}, 'paid')">标记已打款</button><button class="node-action node-action-danger" onclick="reviewPayout(${p.id}, 'reject')">拒绝</button>` : '<span class="muted small">—</span>'}</td></tr>`).join('') || '<tr><td colspan="11" class="muted">暂无提现申请</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">PAYOUTS</span><h1>提现</h1><p>处理供给方的收款提现申请</p></div><button type="button" class="secondary" onclick="loadAdminPayouts()">刷新</button></div>
-    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>用户</th><th>积分</th><th>方式</th><th>账号</th><th>姓名</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>用户</th><th>积分</th><th>方式</th><th>账号</th><th>姓名</th><th>收款码</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
   `, 'admin-payouts', '提现');
 }
 
@@ -1915,6 +1961,18 @@ function openInstanceTunnels(nodeId, nodeName, planId, planName){
 function initPayoutAccountForm(){
   const form = document.querySelector('#payoutAccountForm');
   if(!form) return;
+  const qrFile = form.querySelector('#qrFile');
+  if(qrFile) qrFile.onchange = async () => {
+    const f = (qrFile.files || [])[0];
+    if(!f) return;
+    try{
+      const token = await uploadImage(f, 'qr');
+      form.elements.qr_token.value = token;
+      const box = document.querySelector('#qrPreview');
+      if(box) box.innerHTML = `<img src="/api/upload/${encodeURIComponent(token)}" alt="收款码">`;
+      show('收款码已上传，记得保存');
+    }catch(err){ show(err.message || '上传失败', true); }
+  };
   form.onsubmit = async (e) => {
     e.preventDefault();
     try{
@@ -2668,6 +2726,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
           <div><label>收款方式</label><select name="method"><option value="alipay"${payoutAcc.method === 'alipay' ? ' selected' : ''}>支付宝</option><option value="wechat"${payoutAcc.method === 'wechat' ? ' selected' : ''}>微信</option><option value="bank"${payoutAcc.method === 'bank' ? ' selected' : ''}>银行卡</option></select></div>
           <div><label>收款账号</label><input name="account" value="${esc(payoutAcc.account || '')}" required placeholder="支付宝账号 / 微信号 / 银行卡号"></div>
           <div><label>姓名</label><input name="holder" value="${esc(payoutAcc.holder || '')}" required placeholder="收款人姓名"></div>
+          <div class="span-2"><label>收款码（可选）</label><input type="file" id="qrFile" accept="image/png,image/jpeg,image/webp"><input type="hidden" name="qr_token" value="${esc(payoutAcc.qr_token || '')}"><div id="qrPreview" class="qr-preview">${payoutAcc.qr_token ? `<img src="/api/upload/${encodeURIComponent(payoutAcc.qr_token)}" alt="收款码">` : ''}</div></div>
           <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存收款信息</button></div>
         </form>
       </section>`, 'dashboard-profile', '个人中心');

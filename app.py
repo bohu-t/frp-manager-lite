@@ -2820,6 +2820,16 @@ def init_db() -> None:
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS uploads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token TEXT NOT NULL UNIQUE,
+                user_id INTEGER NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'ticket',
+                mime TEXT NOT NULL DEFAULT '',
+                size INTEGER NOT NULL DEFAULT 0,
+                data BLOB NOT NULL,
+                created_at INTEGER NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS provider_income (
                 owner_id INTEGER PRIMARY KEY,
                 points INTEGER NOT NULL DEFAULT 0,
@@ -2830,6 +2840,7 @@ def init_db() -> None:
                 method TEXT NOT NULL DEFAULT 'alipay',
                 account TEXT NOT NULL DEFAULT '',
                 holder TEXT NOT NULL DEFAULT '',
+                qr_token TEXT NOT NULL DEFAULT '',
                 updated_at INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS payouts (
@@ -2841,6 +2852,7 @@ def init_db() -> None:
                 method TEXT NOT NULL DEFAULT 'alipay',
                 account TEXT NOT NULL DEFAULT '',
                 holder TEXT NOT NULL DEFAULT '',
+                qr_token TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'pending',
                 note TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL,
@@ -2857,6 +2869,7 @@ def init_db() -> None:
                 owner_id INTEGER NOT NULL DEFAULT 0,
                 title TEXT NOT NULL DEFAULT '',
                 content TEXT NOT NULL DEFAULT '',
+                attachments TEXT NOT NULL DEFAULT '[]',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
@@ -2867,6 +2880,7 @@ def init_db() -> None:
                 username TEXT NOT NULL DEFAULT '',
                 role TEXT NOT NULL DEFAULT 'user',
                 content TEXT NOT NULL DEFAULT '',
+                attachments TEXT NOT NULL DEFAULT '[]',
                 created_at INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS provider_guarantee (
@@ -3100,6 +3114,15 @@ def init_db() -> None:
             conn.execute("ALTER TABLE nodes ADD COLUMN auto_suspended INTEGER NOT NULL DEFAULT 0")
         if "expires_at" not in node_cols:
             conn.execute("ALTER TABLE nodes ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0")
+        for tbl, col, ddl in (
+            ("payout_accounts", "qr_token", "TEXT NOT NULL DEFAULT ''"),
+            ("tickets", "attachments", "TEXT NOT NULL DEFAULT '[]'"),
+            ("ticket_messages", "attachments", "TEXT NOT NULL DEFAULT '[]'"),
+            ("payouts", "qr_token", "TEXT NOT NULL DEFAULT ''"),
+        ):
+            cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({tbl})").fetchall()}
+            if col not in cols:
+                conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {ddl}")
         host_cols = {r["name"] for r in conn.execute("PRAGMA table_info(hosts)").fetchall()}
         if "expires_at" not in host_cols:
             conn.execute("ALTER TABLE hosts ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0")
@@ -3636,6 +3659,19 @@ def sanitize_ticket_html(raw: str) -> str:
     return re.sub(r"(?s)<[^>]+>", _tag, text).strip()
 
 
+def clean_attachment_tokens(conn: sqlite3.Connection, user_id: int, raw: Any, limit: int = 6) -> str:
+    items = raw if isinstance(raw, list) else []
+    tokens: list[str] = []
+    for t in items[:limit]:
+        tok = str(t or "").strip()
+        if not tok or tok in tokens:
+            continue
+        row = conn.execute("SELECT 1 FROM uploads WHERE token=? AND user_id=?", (tok, user_id)).fetchone()
+        if row:
+            tokens.append(tok)
+    return json.dumps(tokens, ensure_ascii=False)
+
+
 def new_ticket_no() -> str:
     return "TK" + time.strftime("%Y%m%d%H%M%S", time.localtime()) + secrets.token_hex(2).upper()
 
@@ -3649,6 +3685,7 @@ def ticket_public(row: sqlite3.Row) -> dict[str, Any]:
         "id": int(row["id"]), "ticket_no": row["ticket_no"], "kind": row["kind"], "status": row["status"],
         "user_id": int(row["user_id"]), "username": row["username"], "node_id": int(row["node_id"] or 0),
         "owner_id": int(row["owner_id"] or 0), "title": row["title"], "content": row["content"],
+        "attachments": json.loads(row["attachments"] or "[]") if "attachments" in row.keys() else [],
         "created_at": int(row["created_at"] or 0), "updated_at": int(row["updated_at"] or 0),
     }
 
@@ -3657,7 +3694,8 @@ def payout_public(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": int(row["id"]), "payout_no": row["payout_no"], "user_id": int(row["user_id"]),
         "username": row["username"], "points": int(row["points"] or 0), "method": row["method"],
-        "account": row["account"], "holder": row["holder"], "status": row["status"],
+        "account": row["account"], "holder": row["holder"],
+        "qr_token": row_val(row, "qr_token", "") or "", "status": row["status"],
         "note": row["note"], "created_at": int(row["created_at"] or 0), "updated_at": int(row["updated_at"] or 0),
     }
 
@@ -6242,6 +6280,18 @@ class Handler(BaseHTTPRequestHandler):
                        WHERE n.owner_id=? AND p.deleted=0 ORDER BY p.id DESC""", (int(user["id"]),)).fetchall()
                 self.send_json({"ok": True, "plans": [plan_public(r) for r in rows]})
             return
+        if path.startswith("/api/upload/"):
+            tok = path.rsplit("/", 1)[-1]
+            with db() as conn:
+                row = conn.execute("SELECT * FROM uploads WHERE token=?", (tok,)).fetchone()
+            if not row:
+                self.send_json({"ok": False, "error": "文件不存在"}, 404)
+                return
+            if row["kind"] == "qr" and int(row["user_id"]) != int(user["id"]) and user["role"] != "admin":
+                self.send_json({"ok": False, "error": "无权查看"}, 403)
+                return
+            self.send_body(bytes(row["data"]), 200, row["mime"] or "application/octet-stream", cache_control="private, max-age=86400")
+            return
         if path == "/api/user/payout-account":
             with db() as conn:
                 row = conn.execute("SELECT * FROM payout_accounts WHERE user_id=?", (int(user["id"]),)).fetchone()
@@ -6249,6 +6299,7 @@ class Handler(BaseHTTPRequestHandler):
                 "method": row["method"] if row else "alipay",
                 "account": row["account"] if row else "",
                 "holder": row["holder"] if row else "",
+                "qr_token": (row_val(row, "qr_token", "") or "") if row else "",
             }})
             return
         if path == "/api/user/payouts":
@@ -6742,6 +6793,37 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, "message": "套餐已下架"})
             return
 
+        if path == "/api/user/upload":
+            user = self.require_user()
+            if not user:
+                return
+            kind = str(data.get("kind", "ticket")).strip().lower()
+            if kind not in ("ticket", "qr"):
+                self.send_json({"ok": False, "error": "上传类型不支持"}, 400)
+                return
+            mime = str(data.get("mime", "")).strip().lower()
+            if mime not in ("image/png", "image/jpeg", "image/webp", "image/gif"):
+                self.send_json({"ok": False, "error": "只支持 PNG / JPG / WEBP / GIF 图片"}, 400)
+                return
+            raw = str(data.get("data", "") or "")
+            if "," in raw[:100] and raw.strip().startswith("data:"):
+                raw = raw.split(",", 1)[1]
+            try:
+                blob = base64.b64decode(raw, validate=True)
+            except Exception:
+                self.send_json({"ok": False, "error": "图片数据无效"}, 400)
+                return
+            if len(blob) > 3 * 1024 * 1024:
+                self.send_json({"ok": False, "error": "图片不能超过 3MB"}, 400)
+                return
+            tok = secrets.token_urlsafe(18)
+            with db() as conn:
+                conn.execute(
+                    "INSERT INTO uploads(token, user_id, kind, mime, size, data, created_at) VALUES(?,?,?,?,?,?,?)",
+                    (tok, int(user["id"]), kind, mime, len(blob), sqlite3.Binary(blob), now()))
+            self.send_json({"ok": True, "token": tok, "url": f"/api/upload/{tok}"})
+            return
+
         if path == "/api/user/payout-account/save":
             user = self.require_user()
             if not user:
@@ -6755,10 +6837,16 @@ class Handler(BaseHTTPRequestHandler):
             if not account or not holder:
                 self.send_json({"ok": False, "error": "请填写收款账号和姓名"}, 400)
                 return
+            qr_token = str(data.get("qr_token", "") or "").strip()
             with db() as conn:
+                if qr_token:
+                    own = conn.execute("SELECT 1 FROM uploads WHERE token=? AND user_id=? AND kind='qr'", (qr_token, int(user["id"]))).fetchone()
+                    if not own:
+                        self.send_json({"ok": False, "error": "收款码无效，请重新上传"}, 400)
+                        return
                 conn.execute(
-                    "INSERT INTO payout_accounts(user_id, method, account, holder, updated_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET method=excluded.method, account=excluded.account, holder=excluded.holder, updated_at=excluded.updated_at",
-                    (int(user["id"]), method, account, holder, now()))
+                    "INSERT INTO payout_accounts(user_id, method, account, holder, qr_token, updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET method=excluded.method, account=excluded.account, holder=excluded.holder, qr_token=CASE WHEN excluded.qr_token<>'' THEN excluded.qr_token ELSE payout_accounts.qr_token END, updated_at=excluded.updated_at",
+                    (int(user["id"]), method, account, holder, qr_token, now()))
             self.send_json({"ok": True, "message": "收款信息已保存"})
             return
 
@@ -6789,8 +6877,8 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError("请先在个人中心配置收款信息")
                     pno = new_payout_no()
                     conn.execute(
-                        "INSERT INTO payouts(payout_no, user_id, username, points, method, account, holder, status, note, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                        (pno, int(user["id"]), user["username"], points, acc["method"], acc["account"], acc["holder"], "pending", "", now(), now()))
+                        "INSERT INTO payouts(payout_no, user_id, username, points, method, account, holder, qr_token, status, note, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (pno, int(user["id"]), user["username"], points, acc["method"], acc["account"], acc["holder"], row_val(acc, "qr_token", "") or "", "pending", "", now(), now()))
                     conn.execute(
                         "INSERT INTO tickets(ticket_no, user_id, username, kind, status, node_id, owner_id, title, content, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                         (new_ticket_no(), int(user["id"]), user["username"], "withdraw", "open", 0, 0,
@@ -6830,9 +6918,10 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     owner_id = int(node["owner_id"] or 0)
                 tno = new_ticket_no()
+                att = clean_attachment_tokens(conn, int(user["id"]), data.get("attachments"))
                 conn.execute(
-                    "INSERT INTO tickets(ticket_no, user_id, username, kind, status, node_id, owner_id, title, content, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                    (tno, int(user["id"]), user["username"], "issue", "open", node_id, owner_id, title, content, now(), now()))
+                    "INSERT INTO tickets(ticket_no, user_id, username, kind, status, node_id, owner_id, title, content, attachments, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (tno, int(user["id"]), user["username"], "issue", "open", node_id, owner_id, title, content, att, now(), now()))
             self.send_json({"ok": True, "message": "工单已提交"})
             return
 
@@ -6861,9 +6950,10 @@ class Handler(BaseHTTPRequestHandler):
                 elif int(row["user_id"]) != int(user["id"]):
                     self.send_json({"ok": False, "error": "无权回复该工单"}, 403)
                     return
+                att = clean_attachment_tokens(conn, int(user["id"]), data.get("attachments"))
                 conn.execute(
-                    "INSERT INTO ticket_messages(ticket_id, user_id, username, role, content, created_at) VALUES(?,?,?,?,?,?)",
-                    (tid, int(user["id"]), user["username"], role, content, now()))
+                    "INSERT INTO ticket_messages(ticket_id, user_id, username, role, content, attachments, created_at) VALUES(?,?,?,?,?,?,?)",
+                    (tid, int(user["id"]), user["username"], role, content, att, now()))
                 conn.execute("UPDATE tickets SET status=CASE WHEN status='open' THEN 'processing' ELSE status END, updated_at=? WHERE id=?", (now(), tid))
             self.send_json({"ok": True, "message": "已回复"})
             return

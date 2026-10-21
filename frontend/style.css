@@ -1863,3 +1863,11 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .tk-submit{height:46px;border:0;border-radius:10px;background:#1677FF;color:#fff;font-size:15px;font-weight:600;cursor:pointer}
 .tk-submit:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:720px){.tk-type-grid{grid-template-columns:1fr}}
+.tk-atts{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.tk-att{position:relative;display:inline-block}
+.tk-att img{width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--border)}
+.tk-att button{position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:0;background:var(--danger,#e5484d);color:#fff;font-size:12px;line-height:1;cursor:pointer}
+.ticket-atts{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.ticket-atts img{width:96px;height:96px;object-fit:cover;border-radius:8px;border:1px solid var(--border)}
+.qr-preview img{width:120px;height:120px;object-fit:contain;border:1px solid var(--border);border-radius:8px;background:#fff;margin-top:8px}
+.qr-thumb{width:44px;height:44px;object-fit:contain;border:1px solid var(--border);border-radius:6px;background:#fff}
