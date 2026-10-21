@@ -3687,6 +3687,7 @@ def ticket_public(row: sqlite3.Row) -> dict[str, Any]:
         "id": int(row["id"]), "ticket_no": row["ticket_no"], "kind": row["kind"], "status": row["status"],
         "user_id": int(row["user_id"]), "username": row["username"], "node_id": int(row["node_id"] or 0),
         "owner_id": int(row["owner_id"] or 0), "title": row["title"], "content": row["content"],
+        "node_name": (row["node_name"] if "node_name" in row.keys() else "") or "",
         "attachments": json.loads(row["attachments"] or "[]") if "attachments" in row.keys() else [],
         "resolution": (row["resolution"] if "resolution" in row.keys() else "") or "",
         "created_at": int(row["created_at"] or 0), "updated_at": int(row["updated_at"] or 0),
@@ -6315,7 +6316,7 @@ class Handler(BaseHTTPRequestHandler):
             tid = int_or_none((qs.get("id") or [""])[0])
             with db() as conn:
                 if tid:
-                    row = conn.execute("SELECT * FROM tickets WHERE id=?", (tid,)).fetchone()
+                    row = conn.execute("SELECT t.*, n.name AS node_name FROM tickets t LEFT JOIN nodes n ON n.id=t.node_id WHERE t.id=?", (tid,)).fetchone()
                     if not row:
                         self.send_json({"ok": False, "error": "工单不存在"}, 404)
                         return
@@ -6326,16 +6327,16 @@ class Handler(BaseHTTPRequestHandler):
                     msgs = conn.execute("SELECT * FROM ticket_messages WHERE ticket_id=? ORDER BY id", (tid,)).fetchall()
                     self.send_json({"ok": True, "ticket": ticket_public(row), "messages": [dict(m) for m in msgs]})
                     return
-                rows = conn.execute("SELECT * FROM tickets WHERE user_id=? ORDER BY id DESC LIMIT 100", (int(user["id"]),)).fetchall()
+                rows = conn.execute("SELECT t.*, n.name AS node_name FROM tickets t LEFT JOIN nodes n ON n.id=t.node_id WHERE t.user_id=? ORDER BY t.id DESC LIMIT 100", (int(user["id"]),)).fetchall()
             self.send_json({"ok": True, "tickets": [ticket_public(r) for r in rows]})
             return
         if path == "/api/provider/tickets":
             with db() as conn:
                 if user["role"] == "admin":
-                    rows = conn.execute("SELECT * FROM tickets ORDER BY id DESC LIMIT 100").fetchall()
+                    rows = conn.execute("SELECT t.*, n.name AS node_name FROM tickets t LEFT JOIN nodes n ON n.id=t.node_id ORDER BY t.id DESC LIMIT 100").fetchall()
                 else:
                     rows = conn.execute(
-                        """SELECT t.* FROM tickets t JOIN nodes n ON n.id=t.node_id
+                        """SELECT t.*, n.name AS node_name FROM tickets t JOIN nodes n ON n.id=t.node_id
                            WHERE n.owner_id=? ORDER BY t.id DESC LIMIT 100""", (int(user["id"]),)).fetchall()
             self.send_json({"ok": True, "tickets": [ticket_public(r) for r in rows]})
             return
@@ -6350,7 +6351,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.require_admin():
                 return
             with db() as conn:
-                rows = conn.execute("SELECT * FROM tickets ORDER BY id DESC LIMIT 200").fetchall()
+                rows = conn.execute("SELECT t.*, n.name AS node_name FROM tickets t LEFT JOIN nodes n ON n.id=t.node_id ORDER BY t.id DESC LIMIT 200").fetchall()
             self.send_json({"ok": True, "tickets": [ticket_public(r) for r in rows]})
             return
         if path == "/api/user/provider/earnings":
