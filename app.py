@@ -2359,7 +2359,7 @@ def start_plan_usage_loop() -> None:
         while True:
             try:
                 auto_renew_plans_once()
-                settle_provider_earnings_once()
+                accrue_provider_income_once()
                 expire_plans_once()
                 with db() as conn:
                     reclaim_expired_plan_ports(conn)
@@ -2805,6 +2805,19 @@ def init_db() -> None:
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS provider_guarantee (
+                owner_id INTEGER PRIMARY KEY,
+                points INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS platform_revenue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_no TEXT NOT NULL DEFAULT '',
+                plan_id INTEGER NOT NULL DEFAULT 0,
+                node_id INTEGER NOT NULL DEFAULT 0,
+                points INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS provider_debts (
                 owner_id INTEGER PRIMARY KEY,
                 points INTEGER NOT NULL DEFAULT 0,
@@ -2970,6 +2983,12 @@ def init_db() -> None:
             conn.execute("ALTER TABLE user_plans ADD COLUMN usage_started_at INTEGER NOT NULL DEFAULT 0")
         if "auto_renew" not in up_cols:
             conn.execute("ALTER TABLE user_plans ADD COLUMN auto_renew INTEGER NOT NULL DEFAULT 0")
+        if "provider_paid_points" not in up_cols:
+            conn.execute("ALTER TABLE user_plans ADD COLUMN provider_paid_points INTEGER NOT NULL DEFAULT 0")
+        if "guarantee_points" not in up_cols:
+            conn.execute("ALTER TABLE user_plans ADD COLUMN guarantee_points INTEGER NOT NULL DEFAULT 0")
+        if "provider_id" not in up_cols:
+            conn.execute("ALTER TABLE user_plans ADD COLUMN provider_id INTEGER NOT NULL DEFAULT 0")
         upp_cols = {r["name"] for r in conn.execute("PRAGMA table_info(user_plan_ports)").fetchall()}
         if "release_at" not in upp_cols:
             conn.execute("ALTER TABLE user_plan_ports ADD COLUMN release_at INTEGER NOT NULL DEFAULT 0")
@@ -4587,6 +4606,7 @@ def expire_plans_once() -> int:
             (now(),)).fetchall()
         users: set[int] = set()
         for r in rows:
+            realize_guarantee(conn, r)
             conn.execute("UPDATE user_plans SET status='expired' WHERE id=?", (r["id"],))
             release_plan_resources(conn, r)
             users.add(int(r["user_id"]))
@@ -4729,39 +4749,41 @@ MAX_PLANS_PER_NODE = max(1, int(os.getenv("FML_MAX_PLANS_PER_NODE", "2") or 2))
 
 
 def refund_plans_on_node(conn: sqlite3.Connection, node_id: int, reason: str = "节点停用，按剩余价值退款") -> tuple[int, int]:
-    """节点故障/停用：按剩余天数或剩余额度退款并取消实例。"""
+    """节点故障/停用：退还未服务部分，并用留存保证金补偿买家。"""
     rows = conn.execute("SELECT * FROM user_plans WHERE node_id=? AND status='active'", (node_id,)).fetchall()
+    if not rows:
+        return 0, 0
+    items = []
+    for p in rows:
+        price = int(p["price_points"] or 0)
+        target = int(price * plan_progress(p))
+        remaining = max(0, price - target)
+        items.append((p, price, remaining, int(p["guarantee_points"] or 0)))
+    total_remaining = sum(x[2] for x in items)
+    owners = {int(x[0]["provider_id"] or 0) for x in items if int(x[0]["provider_id"] or 0) > 0}
+    pools: dict[int, int] = {}
+    for owner in owners:
+        g = conn.execute("SELECT points FROM provider_guarantee WHERE owner_id=?", (owner,)).fetchone()
+        pools[owner] = int(g["points"] or 0) if g else 0
     count = 0
     total_refund = 0
     users: set[int] = set()
-    for p in rows:
-        price = int(p["price_points"] or 0)
-        ratio = 1.0
-        if int(p["expires_at"] or 0):
-            total = max(1, int(p["duration_days"] or 0) * 86400)
-            ratio = max(0.0, min(1.0, (int(p["expires_at"]) - now()) / total))
-        elif int(p["quota_bytes"] or 0) > 0:
-            ratio = max(0.0, 1 - int(p["used_bytes"] or 0) / int(p["quota_bytes"]))
-        refund = int(round(price * ratio))
+    for p, price, remaining, keep in items:
+        owner = int(p["provider_id"] or 0)
+        bonus = 0
+        if keep > 0 and total_remaining > 0 and pools.get(owner, 0) > 0:
+            bonus = min(keep, pools[owner]) * remaining // total_remaining
+            bonus = min(bonus, max(0, price - remaining))
+            if bonus > 0:
+                pools[owner] -= bonus
+                conn.execute("UPDATE provider_guarantee SET points=points-?, updated_at=? WHERE owner_id=?", (bonus, now(), owner))
+        refund = remaining + bonus
         if refund > 0:
             points_change(conn, int(p["user_id"]), refund, "plan_refund", f"node:{node_id}", reason)
             total_refund += refund
-        conn.execute("UPDATE user_plans SET status='cancelled', expires_at=? WHERE id=?", (now(), p["id"]))
+        conn.execute("UPDATE user_plans SET status='cancelled', expires_at=?, guarantee_points=0 WHERE id=?", (now(), p["id"]))
         release_plan_resources(conn, p, keep_ports=False)
-        earn = conn.execute("SELECT * FROM provider_earnings WHERE order_no=?", (p["order_no"],)).fetchone()
-        if earn and earn["status"] == "settled":
-            net = int(earn["net_points"] or 0)
-            bal = int(conn.execute("SELECT points FROM users WHERE id=?", (int(earn["owner_id"]),)).fetchone()["points"] or 0)
-            deduct = min(net, bal)
-            if deduct > 0:
-                points_change(conn, int(earn["owner_id"]), -deduct, "provider_clawback", p["order_no"], f"节点 #{node_id} 退款扣回")
-            rest = net - deduct
-            if rest > 0:
-                conn.execute(
-                    "INSERT INTO provider_debts(owner_id, points, updated_at) VALUES(?,?,?) ON CONFLICT(owner_id) DO UPDATE SET points=points+excluded.points, updated_at=excluded.updated_at",
-                    (int(earn["owner_id"]), rest, now()))
-        if earn:
-            conn.execute("UPDATE provider_earnings SET status='refunded' WHERE id=?", (earn["id"],))
+        conn.execute("UPDATE provider_earnings SET status='refunded' WHERE order_no=? AND status='pending'", (p["order_no"],))
         users.add(int(p["user_id"]))
         count += 1
     for uid in users:
@@ -4793,6 +4815,70 @@ def settle_provider_earnings_once() -> int:
             conn.execute("UPDATE provider_earnings SET status='settled' WHERE id=?", (r["id"],))
             settled += 1
     return settled
+
+
+def plan_progress(plan: sqlite3.Row) -> float:
+    """实例服务进度：时间套餐按已服务天数，流量套餐按已用额度。"""
+    quota = int(plan["quota_bytes"] or 0)
+    if (plan["billing_mode"] or "time") == "traffic" and quota > 0:
+        return max(0.0, min(1.0, int(plan["used_bytes"] or 0) / quota))
+    start = int(plan["starts_at"] or 0)
+    expires = int(plan["expires_at"] or 0)
+    if start and expires and expires > start:
+        total = expires - start
+        served = max(0, min(total, now() - start))
+        return served / total
+    return 1.0
+
+
+def accrue_provider_income_once() -> int:
+    """按交付进度结算：90% 给供给方，10% 留作保证金。"""
+    paid_count = 0
+    with db() as conn:
+        rows = conn.execute(
+            """SELECT up.*, n.owner_id AS node_owner FROM user_plans up
+               JOIN nodes n ON n.id=up.node_id
+               WHERE up.status='active' AND n.owner_id>0""").fetchall()
+        for up in rows:
+            price = int(up["price_points"] or 0)
+            owner = int(up["node_owner"] or 0)
+            if price <= 0 or owner <= 0:
+                continue
+            target = int(price * plan_progress(up))
+            done = int(up["provider_paid_points"] or 0) + int(up["guarantee_points"] or 0)
+            delta = target - done
+            if delta <= 0:
+                continue
+            pay = delta * 90 // 100
+            keep = delta - pay
+            if pay > 0:
+                points_change(conn, owner, pay, "provider_income", up["order_no"], f"实例 {up['plan_name']} 按进度结算")
+            conn.execute(
+                "UPDATE user_plans SET provider_paid_points=provider_paid_points+?, guarantee_points=guarantee_points+?, provider_id=? WHERE id=?",
+                (pay, keep, owner, up["id"]))
+            if keep > 0:
+                conn.execute(
+                    "INSERT INTO provider_guarantee(owner_id, points, updated_at) VALUES(?,?,?) ON CONFLICT(owner_id) DO UPDATE SET points=points+excluded.points, updated_at=excluded.updated_at",
+                    (owner, keep, now()))
+            paid_count += 1
+    return paid_count
+
+
+def realize_guarantee(conn: sqlite3.Connection, plan_row: sqlite3.Row) -> None:
+    """服务完整交付后，留存保证金转为平台收入。"""
+    owner = int(row_val(plan_row, "provider_id", 0) or 0)
+    keep = int(row_val(plan_row, "guarantee_points", 0) or 0)
+    if owner <= 0 or keep <= 0:
+        return
+    gor = conn.execute("SELECT points FROM provider_guarantee WHERE owner_id=?", (owner,)).fetchone()
+    have = int(gor["points"] or 0) if gor else 0
+    take = min(have, keep)
+    if take > 0:
+        conn.execute("UPDATE provider_guarantee SET points=points-?, updated_at=? WHERE owner_id=?", (take, now(), owner))
+    conn.execute(
+        "INSERT INTO platform_revenue(order_no, plan_id, node_id, points, created_at) VALUES(?,?,?,?,?)",
+        (str(plan_row["order_no"] or ""), int(plan_row["id"]), int(plan_row["node_id"] or 0), keep, now()))
+    conn.execute("UPDATE user_plans SET guarantee_points=0 WHERE id=?", (int(plan_row["id"]),))
 
 
 def record_provider_earning(conn: sqlite3.Connection, order_no: str, node_id: int, gross_points: int) -> None:
@@ -4864,7 +4950,7 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
             "SELECT port FROM user_plan_ports WHERE user_plan_id=? AND release_at=0 ORDER BY port",
             (new_plan_row["id"],)).fetchall()] if new_plan_row else []
         created_tunnels = create_preconfigured_tunnels(conn, user, int(node_id or 0), tunnels or [], int(plan["max_ports"] or 0), allowed_ports, int(new_plan_row["id"]) if new_plan_row else 0)
-        record_provider_earning(conn, order_no, int(node_id or 0), int(plan["price_points"] or 0))
+        # 收益改为按交付进度结算，购买时不再预生成待结算记录
         conn.execute("UPDATE orders SET status='paid', paid_at=?, updated_at=? WHERE id=?", (now(), now(), order["id"]))
         provision_msg = msg
     with db() as conn:
@@ -6002,10 +6088,33 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/user/provider/earnings":
             with db() as conn:
-                rows = conn.execute("SELECT * FROM provider_earnings WHERE owner_id=? ORDER BY id DESC LIMIT 100", (int(user["id"]),)).fetchall()
-                total = conn.execute("SELECT COALESCE(SUM(net_points),0) FROM provider_earnings WHERE owner_id=? AND status IN ('pending','settled')", (int(user["id"]),)).fetchone()[0]
+                rows = conn.execute(
+                    """SELECT up.*, n.name AS node_name FROM user_plans up
+                       JOIN nodes n ON n.id=up.node_id
+                       WHERE n.owner_id=? ORDER BY up.id DESC LIMIT 100""", (int(user["id"]),)).fetchall()
+                plans = []
+                paid_total = 0
+                keep_total = 0
+                for r in rows:
+                    price = int(r["price_points"] or 0)
+                    paid = int(r["provider_paid_points"] or 0)
+                    keep = int(r["guarantee_points"] or 0)
+                    paid_total += paid
+                    keep_total += keep
+                    plans.append({
+                        "id": int(r["id"]), "plan_name": r["plan_name"], "node_id": int(r["node_id"] or 0),
+                        "node_name": r["node_name"], "price_points": price,
+                        "paid_points": paid, "guarantee_points": keep,
+                        "progress": round(plan_progress(r), 4), "status": r["status"],
+                    })
+                g = conn.execute("SELECT points FROM provider_guarantee WHERE owner_id=?", (int(user["id"]),)).fetchone()
                 debt_row = conn.execute("SELECT points FROM provider_debts WHERE owner_id=?", (int(user["id"]),)).fetchone()
-                self.send_json({"ok": True, "earnings": [row_dict(r) for r in rows], "total_net": int(total or 0), "debt": int(row_val(debt_row, "points", 0) or 0), "commission_pct": PROVIDER_COMMISSION_PCT})
+                self.send_json({
+                    "ok": True, "plans": plans,
+                    "total_paid": paid_total, "guarantee": int(row_val(g, "points", 0) or 0),
+                    "debt": int(row_val(debt_row, "points", 0) or 0),
+                    "commission_pct": PROVIDER_COMMISSION_PCT,
+                })
             return
         if path == "/api/user/provider/nodes":
             with db() as conn:
