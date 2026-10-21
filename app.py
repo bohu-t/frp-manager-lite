@@ -2820,6 +2820,13 @@ def init_db() -> None:
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS announcements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS notifications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -6320,6 +6327,18 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_body(bytes(row["data"]), 200, row["mime"] or "application/octet-stream", cache_control="private, max-age=86400")
             return
+        if path == "/api/announcements":
+            with db() as conn:
+                rows = conn.execute("SELECT * FROM announcements WHERE active=1 ORDER BY id DESC LIMIT 20").fetchall()
+            self.send_json({"ok": True, "announcements": [dict(r) for r in rows]})
+            return
+        if path == "/api/admin/announcements":
+            if not self.require_admin():
+                return
+            with db() as conn:
+                rows = conn.execute("SELECT * FROM announcements ORDER BY id DESC LIMIT 100").fetchall()
+            self.send_json({"ok": True, "announcements": [dict(r) for r in rows]})
+            return
         if path == "/api/notifications":
             with db() as conn:
                 rows = conn.execute("SELECT * FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 30", (int(user["id"]),)).fetchall()
@@ -6828,6 +6847,31 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 conn.execute("UPDATE plans SET deleted=1, active=0 WHERE id=?", (pid,))
             self.send_json({"ok": True, "message": "套餐已下架"})
+            return
+
+        if path == "/api/admin/announcements/save":
+            if not self.require_admin():
+                return
+            title = str(data.get("title", "")).strip()[:120]
+            content = sanitize_ticket_html(str(data.get("content", "")))[:4000]
+            if not title or not content:
+                self.send_json({"ok": False, "error": "请填写公告标题和内容"}, 400)
+                return
+            with db() as conn:
+                conn.execute("INSERT INTO announcements(title, content, active, created_at) VALUES(?,?,1,?)", (title, content, now()))
+            self.send_json({"ok": True, "message": "公告已发布"})
+            return
+
+        if path == "/api/admin/announcements/delete":
+            if not self.require_admin():
+                return
+            try:
+                aid = int(data.get("id", 0))
+            except (TypeError, ValueError):
+                aid = 0
+            with db() as conn:
+                conn.execute("UPDATE announcements SET active=0 WHERE id=?", (aid,))
+            self.send_json({"ok": True, "message": "公告已下架"})
             return
 
         if path == "/api/notifications/read":

@@ -746,7 +746,7 @@ function appSidebarHtml(kind='dashboard'){
   const isAdmin = currentUser?.role === 'admin';
   const username = currentUser?.username || '用户';
   const items = isAdmin ? [
-    ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','chart','订单','orders'],['admin-hosts','cloud','托管中心'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin-tickets','log','工单'],['admin-payouts','key','提现'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
+    ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','chart','订单','orders'],['admin-hosts','cloud','托管中心'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin-tickets','log','工单'],['admin-payouts','key','提现'],['admin-announcements','bell','公告'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
   ] : [
     ['dashboard','home','概览'],['dashboard-nodes','node','新建实例'],['dashboard-myplans','license','我的实例'],['dashboard-hosts','cloud','托管中心'],['dashboard-points','bolt','账单与充值'],['dashboard-tickets','log','工单'],['dashboard-profile','user','个人中心']
   ];
@@ -796,30 +796,63 @@ function renderNotifBadge(){
   el.classList.toggle('hidden', n <= 0);
 }
 
-function renderNotifList(){
-  const panel = document.querySelector('#notifPanel');
-  if(!panel) return;
-  const list = window.__notifs || [];
-  panel.innerHTML = `
-    <div class="notif-head"><b>通知</b><button type="button" class="link-btn" onclick="markAllNotifsRead()">全部已读</button></div>
-    <div class="notif-list">${list.length ? list.map(n => `<button type="button" class="notif-item${Number(n.read_at) ? '' : ' unread'}" onclick="openNotif(${n.id}, '${esc(n.link || '')}')"><b>${esc(n.title)}</b><span>${esc(n.content || '')}</span><small>${fmtTs(n.created_at)}</small></button>`).join('') : '<p class="muted small" style="padding:14px">暂无通知</p>'}</div>`;
+let notifTab = 'notif';
+
+function renderNotifBadge(){
+  const el = document.querySelector('#notifBadge');
+  if(!el) return;
+  const n = Number(window.__notifUnread || 0);
+  el.textContent = n > 99 ? '99+' : String(n);
+  el.classList.toggle('hidden', n <= 0);
 }
 
-function toggleNotifPanel(){
-  const panel = document.querySelector('#notifPanel');
-  if(!panel) return;
-  panel.classList.toggle('hidden');
-  if(!panel.classList.contains('hidden')) loadNotifications();
+async function loadAnnouncements(){
+  try{
+    const r = await api('/api/announcements');
+    window.__announcements = r.announcements || [];
+  }catch(e){ window.__announcements = window.__announcements || []; }
+}
+
+function notifModalHtml(){
+  const list = window.__notifs || [];
+  const anns = window.__announcements || [];
+  const notifHtml = list.length ? list.map(n => `<button type="button" class="notif-item${Number(n.read_at) ? '' : ' unread'}" onclick="openNotif(${n.id}, '${esc(n.link || '')}')"><b>${esc(n.title)}</b><span>${esc(n.content || '')}</span><small>${fmtTs(n.created_at)}</small></button>`).join('') : '<div class="notif-empty">暂无通知</div>';
+  const annHtml = anns.length ? anns.map(a => `<article class="ann-item"><div class="ann-head"><b>${esc(a.title)}</b><small>${fmtTs(a.created_at)}</small></div><p>${ticketBodyHtml(a.content)}</p></article>`).join('') : '<div class="notif-empty">暂无系统公告</div>';
+  return `<div class="modal-backdrop" id="notifModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeNotifModal()">
+    <section class="modal-page card notif-modal">
+      <div class="section-title modal-title"><div><h2>通知中心</h2><p>工单、提现与系统公告</p></div><button type="button" class="secondary modal-close" onclick="closeNotifModal()">关闭 ×</button></div>
+      <nav class="seg-tabs notif-tabs">
+        <button type="button" class="seg-tab${notifTab === 'notif' ? ' active' : ''}" onclick="switchNotifTab('notif')">通知${(window.__notifUnread||0) > 0 ? `<span>${window.__notifUnread}</span>` : ''}</button>
+        <button type="button" class="seg-tab${notifTab === 'ann' ? ' active' : ''}" onclick="switchNotifTab('ann')">系统公告${(window.__announcements||[]).length ? `<span>${window.__announcements.length}</span>` : ''}</button>
+      </nav>
+      <div class="notif-body">
+        ${notifTab === 'notif' ? `<div class="notif-list">${notifHtml}</div><div class="notif-foot"><button type="button" class="link-btn" onclick="markAllNotifsRead()">全部标为已读</button></div>` : `<div class="ann-list">${annHtml}</div>`}
+      </div>
+    </section></div>`;
+}
+
+async function openNotifModal(){
+  await Promise.all([loadNotifications(), loadAnnouncements()]);
+  const old = document.querySelector('#notifModal');
+  if(old) old.remove();
+  document.body.insertAdjacentHTML('beforeend', notifModalHtml());
+}
+
+function closeNotifModal(){ const el = document.querySelector('#notifModal'); if(el) el.remove(); }
+
+async function switchNotifTab(tab){
+  notifTab = tab;
+  const el = document.querySelector('#notifModal');
+  if(el){ el.remove(); document.body.insertAdjacentHTML('beforeend', notifModalHtml()); }
 }
 
 async function markAllNotifsRead(){
-  try{ await api('/api/notifications/read', {method:'POST', body:{all:true}}); await loadNotifications(); }catch(e){}
+  try{ await api('/api/notifications/read', {method:'POST', body:{all:true}}); await loadNotifications(); await switchNotifTab(notifTab); }catch(e){}
 }
 
 async function openNotif(id, link){
   try{ await api('/api/notifications/read', {method:'POST', body:{id:Number(id)}}); }catch(e){}
-  const panel = document.querySelector('#notifPanel');
-  if(panel) panel.classList.add('hidden');
+  closeNotifModal();
   loadNotifications();
   if(!link) return;
   if(link.startsWith('ticket:')){
@@ -835,7 +868,7 @@ async function openNotif(id, link){
 function appLayoutHtml(content, kind='dashboard', topTitle='工作区'){
   const username = currentUser?.username || '用户';
   const isSettings = kind === 'admin-settings';
-  return `<div class="app-shell${isSettings ? ' is-settings' : ''}">${appSidebarHtml(kind)}<main class="workspace-main"><div class="workspace-topbar"><div class="topbar-banner"><svg class="topbar-banner-art" viewBox="0 0 1200 120" preserveAspectRatio="none" aria-hidden="true"><path d="M0 96 L150 58 L260 86 L420 34 L560 78 L700 44 L860 92 L1010 52 L1200 84 L1200 120 L0 120 Z" fill="rgba(122,174,255,.30)"/><path d="M0 108 L180 74 L340 100 L520 62 L700 96 L880 70 L1060 104 L1200 84 L1200 120 L0 120 Z" fill="rgba(122,174,255,.45)"/></svg><span class="topbar-banner-spark" aria-hidden="true"></span><div class="topbar-banner-left"><span class="topbar-brandmark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 18.5h9a4 4 0 0 0 .4-8A5.5 5.5 0 0 0 6.6 9.6 4.2 4.2 0 0 0 7.5 18.5Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div class="topbar-banner-copy"><span class="topbar-kicker">FRP WORKSPACE</span><b>欢迎回来，${esc(username)}</b><span class="topbar-banner-sub">高效管理您的内网服务，轻松实现远程访问</span></div></div><div class="topbar-banner-right"><div class="topbar-banner-slogan"><b>让内网服务更简单</b><span>安全 · 稳定 · 高效</span></div><span class="topbar-banner-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7 7h.01M7 17h.01" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M14.6 12.3l1.8 1.8 3.2-3.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div><button type="button" class="topbar-banner-theme" data-nav="theme-toggle" title="切换亮色/暗色" aria-label="切换亮色/暗色">◐</button></div></div>${content}</main>${currentUser ? `<div class="topbar-bell-wrap floating"><div class="topbar-bell-wrap"><button type="button" class="topbar-banner-theme topbar-bell" onclick="toggleNotifPanel()" title="通知" aria-label="通知"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 4.5 1.5 6 1.5 6H4.5S6 13.5 6 9Z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M10 18.5a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><span id="notifBadge" class="notif-badge hidden">0</span></button><div id="notifPanel" class="notif-panel hidden"></div></div></div>` : ''}</div>`;
+  return `<div class="app-shell${isSettings ? ' is-settings' : ''}">${appSidebarHtml(kind)}<main class="workspace-main"><div class="workspace-topbar"><div class="topbar-banner"><svg class="topbar-banner-art" viewBox="0 0 1200 120" preserveAspectRatio="none" aria-hidden="true"><path d="M0 96 L150 58 L260 86 L420 34 L560 78 L700 44 L860 92 L1010 52 L1200 84 L1200 120 L0 120 Z" fill="rgba(122,174,255,.30)"/><path d="M0 108 L180 74 L340 100 L520 62 L700 96 L880 70 L1060 104 L1200 84 L1200 120 L0 120 Z" fill="rgba(122,174,255,.45)"/></svg><span class="topbar-banner-spark" aria-hidden="true"></span><div class="topbar-banner-left"><span class="topbar-brandmark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 18.5h9a4 4 0 0 0 .4-8A5.5 5.5 0 0 0 6.6 9.6 4.2 4.2 0 0 0 7.5 18.5Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div class="topbar-banner-copy"><span class="topbar-kicker">FRP WORKSPACE</span><b>欢迎回来，${esc(username)}</b><span class="topbar-banner-sub">高效管理您的内网服务，轻松实现远程访问</span></div></div><div class="topbar-banner-right"><div class="topbar-banner-slogan"><b>让内网服务更简单</b><span>安全 · 稳定 · 高效</span></div><span class="topbar-banner-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7 7h.01M7 17h.01" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M14.6 12.3l1.8 1.8 3.2-3.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div><button type="button" class="topbar-banner-theme" data-nav="theme-toggle" title="切换亮色/暗色" aria-label="切换亮色/暗色">◐</button></div></div>${content}</main>${currentUser ? `<div class="topbar-bell-wrap floating"><div class="topbar-bell-wrap"><button type="button" class="topbar-banner-theme topbar-bell" onclick="openNotifModal()" title="通知" aria-label="通知"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 4.5 1.5 6 1.5 6H4.5S6 13.5 6 9Z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M10 18.5a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><span id="notifBadge" class="notif-badge hidden">0</span></button><div id="notifPanel" class="notif-panel hidden"></div></div></div>` : ''}</div>`;
 }
 
 function setNav(){
@@ -927,6 +960,7 @@ app.addEventListener('click', async (e) => {
     if(action === 'dashboard-tickets') return loadTickets();
     if(action === 'admin-tickets') return loadAdminTickets();
     if(action === 'admin-payouts') return loadAdminPayouts();
+    if(action === 'admin-announcements') return loadAdminAnnouncements();
     if(action === 'dashboard-myplans') return loadMyPlans();
     if(action === 'dashboard-hosts') return loadHosts();
     if(action === 'admin-hosts') return loadAdminHosts();
@@ -1614,6 +1648,34 @@ async function loadAdminTickets(){
     <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>工单</h1><p>全部用户提交的工单</p></div></div>
     <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>编号</th><th>类型</th><th>标题</th><th>提交人</th><th>节点</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
   `, 'admin-tickets', '工单');
+}
+
+async function loadAdminAnnouncements(){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
+  let list = [];
+  try{ list = (await api('/api/admin/announcements')).announcements || []; }
+  catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
+  const rows = list.map((a, i) => `<tr><td>${i + 1}</td><td><b>${esc(a.title)}</b></td><td>${esc(String(a.content || '').replace(/<[^>]+>/g, '').slice(0, 60))}</td><td><span class="status-badge ${a.active ? 'ok' : 'bad'}"><i></i>${a.active ? '展示中' : '已下架'}</span></td><td>${fmtTs(a.created_at)}</td><td class="actions node-actions">${a.active ? `<button class="node-action node-action-danger" onclick="deleteAnnouncement(${a.id})">下架</button>` : '<span class="muted small">—</span>'}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">暂无公告</td></tr>';
+  app.innerHTML = appLayoutHtml(`
+    <div class="ov-page-head"><div><span class="section-kicker">ANNOUNCEMENTS</span><h1>系统公告</h1><p>发布后会显示在用户的「通知中心 › 系统公告」</p></div></div>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('bell')}发布公告</h2></div></div>
+      <form id="annForm" class="grid"><div class="span-2"><label>标题</label><input name="title" maxlength="120" required></div><div class="span-2"><label>内容</label><textarea name="content" rows="4" required placeholder="支持简单格式文本"></textarea></div><div class="form-actions span-2"><button type="submit">发布</button></div></form>
+    </section>
+    <section class="card"><div class="section-title"><div><h2>公告列表</h2><p>共 ${list.length} 条</p></div></div><div class="table-wrap"><table><thead><tr><th>序号</th><th>标题</th><th>内容</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+  `, 'admin-announcements', '公告');
+  const form = document.querySelector('#annForm');
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    try{
+      const r = await api('/api/admin/announcements/save', {method:'POST', body:Object.fromEntries(new FormData(form))});
+      show(r.message || '已发布'); await loadAdminAnnouncements();
+    }catch(err){ show(err.message || '发布失败', true); }
+  };
+}
+
+async function deleteAnnouncement(id){
+  if(!await appConfirm('下架后用户将看不到这条公告，确认？', {title:'下架公告', okText:'确认下架', danger:true})) return;
+  try{ await api('/api/admin/announcements/delete', {method:'POST', body:{id:Number(id)}}); show('已下架'); await loadAdminAnnouncements(); }catch(err){ show(err.message, true); }
 }
 
 async function loadAdminPayouts(){

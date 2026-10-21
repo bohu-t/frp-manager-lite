@@ -1912,3 +1912,14 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .notif-item:hover{background:rgba(56,189,248,.08)}
 .notif-item.unread{background:rgba(56,189,248,.10)}
 .topbar-bell-wrap.floating .topbar-bell{background:var(--panel2);border-color:var(--line);color:var(--text)}
+.notif-modal{width:min(92vw,600px)}
+.notif-tabs{margin-top:6px}
+.notif-body{max-height:60vh;overflow:auto;border-top:1px solid var(--line)}
+.notif-empty{padding:28px 0;text-align:center;color:var(--muted);font-size:13px}
+.notif-foot{padding:10px 2px 2px;display:flex;justify-content:flex-end}
+.ann-list{display:flex;flex-direction:column;gap:10px;padding:12px 2px}
+.ann-item{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--panel)}
+.ann-head{display:flex;justify-content:space-between;gap:10px;margin-bottom:6px}
+.ann-head b{font-size:14px;color:var(--text)}
+.ann-head small{color:var(--muted);font-size:11px}
+.ann-item p{margin:0;font-size:13px;line-height:1.7;color:var(--soft);white-space:pre-wrap}
