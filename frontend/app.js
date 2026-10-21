@@ -1233,7 +1233,7 @@ async function loadHosts(){
       ${pEarn.length ? pEarn.slice(0, 50).map(e => `<tr><td>${esc(e.order_no)}</td><td>#${e.node_id}</td><td>${e.gross_points}</td><td>${e.commission_points}</td><td><b>${e.net_points}</b></td><td>${e.status === 'settled' ? '已结算' : (e.status === 'refunded' ? '已退款' : '待结算')}</td><td>${fmtTs(e.created_at)}</td></tr>`).join('') : '<tr><td colspan="7" class="muted">暂无收益记录</td></tr>'}
       </tbody></table></div>
     </section>`;
-  const hostsSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('cloud')}我的托管</h2><p>共 ${hosts.length} 条申请记录</p></div></div>
+  const hostsSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('cloud')}申请记录</h2><p>共 ${hosts.length} 条，包含待审核与被拒绝的母鸡</p></div></div>
       <div class="table-wrap"><table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>配置</th><th>带宽 / 流量</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${hostRowsHtml(hosts, false)}</tbody></table></div>
       <details class="host-rules-details"><summary>托管规则与准则</summary><ol class="host-rule-list">${HOST_RULES.map(r => `<li>${esc(r)}</li>`).join('')}</ol></details>
     </section>`;
@@ -1245,7 +1245,7 @@ async function loadHosts(){
       <button type="button" class="seg-tab${tab === 'nodes' ? ' active' : ''}" onclick="switchHostsTab('nodes')">我的节点${pNodes.length ? `<span>${pNodes.length}</span>` : ''}</button>
       <button type="button" class="seg-tab${tab === 'plans' ? ' active' : ''}" onclick="switchHostsTab('plans')">我的套餐${pPlans.length ? `<span>${pPlans.length}</span>` : ''}</button>
       <button type="button" class="seg-tab${tab === 'earn' ? ' active' : ''}" onclick="switchHostsTab('earn')">收益</button>
-      <button type="button" class="seg-tab${tab === 'hosts' ? ' active' : ''}" onclick="switchHostsTab('hosts')">我的托管${hosts.length ? `<span>${hosts.length}</span>` : ''}</button>
+      <button type="button" class="seg-tab${tab === 'hosts' ? ' active' : ''}" onclick="switchHostsTab('hosts')">申请记录${hosts.length ? `<span>${hosts.length}</span>` : ''}</button>
     </nav>
     ${sections[tab] || sections.nodes}
   `, 'dashboard-hosts', '托管中心');
