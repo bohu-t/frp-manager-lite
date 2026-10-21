@@ -1153,7 +1153,7 @@ function hostRowsHtml(hosts, admin){
       <td>${esc(h.name)}</td>
       <td>${esc(h.region)}</td>
       <td>${esc(h.server_addr)}:${h.server_port}</td>
-      <td>${esc(h.cpu || '-')} / ${esc(h.memory || '-')} / ${esc(h.disk || '-')}</td>
+      <td>${h.expires_at ? fmtTs(h.expires_at) : '-'}</td>
       <td>${h.bandwidth_mbps ? h.bandwidth_mbps + ' Mbps' : '不限'} / ${h.monthly_traffic_gb ? h.monthly_traffic_gb + ' GB' : '不限'}</td>
       ${admin ? `<td>${esc(h.username)}</td>` : ''}
       <td><span class="status-badge ${HOST_STATUS_CLASS[h.status] || ''}"><i></i>${esc(h.status_text)}</span></td>
@@ -1173,15 +1173,13 @@ function hostFormModal(){
         <div><label>母鸡名称</label><input name="name" required placeholder="例如 wh-01"></div>
         <div><label>地区</label><input name="region" placeholder="例如 武汉" required></div>
         <div><label>公网 IP / 域名</label><input name="server_addr" required placeholder="frp.example.com"></div>
-        <div><label>frps 端口</label><input name="server_port" type="number" value="7000" min="1" max="65535"></div>
-        <div><label>端口起始</label><input name="port_start" type="number" value="20000" min="1" max="65535"></div>
-        <div><label>端口结束</label><input name="port_end" type="number" value="20199" min="1" max="65535"></div>
-        <div><label>带宽 Mbps</label><input name="bandwidth_mbps" type="number" value="0" min="0"></div>
-        <div><label>月流量 GB</label><input name="monthly_traffic_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限</span></div>
-        <div><label>CPU</label><input name="cpu" placeholder="例如 4 核"></div>
-        <div><label>内存</label><input name="memory" placeholder="例如 8G"></div>
-        <div><label>硬盘</label><input name="disk" placeholder="例如 100G SSD"></div>
-        <div class="span-2"><label>备注</label><input name="note" placeholder="线路 / 机房 / 联系方式"></div>
+        <div><label>frps 端口</label><input name="server_port" type="number" value="7000" min="1" max="65535" required></div>
+        <div><label>端口起始</label><input name="port_start" type="number" value="20000" min="1" max="65535" required></div>
+        <div><label>端口结束</label><input name="port_end" type="number" value="20199" min="1" max="65535" required></div>
+        <div><label>带宽 Mbps</label><input name="bandwidth_mbps" type="number" value="100" min="1" required></div>
+        <div><label>月流量 GB</label><input name="monthly_traffic_gb" type="number" value="500" min="0.1" step="0.1" required></div>
+        <div><label>服务器到期时间</label><input name="expires_at" type="date" required min="${new Date(Date.now() + 86400000).toISOString().slice(0,10)}"><span class="muted small">用于限制套餐时长，到期自动停售</span></div>
+        <div class="span-2"><label>备注</label><input name="note" placeholder="线路 / 机房 / 联系方式" required></div>
         <div class="form-actions span-2"><button>提交审核</button></div>
       </form>
     </section>
@@ -1220,8 +1218,8 @@ async function loadHosts(){
   const pct = Number(eData.commission_pct ?? 10);
   const tab = hostsTab || 'nodes';
   const nodesSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('node')}我的节点</h2><p>${pNodes.length ? '已接入平台的主机' : '提交母鸡并通过审核后，这里会显示你的节点'}</p></div></div>
-      ${pNodes.length ? `<div class="table-wrap"><table><thead><tr><th>序号</th><th>节点</th><th>地区</th><th>接入地址</th><th>端口（已用/总）</th><th>本月流量</th><th>实例</th><th>状态</th><th>上次在线</th></tr></thead><tbody>
-        ${pNodes.map((n, i) => `<tr><td>${i + 1}</td><td><b>${esc(n.name)}</b></td><td>${esc(n.region)}</td><td>${esc(n.server_addr)}:${n.server_port}</td><td>${n.ports_used} / ${n.ports_total}</td><td>${fmtBytes(n.month_used_bytes)} / ${n.monthly_traffic_bytes > 0 ? fmtBytes(n.monthly_traffic_bytes) : '不限'}</td><td>${n.active_plans}</td><td><span class="status-badge ${n.auto_suspended ? 'bad' : (n.active ? 'ok' : 'bad')}"><i></i>${n.auto_suspended ? '已停售' : (n.active ? '在线' : '已停用')}</span></td><td>${n.last_online_at ? fmtTs(n.last_online_at) : '-'}</td></tr>`).join('')}
+      ${pNodes.length ? `<div class="table-wrap"><table><thead><tr><th>序号</th><th>节点</th><th>地区</th><th>接入地址</th><th>端口（已用/总）</th><th>本月流量</th><th>实例</th><th>状态</th><th>到期时间</th><th>上次在线</th></tr></thead><tbody>
+        ${pNodes.map((n, i) => `<tr><td>${i + 1}</td><td><b>${esc(n.name)}</b></td><td>${esc(n.region)}</td><td>${esc(n.server_addr)}:${n.server_port}</td><td>${n.ports_used} / ${n.ports_total}</td><td>${fmtBytes(n.month_used_bytes)} / ${n.monthly_traffic_bytes > 0 ? fmtBytes(n.monthly_traffic_bytes) : '不限'}</td><td>${n.active_plans}</td><td><span class="status-badge ${n.auto_suspended ? 'bad' : (n.active ? 'ok' : 'bad')}"><i></i>${n.auto_suspended ? '已停售' : (n.active ? '在线' : '已停用')}</span></td><td>${n.expires_at ? fmtTs(n.expires_at) : '-'}</td><td>${n.last_online_at ? fmtTs(n.last_online_at) : '-'}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="empty-state"><strong>还没有节点</strong><p class="muted small">点右上角「添加母鸡」，审核通过后自动成为你的节点。</p></div>'}
     </section>`;
   const plansSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('license')}我的套餐</h2><p>${pNodes.length ? '上架后买家可在该节点购买' : '先有节点，才能上架套餐'}</p></div><button type="button" onclick="providerPlanForm()" ${pNodes.length ? '' : 'disabled'}>＋ 上架套餐</button></div>
@@ -1236,7 +1234,7 @@ async function loadHosts(){
       <p class="muted small" style="margin-top:10px">保证金在服务正常到期后转为平台服务费；提前清退或节点故障时，一半补偿买家，一半归平台。</p>
     </section>`;
   const hostsSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('cloud')}申请记录</h2><p>共 ${hosts.length} 条，包含待审核与被拒绝的母鸡</p></div></div>
-      <div class="table-wrap"><table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>配置</th><th>带宽 / 流量</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${hostRowsHtml(hosts, false)}</tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>到期时间</th><th>带宽 / 流量</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${hostRowsHtml(hosts, false)}</tbody></table></div>
       <details class="host-rules-details"><summary>托管规则与准则</summary><ol class="host-rule-list">${HOST_RULES.map(r => `<li>${esc(r)}</li>`).join('')}</ol></details>
     </section>`;
   const sections = { nodes: nodesSection, plans: plansSection, earn: earnSection, hosts: hostsSection };
@@ -1326,7 +1324,7 @@ async function loadAdminHosts(){
       <ol class="host-rule-list">${HOST_RULES.map(r => `<li>${esc(r)}</li>`).join('')}</ol>
     </section>
     <section class="card"><div class="section-title"><div><h2>${stIcon('cloud')}托管列表</h2><p>共 ${hosts.length} 条</p></div></div>
-      <table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>配置</th><th>带宽 / 流量</th><th>提交人</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${hostRowsHtml(hosts, true)}</tbody></table>
+      <table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>到期时间</th><th>带宽 / 流量</th><th>提交人</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${hostRowsHtml(hosts, true)}</tbody></table>
     </section>`, 'admin-hosts', '托管中心');
 }
 

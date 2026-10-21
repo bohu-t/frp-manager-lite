@@ -104,6 +104,21 @@ def now() -> int:
     return int(time.time())
 
 
+def parse_date_epoch(raw: str) -> int:
+    """接受 2026-12-31 或 epoch 秒，返回当天 23:59 的时间戳。"""
+    raw = str(raw or "").strip()
+    if not raw:
+        return 0
+    if raw.isdigit():
+        return int(raw)
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            return int(time.mktime(time.strptime(raw + " 23:59", fmt + " %H:%M")))
+        except ValueError:
+            continue
+    return 0
+
+
 def fmt_time(ts: int | None) -> str:
     if not ts:
         return "永不过期"
@@ -3034,6 +3049,11 @@ def init_db() -> None:
             conn.execute("ALTER TABLE nodes ADD COLUMN last_online_at INTEGER NOT NULL DEFAULT 0")
         if "auto_suspended" not in node_cols:
             conn.execute("ALTER TABLE nodes ADD COLUMN auto_suspended INTEGER NOT NULL DEFAULT 0")
+        if "expires_at" not in node_cols:
+            conn.execute("ALTER TABLE nodes ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0")
+        host_cols = {r["name"] for r in conn.execute("PRAGMA table_info(hosts)").fetchall()}
+        if "expires_at" not in host_cols:
+            conn.execute("ALTER TABLE hosts ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0")
         conn.execute(
             """UPDATE nodes SET owner_id=(SELECT h.user_id FROM hosts h WHERE h.node_id=nodes.id AND h.status='approved' ORDER BY h.id LIMIT 1)
                WHERE owner_id=0 AND EXISTS (SELECT 1 FROM hosts h WHERE h.node_id=nodes.id AND h.status='approved')"""
@@ -5214,6 +5234,7 @@ def host_public(row: sqlite3.Row) -> dict[str, Any]:
         "status_text": HOST_STATUS_TEXT.get(row["status"] or "pending", row["status"] or ""),
         "node_id": int(row["node_id"] or 0),
         "reviewed_at": int(row["reviewed_at"] or 0),
+        "expires_at": int(row_val(row, "expires_at", 0) or 0),
         "created_at": int(row["created_at"] or 0),
     }
 
@@ -5252,9 +5273,16 @@ def provider_plan_save(user: sqlite3.Row, data: dict[str, Any]) -> tuple[bool, s
         return False, "带宽上限不合法"
     traffic_bytes = int(traffic_gb * 1024 ** 3)
     with db() as conn:
-        node = conn.execute("SELECT id, owner_id FROM nodes WHERE id=?", (node_id,)).fetchone()
+        node = conn.execute("SELECT id, owner_id, expires_at FROM nodes WHERE id=?", (node_id,)).fetchone()
         if not node or int(node["owner_id"] or 0) != int(user["id"]):
             return False, "只能在自己的节点上架套餐"
+        node_exp = int(node["expires_at"] or 0)
+        if node_exp and node_exp <= now():
+            return False, "节点已到期，无法上架套餐"
+        if mode == "time" and node_exp:
+            remain_days = (node_exp - now()) // 86400
+            if days > remain_days:
+                return False, f"套餐时长超过母鸡剩余可用天数（{remain_days} 天）"
         if pid:
             row = conn.execute(
                 "SELECT p.id FROM plans p JOIN nodes n ON n.id=p.node_id WHERE p.id=? AND n.owner_id=? AND p.deleted=0",
@@ -5293,6 +5321,7 @@ def provider_nodes_payload(conn: sqlite3.Connection, user_id: int) -> list[dict[
             "active": bool(n["active"]),
             "auto_suspended": bool(row_val(n, "auto_suspended", 0)),
             "last_online_at": int(row_val(n, "last_online_at", 0) or 0),
+            "expires_at": int(row_val(n, "expires_at", 0) or 0),
             "port_start": int(n["port_start"] or 0), "port_end": int(n["port_end"] or 0),
             "ports_total": int(total_ports), "ports_used": int(used_ports),
             "ports_free": max(0, int(total_ports) - int(used_ports)),
@@ -5314,22 +5343,28 @@ def list_hosts(conn: sqlite3.Connection, user_id: int | None = None) -> list[dic
 
 def create_host_application(user: sqlite3.Row, data: dict[str, Any]) -> tuple[bool, str]:
     name = str(data.get("name", "")).strip()[:40]
-    region = str(data.get("region", "")).strip()[:40] or "默认地区"
+    region = str(data.get("region", "")).strip()[:40]
     server_addr = str(data.get("server_addr", "")).strip()[:200]
     note = str(data.get("note", "")).strip()[:300]
-    cpu = str(data.get("cpu", "")).strip()[:60]
-    memory = str(data.get("memory", "")).strip()[:60]
-    disk = str(data.get("disk", "")).strip()[:60]
+    expires_at = parse_date_epoch(str(data.get("expires_at", "")))
     if not name or not name.replace("_", "").replace("-", "").isalnum():
         return False, "母鸡名称只能包含字母、数字、下划线、短横线"
+    if not region:
+        return False, "请填写地区"
     if not server_addr:
         return False, "请填写公网 IP 或域名"
+    if not note:
+        return False, "请填写备注（线路 / 机房 / 联系方式）"
+    if not expires_at:
+        return False, "请填写服务器到期时间（格式 2026-12-31）"
+    if expires_at <= now() + 86400:
+        return False, "服务器到期时间必须晚于明天"
     try:
-        server_port = int(data.get("server_port", 7000) or 7000)
-        port_start = int(data.get("port_start", 20000) or 20000)
-        port_end = int(data.get("port_end", 20199) or 20199)
-        bandwidth = max(0, int(data.get("bandwidth_mbps", 0) or 0))
-        monthly = max(0.0, float(data.get("monthly_traffic_gb", 0) or 0))
+        server_port = int(data.get("server_port", 0) or 0)
+        port_start = int(data.get("port_start", 0) or 0)
+        port_end = int(data.get("port_end", 0) or 0)
+        bandwidth = int(data.get("bandwidth_mbps", 0) or 0)
+        monthly = float(data.get("monthly_traffic_gb", 0) or 0)
     except (TypeError, ValueError):
         return False, "端口 / 带宽 / 流量格式不正确"
     if not (1 <= server_port <= 65535):
@@ -5338,14 +5373,18 @@ def create_host_application(user: sqlite3.Row, data: dict[str, Any]) -> tuple[bo
         return False, "端口范围不合法"
     if port_end - port_start > 20000:
         return False, "端口池不要超过 20000 个"
+    if bandwidth <= 0:
+        return False, "请填写带宽（Mbps，必须大于 0）"
+    if monthly <= 0:
+        return False, "请填写月流量（GB，必须大于 0）"
     with db() as conn:
         pending = conn.execute("SELECT COUNT(*) FROM hosts WHERE user_id=? AND status='pending'", (user["id"],)).fetchone()[0]
         if pending >= 5:
             return False, "待审核的托管申请过多，请等待处理"
         conn.execute(
-            "INSERT INTO hosts(user_id, username, name, region, server_addr, server_port, port_start, port_end, bandwidth_mbps, monthly_traffic_gb, cpu, memory, disk, note, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO hosts(user_id, username, name, region, server_addr, server_port, port_start, port_end, bandwidth_mbps, monthly_traffic_gb, cpu, memory, disk, note, status, created_at, updated_at, expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (user["id"], user["username"], name, region, server_addr, server_port, port_start, port_end,
-             bandwidth, monthly, cpu, memory, disk, note, "pending", now(), now()))
+             bandwidth, monthly, "", "", "", note, "pending", now(), now(), expires_at))
     return True, "已提交托管申请，等待管理员审核"
 
 
@@ -5379,11 +5418,11 @@ def review_host_application(admin: sqlite3.Row, host_id: int, action: str, reaso
             node_name = f"{base_name}-{suffix}"
         token = str(host["auth_token"] or "") or secrets.token_urlsafe(24)
         cur = conn.execute(
-            "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, monthly_traffic_bytes, active, note, created_at, owner_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, monthly_traffic_bytes, active, note, created_at, owner_id, expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (host["region"], node_name, host["server_addr"], int(host["server_port"]), token,
              int(host["port_start"]), int(host["port_end"]), 0, "", "", "", int(host["bandwidth_mbps"] or 0),
              int(float(host["monthly_traffic_gb"] or 0) * 1024 ** 3), 1,
-             f"托管：{host['username']} / {host['note'] or ''}".strip(), now(), int(host["user_id"])))
+             f"托管：{host['username']} / {host['note'] or ''}".strip(), now(), int(host["user_id"]), int(host["expires_at"] or 0)))
         node_id = int(cur.lastrowid)
         conn.executemany("INSERT OR IGNORE INTO ports(node_id, port, created_at) VALUES(?,?,?)",
                          [(node_id, p, now()) for p in range(int(host["port_start"]), int(host["port_end"]) + 1)])
@@ -6118,8 +6157,8 @@ class Handler(BaseHTTPRequestHandler):
                 debt_row = conn.execute("SELECT points FROM provider_debts WHERE owner_id=?", (int(user["id"]),)).fetchone()
                 self.send_json({
                     "ok": True, "plans": plans,
-                    "total_paid": paid_total, "guarantee": int(row_val(g, "points", 0) or 0),
-                    "debt": int(row_val(debt_row, "points", 0) or 0),
+                    "total_paid": paid_total, "guarantee": int(g["points"] or 0) if g else 0,
+                    "debt": int(debt_row["points"] or 0) if debt_row else 0,
                     "commission_pct": PROVIDER_COMMISSION_PCT,
                 })
             return
