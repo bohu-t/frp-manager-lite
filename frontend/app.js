@@ -753,7 +753,6 @@ function appSidebarHtml(kind='dashboard'){
     ['admin','nodePlus','新增节点','nodes'],
     ['admin-health','pulse','节点健康','health'],
     ['admin-proxies','monitor','映射监控','proxies'],
-    ['admin-announcements','bell','公告'],
     ['admin','risk','风控审计','risk'],
     ['admin-settings','gear','设置']
   ] : [
@@ -779,17 +778,29 @@ function appSidebarHtml(kind='dashboard'){
   const ticketActive = ticketItems.some(([a]) => kind === a);
   const stored = localStorage.getItem('sideTicketsOpen');
   const open = ticketActive || stored === '1';
-  const ticketsBlock = `<div class="side-group">
-      <button type="button" class="side-link side-group-toggle${ticketActive ? ' active' : ''}" onclick="toggleSideGroup(this)" aria-expanded="${open ? 'true' : 'false'}">
-        ${sideIcon('log')}<span class="side-link-label">工单</span><span class="side-group-chevron">›</span>
+  const groupBlock = (label, items, key, icon) => {
+    const active = items.some(([a]) => kind === a);
+    const stored = localStorage.getItem(key);
+    const open = active || stored === '1';
+    return `<div class="side-group">
+      <button type="button" class="side-link side-group-toggle${active ? ' active' : ''}" data-group="${key}" onclick="toggleSideGroup(this)" aria-expanded="${open ? 'true' : 'false'}">
+        ${sideIcon(icon)}<span class="side-link-label">${label}</span><span class="side-group-chevron">›</span>
       </button>
-      <div class="side-subnav${open ? ' open' : ''}">${ticketItems.map(x => linkHtml(x, true)).join('')}</div>
+      <div class="side-subnav${open ? ' open' : ''}">${items.map(x => linkHtml(x, true)).join('')}</div>
     </div>`;
+  };
+  const ticketsBlock = groupBlock('工单', ticketItems, 'sideTicketsOpen', 'log');
+  const maintItems = [
+    ['admin-ops','tools','运维工具'],
+    ['admin-announcements','bell','公告'],
+    ['admin-recharge','key','积分充值密钥']
+  ];
+  const maintBlock = isAdmin ? groupBlock('平台维护', maintItems, 'sideMaintOpen', 'tools') : '';
   const brandName = 'Frp 管理台';
   const brandSub = '内网穿透管理平台';
   return `<aside class="app-sidebar">
     <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>${brandName}</strong><span>${brandSub}</span></div></div>
-    <div class="sidebar-section-label">工作空间</div>${mainItems.map(x => linkHtml(x, false)).join('')}${ticketsBlock}${tailItems.map(x => linkHtml(x, false)).join('')}
+    <div class="sidebar-section-label">工作空间</div>${mainItems.map(x => linkHtml(x, false)).join('')}${ticketsBlock}${maintBlock}${tailItems.map(x => linkHtml(x, false)).join('')}
     ${isAdmin ? '' : `<div class="sidebar-section-label sidebar-tools-label">快速工具</div>
       <button class="side-link${kind === 'dashboard-config' ? ' active' : ''}" data-nav="dashboard-config">${sideIcon('download')}<span class="side-link-label">配置下载</span><span class="side-link-arrow">›</span></button>
       <button class="side-link${kind === 'dashboard-editor' ? ' active' : ''}" data-nav="dashboard-editor">${sideIcon('edit')}<span class="side-link-label">在线配置</span><span class="side-link-arrow">›</span></button>`}
@@ -805,7 +816,8 @@ function toggleSideGroup(btn){
   const open = !sub.classList.contains('open');
   sub.classList.toggle('open', open);
   btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-  localStorage.setItem('sideTicketsOpen', open ? '1' : '0');
+  const key = btn.getAttribute('data-group') || 'sideTicketsOpen';
+  localStorage.setItem(key, open ? '1' : '0');
 }
 
 function settingsTopbarHtml(title){
@@ -1002,6 +1014,8 @@ app.addEventListener('click', async (e) => {
     if(action === 'admin-tickets') return loadAdminTickets();
     if(action === 'admin-payouts') return loadAdminPayouts();
     if(action === 'admin-announcements') return loadAdminAnnouncements();
+    if(action === 'admin-ops') return loadAdminOps();
+    if(action === 'admin-recharge') return loadAdminRecharge();
     if(action === 'dashboard-myplans') return loadMyPlans();
     if(action === 'dashboard-hosts') return loadHosts();
     if(action === 'admin-hosts') return loadAdminHosts();
@@ -1667,6 +1681,59 @@ async function loadAdminAnnouncements(){
 async function deleteAnnouncement(id){
   if(!await appConfirm('下架后用户将看不到这条公告，确认？', {title:'下架公告', okText:'确认下架', danger:true})) return;
   try{ await api('/api/admin/announcements/delete', {method:'POST', body:{id:Number(id)}}); show('已下架'); await loadAdminAnnouncements(); }catch(err){ show(err.message, true); }
+}
+
+async function loadAdminOps(){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
+  app.innerHTML = appLayoutHtml(`
+    <div class="ov-page-head"><div><span class="section-kicker">MAINTENANCE</span><h1>平台维护</h1><p>运维工具、公告与积分充值密钥</p></div></div>
+    ${adminOpsCardHtml()}
+    <section class="card"><div class="section-title"><div><h2>${stIcon('bell')}公告</h2><p>发布系统公告，用户可在通知中心查看</p></div><button type="button" onclick="loadAdminAnnouncements()">去发布</button></div></section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('key')}积分充值密钥</h2><p>生成后发给用户兑换积分</p></div><button type="button" onclick="loadAdminRecharge()">管理密钥</button></div></section>
+  `, 'admin-ops', '平台维护');
+}
+
+async function loadAdminRecharge(){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
+  let data;
+  try{ data = await api('/api/admin/recharge-keys'); }
+  catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
+  const keys = data.recharge_keys || [];
+  const rows = keys.map((k, i) => `<tr>
+      <td>${i + 1}</td>
+      <td><code class="token">${esc(k.key)}</code></td>
+      <td>${k.points}</td>
+      <td>${esc(k.note || '—')}</td>
+      <td>${k.used_by ? '<span class="bad">已使用</span>' : (k.active ? '<span class="ok">可用</span>' : '<span class="bad">停用</span>')}</td>
+      <td>${fmtTs(k.created_at)}</td>
+      <td class="actions node-actions">${k.used_by ? '<span class="muted small">已使用</span>' : `<button type="button" class="node-action" onclick="rechargeKeyToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button type="button" class="node-action node-action-danger" onclick="rechargeKeyDelete(${k.id})">删除</button>`}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">还没有充值密钥</td></tr>';
+  app.innerHTML = appLayoutHtml(`
+    <div class="ov-page-head"><div><span class="section-kicker">RECHARGE KEYS</span><h1>积分充值密钥</h1><p>生成后发给用户，用户在「积分充值」页兑换；每枚只能使用一次</p></div><span class="section-count">可用 ${keys.filter(k => !k.used_by && k.active).length}</span></div>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('key')}生成密钥</h2></div></div>
+      <form id="rechargeKeyForm" class="grid">
+        <div><label>每枚积分</label><input name="points" type="number" value="100" min="1" step="1"></div>
+        <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
+        <div><label>有效期（天）</label><input name="duration_days" type="number" value="0" min="0" max="3650"><span class="muted small">0 表示长期有效</span></div>
+        <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
+        <div class="form-actions" style="grid-column:1/-1;justify-content:flex-end"><button>生成充值密钥</button></div>
+      </form>
+    </section>
+    <section class="card"><div class="section-title"><div><h2>密钥列表</h2><p>共 ${keys.length} 条</p></div></div><div class="table-wrap"><table><thead><tr><th>序号</th><th>密钥</th><th>积分</th><th>备注</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+  `, 'admin-recharge', '积分充值密钥');
+  const form = document.querySelector('#rechargeKeyForm');
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    const body = {points: fd.get('points'), count: fd.get('count'), note: fd.get('note'), expires_days: fd.get('duration_days')};
+    try{
+      const r = await api('/api/admin/recharge-keys/create', {method:'POST', body});
+      const list = r.keys || [];
+      if(list.length) await copyText(list.join('\n'));
+      await appAlert((r.message || '充值密钥已生成') + (list.length ? '\n已复制到剪贴板。' : ''), {title:'生成完成'});
+      await loadAdminRecharge();
+    }catch(err){ show(err.message, true); }
+  };
 }
 
 async function loadAdminPayouts(){
@@ -3251,15 +3318,6 @@ async function loadAdmin(section=currentAdminSection){
       <td>${fmtTs(o.created_at)}</td>
       <td class="actions node-actions">${o.status === 'pending' ? `<button type="button" class="node-action" onclick="orderComplete('${esc(o.order_no)}')">手动开通</button>` : '<span class="muted small">—</span>'}</td>
     </tr>`).join('') || '<tr><td colspan="11" class="muted">暂无订单</td></tr>';
-  const rkRows = (data.recharge_keys || []).map((k, i) => `<tr>
-      <td>${i + 1}</td>
-      <td><code class="token">${esc(k.key)}</code></td>
-      <td>${k.points}</td>
-      <td>${esc(k.note || '—')}</td>
-      <td>${k.used_by ? '<span class="bad">已使用</span>' : (k.active ? '<span class="ok">可用</span>' : '<span class="bad">停用</span>')}</td>
-      <td>${fmtTs(k.created_at)}</td>
-      <td class="actions node-actions">${k.used_by ? '<span class="muted small">已使用</span>' : `<button type="button" class="node-action" onclick="rechargeKeyToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button type="button" class="node-action node-action-danger" onclick="rechargeKeyDelete(${k.id})">删除</button>`}</td>
-    </tr>`).join('') || '<tr><td colspan="7" class="muted">还没有充值密钥</td></tr>';
   const ordersHtml = `
     <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}订单</h2><p>最近 100 条；待支付订单可手动开通</p></div><span class="section-count">已支付 ${orderList.filter(o => o.status === 'paid').length} / 共 ${orderList.length}</span></div>
       <table><thead><tr><th>序号</th><th>订单号</th><th>用户</th><th>类型</th><th>套餐 / 内容</th><th>积分</th><th>金额</th><th>状态</th><th>支付方式</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table>
@@ -3283,16 +3341,7 @@ async function loadAdmin(section=currentAdminSection){
       <div class="form-actions" style="grid-column:1/-1"><button>保存套餐</button><button type="button" class="secondary" onclick="resetPlanForm()">清空</button></div>
     </form></section>
     <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>序号</th><th>名称</th><th>积分价格</th><th>端口</th><th>计费</th><th>有效期 / 额度</th><th>速率</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
-    <section class="card" id="recharge-keys"><div class="section-title"><div><h2>${stIcon('key')}积分充值密钥</h2><p>生成后发给用户，用户在「积分充值」页兑换；每枚只能使用一次</p></div><span class="section-count">可用 ${(data.recharge_keys || []).filter(k => !k.used_by && k.active).length}</span></div>
-      <form id="rechargeKeyForm" class="grid" style="margin-bottom:18px">
-        <div><label>每枚积分</label><input name="points" type="number" value="100" min="1" step="1"></div>
-        <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
-        <div><label>有效期（天）</label><input name="duration_days" type="number" value="0" min="0" max="3650"><span class="muted small">0 表示长期有效</span></div>
-        <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
-        <div class="form-actions" style="grid-column:1/-1;justify-content:flex-end;margin-top:2px"><button>生成充值密钥</button></div>
-      </form>
-      <table><thead><tr><th>序号</th><th>密钥</th><th>积分</th><th>备注</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${rkRows}</tbody></table>
-    </section>
+    
     ${data.software_license_authority ? `<section class="card" id="software-licenses"><div class="section-title"><h2>${stIcon('license')}服务器软件授权码</h2><p>卖家后台使用：先批量生成授权码发给客户；客户输入授权码后自动绑定他的部署服务器。</p></div><form id="softwareLicenseForm" class="grid">
       <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
       <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
@@ -3472,21 +3521,6 @@ async function loadAdmin(section=currentAdminSection){
         if(keys.length){ await copyText(keys.join('\n')); }
         await loadAdmin();
         show(r.message || '续期密钥已生成');
-      }catch(err){ show(err.message, true); }
-    };
-  }
-  const rechargeKeyForm = document.querySelector('#rechargeKeyForm');
-  if(rechargeKeyForm){
-    rechargeKeyForm.onsubmit = async (e) => {
-      e.preventDefault();
-      const fd = new FormData(e.target);
-      const body = {points: fd.get('points'), count: fd.get('count'), note: fd.get('note'), expires_days: fd.get('duration_days')};
-      try{
-        const r = await api('/api/admin/recharge-keys/create', {method:'POST', body});
-        const keys = r.keys || [];
-        if(keys.length) await copyText(keys.join('\n'));
-        await loadAdmin();
-        await appAlert((r.message || '充值密钥已生成') + (keys.length ? '\n已复制到剪贴板。' : ''), {title:'生成完成'});
       }catch(err){ show(err.message, true); }
     };
   }
@@ -3840,8 +3874,8 @@ async function adminAdjustPoints(id, username){
   }catch(err){ show(err.message, true); }
 }
 
-async function rechargeKeyToggle(id){ await api('/api/admin/recharge-keys/toggle', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥状态已更新'))).catch(e=>show(e.message,true)); }
-async function rechargeKeyDelete(id){ if(await appConfirm('删除这枚充值密钥？', {title:'删除充值密钥', okText:'删除', danger:true})) await api('/api/admin/recharge-keys/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥已删除'))).catch(e=>show(e.message,true)); }
+async function rechargeKeyToggle(id){ await api('/api/admin/recharge-keys/toggle', {method:'POST', body:{id}}).then(()=>loadAdminRecharge().then(()=>show('密钥状态已更新'))).catch(e=>show(e.message,true)); }
+async function rechargeKeyDelete(id){ if(await appConfirm('删除这枚充值密钥？', {title:'删除充值密钥', okText:'删除', danger:true})) await api('/api/admin/recharge-keys/delete', {method:'POST', body:{id}}).then(()=>loadAdminRecharge().then(()=>show('密钥已删除'))).catch(e=>show(e.message,true)); }
 async function planToggle(id){ await api('/api/admin/plans/toggle', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('套餐状态已更新'))).catch(e=>show(e.message,true)); }
 async function planDelete(id){ if(await appConfirm('删除这个套餐？删除后不再展示，历史订单和套餐数据仍保留。', {title:'删除套餐', okText:'删除', danger:true})) await api('/api/admin/plans/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('套餐已删除'))).catch(e=>show(e.message,true)); }
 async function orderComplete(orderNo){ if(await appConfirm('确认手动开通该订单？将立即分配端口并延长有效期。', {title:'手动开通'})) await api('/api/admin/orders/complete', {method:'POST', body:{order_no:orderNo}}).then(r=>loadAdmin().then(()=>appAlert(r.message || '已开通', {title:'开通完成'}))).catch(e=>show(e.message,true)); }
@@ -4085,7 +4119,7 @@ function reloadAdminCurrentPage(){
 
 function adminOpsCardHtml(){
   return `<section class="card admin-ops-card">
-    <div class="settings-card-head"><span class="settings-card-icon icon-purple">${stIcon('tools')}</span><div><h2>运维入口</h2><p>提供系统运维维护相关工具和功能。</p></div></div>
+    <div class="settings-card-head"><span class="settings-card-icon icon-purple">${stIcon('tools')}</span><div><h2>运维工具</h2><p>提供系统运维维护相关工具和功能。</p></div></div>
     <div class="ops-list">
       <button type="button" class="ops-row" onclick="openAdminFrpcModal()">
         <span class="ops-row-icon">${stIcon('file')}</span>
@@ -4454,7 +4488,7 @@ async function loadAdminSettings(){
   const frpcUserOptions = frpcUsers.map(u => `<option value="${u.id}">${esc(u.username)} · ${esc(u.node_region || '-')} / ${esc(u.node_name || '-')} · 端口 ${u.port_count || 0} · 可用 ${(u.available_ports || []).length} · 隧道 ${u.tunnel_count || 0}</option>`).join('');
   app.innerHTML = appLayoutHtml(`
     <div class="admin-settings-grid">
-      <div class="admin-settings-col">${adminNotifyCardHtml(notify)}${adminPaymentCardHtml(data.payment)}${adminOpsCardHtml()}</div>
+      <div class="admin-settings-col">${adminNotifyCardHtml(notify)}${adminPaymentCardHtml(data.payment)}</div>
       <div class="admin-settings-col">${adminSmtpCardHtml(smtp)}${adminBackupCardHtml(r2, r2Status, r2Source)}${adminR2CardHtml(r2, r2Status, r2Source)}</div>
     </div>
     ${adminFrpcModalHtml(frpcUserOptions)}
