@@ -1923,3 +1923,6 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .ann-head b{font-size:14px;color:var(--text)}
 .ann-head small{color:var(--muted);font-size:11px}
 .ann-item p{margin:0;font-size:13px;line-height:1.7;color:var(--soft);white-space:pre-wrap}
+.sidebar-group-label{margin:14px 0 6px;font-size:11px;letter-spacing:.08em;color:var(--muted)}
+.side-sublink{padding-left:34px!important}
+.side-sublink .side-link-label{font-size:13px}

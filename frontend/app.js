@@ -746,13 +746,39 @@ function appSidebarHtml(kind='dashboard'){
   const isAdmin = currentUser?.role === 'admin';
   const username = currentUser?.username || '用户';
   const items = isAdmin ? [
-    ['admin-dashboard','home','运行总览'],['admin','users','用户管理','users'],['admin','license','套餐','plans'],['admin','chart','订单','orders'],['admin-hosts','cloud','托管中心'],['admin','nodePlus','新增节点','nodes'],['admin-health','pulse','节点健康','health'],['admin-proxies','monitor','映射监控','proxies'],['admin-tickets','log','工单'],['admin-payouts','key','提现'],['admin-announcements','bell','公告'],['admin','risk','风控审计','risk'],['admin-settings','gear','设置']
+    ['admin-dashboard','home','运行总览'],
+    ['admin','users','用户管理','users'],
+    ['admin','license','套餐','plans'],
+    ['admin','chart','订单','orders'],
+    ['admin','nodePlus','新增节点','nodes'],
+    ['admin-health','pulse','节点健康','health'],
+    ['admin-proxies','monitor','映射监控','proxies'],
+    ['admin-announcements','bell','公告'],
+    ['admin','risk','风控审计','risk'],
+    ['admin-settings','gear','设置'],
+    ['__group__','','工单'],
+    ['admin-tickets','log','故障工单'],
+    ['admin-payouts','key','提现工单'],
+    ['admin-hosts','cloud','托管申请'],
   ] : [
-    ['dashboard','home','概览'],['dashboard-nodes','node','新建实例'],['dashboard-myplans','license','我的实例'],['dashboard-hosts','cloud','托管中心'],['dashboard-points','bolt','账单与充值'],['dashboard-tickets','log','工单'],['dashboard-profile','user','个人中心']
+    ['dashboard','home','概览'],
+    ['dashboard-nodes','node','新建实例'],
+    ['dashboard-myplans','license','我的实例'],
+    ['dashboard-points','bolt','账单与充值'],
+    ['__group__','','工单'],
+    ['dashboard-tickets','log','故障工单'],
+    ['dashboard-payouts','key','提现工单'],
+    ['dashboard-hosts','cloud','托管申请'],
+    ['dashboard-profile','user','个人中心'],
   ];
+  let inGroup = false;
   const links = items.map(([action, icon, label, section]) => {
+    if(action === '__group__'){
+      inGroup = true;
+      return `<div class="sidebar-section-label sidebar-group-label">${label}</div>`;
+    }
     const active = kind === action || (section && kind === section) ? ' active' : '';
-    return `<button class="side-link${active}" data-nav="${action}"${section ? ` data-section="${section}"` : ''}>${sideIcon(icon)}<span class="side-link-label">${label}</span><span class="side-link-arrow">›</span></button>`;
+    return `<button class="side-link${inGroup ? ' side-sublink' : ''}${active}" data-nav="${action}"${section ? ` data-section="${section}"` : ''}>${sideIcon(icon)}<span class="side-link-label">${label}</span><span class="side-link-arrow">›</span></button>`;
   }).join('');
   const brandName = 'Frp 管理台';
   const brandSub = '内网穿透管理平台';
@@ -958,6 +984,7 @@ app.addEventListener('click', async (e) => {
     if(action === 'dashboard-plans') return loadPlans();
     if(action === 'dashboard-points') return loadPoints();
     if(action === 'dashboard-tickets') return loadTickets();
+    if(action === 'dashboard-payouts') return loadPayoutTickets();
     if(action === 'admin-tickets') return loadAdminTickets();
     if(action === 'admin-payouts') return loadAdminPayouts();
     if(action === 'admin-announcements') return loadAdminAnnouncements();
@@ -1342,7 +1369,7 @@ async function loadHosts(){
     </section>`;
   const sections = { nodes: nodesSection, plans: plansSection, earn: earnSection, hosts: hostsSection };
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">HOSTING</span><h1>托管中心</h1><p>提供主机、上架套餐、查看收益与申请记录。</p></div>
+    <div class="ov-page-head"><div><span class="section-kicker">HOSTING</span><h1>托管申请</h1><p>提交母鸡、上架套餐、查看收益与申请记录。</p></div>
       <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadHosts()">刷新</button><button type="button" onclick="hostFormModal()">＋ 添加母鸡</button></div></div>
     <nav class="seg-tabs">
       <button type="button" class="seg-tab${tab === 'nodes' ? ' active' : ''}" onclick="switchHostsTab('nodes')">我的节点${pNodes.length ? `<span>${pNodes.length}</span>` : ''}</button>
@@ -1351,7 +1378,7 @@ async function loadHosts(){
       <button type="button" class="seg-tab${tab === 'hosts' ? ' active' : ''}" onclick="switchHostsTab('hosts')">申请记录${hosts.length ? `<span>${hosts.length}</span>` : ''}</button>
     </nav>
     ${sections[tab] || sections.nodes}
-  `, 'dashboard-hosts', '托管中心');
+  `, 'dashboard-hosts', '托管申请');
 }
 
 function switchHostsTab(tab){
@@ -1390,7 +1417,7 @@ async function loadTickets(){
       <td class="actions node-actions"><button type="button" class="node-action" onclick="loadTicketDetail(${t.id})">查看</button></td>
     </tr>`).join('') || `<tr><td colspan="8" class="muted">${ticketsTab === 'mine' ? '还没有提交过工单' : '还没有收到工单'}</td></tr>`;
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>工单</h1><p>母鸡故障、服务异常可以提交工单通知机主。</p></div>
+    <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>故障工单</h1><p>节点或实例出现故障时，提交工单通知机主处理。</p></div>
       <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadTickets()">刷新</button><button type="button" onclick="loadTicketNew()">＋ 新建工单</button></div></div>
     <nav class="seg-tabs">
       <button type="button" class="seg-tab${ticketsTab === 'mine' ? ' active' : ''}" onclick="switchTicketsTab('mine')">我提交的${mine.length ? `<span>${mine.length}</span>` : ''}</button>
@@ -1401,10 +1428,6 @@ async function loadTickets(){
 }
 
 function switchTicketsTab(tab){ ticketsTab = tab; loadTickets(); }
-
-let ticketNewKind = 'issue';
-
-function switchTicketNewKind(kind){ ticketNewKind = kind; loadTicketNew(); }
 
 function ticketBodyHtml(c){
   const raw = String(c || '');
@@ -1418,66 +1441,24 @@ function tkCmd(cmd){
   if(ed) ed.focus();
 }
 
-async function uploadImage(file, kind){
-  if(!file || !file.type.startsWith('image/')) throw new Error('请选择图片文件');
-  if(file.size > 3 * 1024 * 1024) throw new Error('图片不能超过 3MB');
-  const dataUrl = await new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(fr.result);
-    fr.onerror = () => reject(new Error('读取图片失败'));
-    fr.readAsDataURL(file);
-  });
-  const r = await api('/api/user/upload', {method:'POST', body:{kind, mime:file.type, data:dataUrl}});
-  return r.token;
-}
-
-function renderTicketAtts(){
-  const box = document.querySelector('#tkAtts');
-  if(!box) return;
-  const list = window.__tkAtts || [];
-  box.innerHTML = list.map((tok, i) => `<span class="tk-att"><img src="/api/upload/${encodeURIComponent(tok)}" alt=""><button type="button" onclick="removeTicketAtt(${i})">×</button></span>`).join('');
-}
-function removeTicketAtt(i){
-  (window.__tkAtts || []).splice(i, 1);
-  renderTicketAtts();
-}
-
-function attsHtml(tokens){
-  const list = Array.isArray(tokens) ? tokens : [];
-  if(!list.length) return '';
-  return `<div class="ticket-atts">${list.map(t => `<img src="/api/upload/${encodeURIComponent(t)}" alt="附件" onclick="showImageViewer('/api/upload/${encodeURIComponent(t)}')">`).join('')}</div>`;
-}
-
-function showImageViewer(url){
-  const old = document.querySelector('#imgViewer');
-  if(old) old.remove();
-  document.body.insertAdjacentHTML('beforeend', `<div class="img-viewer" id="imgViewer"><img src="${url}" alt="图片预览"></div>`);
-  const box = document.querySelector('#imgViewer');
-  box.onclick = () => box.remove();
-  const onKey = (e) => { if(e.key === 'Escape'){ box.remove(); document.removeEventListener('keydown', onKey); } };
-  document.addEventListener('keydown', onKey);
-}
-
 async function loadTicketNew(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
-  let nodes = [], plans = [], income = 0, acc = { method: 'alipay', account: '', holder: '' };
+  let nodes = [], plans = [];
   try{
-    const [a, b, c, d] = await Promise.all([
+    const [a, b] = await Promise.all([
       api('/api/user/nodes').catch(() => ({nodes: []})),
-      api('/api/dashboard').catch(() => ({my_plans: []})),
-      api('/api/user/payouts').catch(() => ({income: 0})),
-      api('/api/user/payout-account').catch(() => ({}))
+      api('/api/dashboard').catch(() => ({my_plans: []}))
     ]);
-    nodes = a.nodes || []; plans = b.my_plans || []; income = Number(c.income || 0);
-    acc = (d.account) || acc;
+    nodes = a.nodes || []; plans = b.my_plans || [];
   }catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
   const nodeById = {}; nodes.forEach(n => { nodeById[Number(n.id)] = n; });
   const ids = [...new Set(plans.filter(p => p.status !== 'cancelled').map(p => Number(p.node_id)))].filter(Boolean);
   const opts = '<option value="0">不关联实例</option>' + ids.map(id => `<option value="${id}">${esc((nodeById[id] || {}).name || ('#' + id))}（${esc((nodeById[id] || {}).region || '')}）</option>`).join('');
-  const hasAcc = !!(acc.account && acc.holder);
-  const issuePanel = `
+  app.innerHTML = appLayoutHtml(`
+    <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>提交故障工单</h1><p>描述节点或实例的故障，机主会收到通知并处理。</p></div>
+      <button type="button" class="secondary" onclick="loadTickets()">‹ 返回</button></div>
     <section class="tk-panel">
-      <label class="tk-field"><span>工单主题</span><input id="tkSubject" maxlength="80" placeholder="简述您的问题"></label>
+      <label class="tk-field"><span>工单主题</span><input id="tkSubject" maxlength="80" placeholder="简述您遇到的问题"></label>
       <label class="tk-field"><span>关联实例</span><select id="tkNode">${opts}</select></label>
       <div class="tk-field"><span>沟通内容</span>
         <div class="tk-editor-wrap">
@@ -1489,72 +1470,68 @@ async function loadTicketNew(){
             <button type="button" title="插入图片" onclick="document.querySelector('#tkFile').click()">🖼 图片</button>
             <input type="file" id="tkFile" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
           </div>
-          <div id="tkEditor" class="tk-editor" contenteditable="true" data-placeholder="详细描述您的问题..."></div>
+          <div id="tkEditor" class="tk-editor" contenteditable="true" data-placeholder="出现时间、现象、已尝试的操作..."></div>
         </div>
       </div>
       <div id="tkAtts" class="tk-atts"></div>
       <button type="button" class="tk-submit" id="tkSubmit">提交</button>
-    </section>`;
-  const withdrawPanel = `
-    <section class="tk-panel">
-      <label class="tk-field"><span>可提现收益</span><input value="${income} 积分" disabled></label>
-      <label class="tk-field"><span>提现方式</span><select id="tkMode"><option value="balance">转入余额</option><option value="external"${hasAcc ? '' : ' disabled'}>提现到收款账户</option></select></label>
-      <label class="tk-field"><span>提现积分</span><input id="tkPoints" type="number" min="1" max="${income}" value="${income > 0 ? income : ''}" ${income > 0 ? '' : 'disabled'}></label>
-      <p class="muted small">${hasAcc ? '收款信息可在「个人中心」修改。' : '提现到收款账户前，请先在「个人中心」配置收款信息。'}</p>
-      <button type="button" class="tk-submit" id="tkSubmit" ${income > 0 ? '' : 'disabled'}>提交</button>
-    </section>`;
-  app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>提交新工单</h1><p>提交工单并获取我们的团队和机主的业务支持。</p></div>
-      <button type="button" class="secondary" onclick="loadTickets()">‹ 返回</button></div>
-    <div class="tk-type-grid">
-      <button type="button" class="tk-type-card${ticketNewKind === 'issue' ? ' active' : ''}" onclick="switchTicketNewKind('issue')">
-        <span class="tk-type-icon issue">💬</span><span class="tk-type-copy"><b>普通工单</b><small>获取团队协助</small></span>
-      </button>
-      <button type="button" class="tk-type-card${ticketNewKind === 'withdraw' ? ' active' : ''}" onclick="switchTicketNewKind('withdraw')">
-        <span class="tk-type-icon withdraw">＄</span><span class="tk-type-copy"><b>提现工单</b><small>提取您的托管余额</small></span>
-      </button>
-    </div>
-    ${ticketNewKind === 'issue' ? issuePanel : withdrawPanel}
-  `, 'dashboard-tickets', '工单');
+    </section>
+  `, 'dashboard-tickets', '故障工单');
   window.__tkAtts = [];
   const fileInput = document.querySelector('#tkFile');
   if(fileInput) fileInput.onchange = async () => {
     for(const f of Array.from(fileInput.files || [])){
-      try{
-        const token = await uploadImage(f, 'ticket');
-        window.__tkAtts.push(token);
-      }catch(err){ show(err.message || '图片上传失败', true); }
+      try{ window.__tkAtts.push(await uploadImage(f, 'ticket')); }catch(err){ show(err.message || '图片上传失败', true); }
     }
     fileInput.value = '';
     renderTicketAtts();
   };
   renderTicketAtts();
   const submit = document.querySelector('#tkSubmit');
-  if(ticketNewKind === 'issue'){
-    submit.onclick = async () => {
-      const title = document.querySelector('#tkSubject').value.trim();
-      const nodeId = Number(document.querySelector('#tkNode').value || 0);
-      const ed = document.querySelector('#tkEditor');
-      if(!title){ show('请填写工单主题', true); return; }
-      if(!ed.innerText.trim()){ show('请填写沟通内容', true); return; }
-      submit.disabled = true;
-      try{
-        const r = await api('/api/user/tickets/create', {method:'POST', body:{node_id:nodeId, title, content:ed.innerHTML, attachments:window.__tkAtts || []}});
-        show(r.message || '已提交'); await loadTickets();
-      }catch(err){ show(err.message || '提交失败', true); submit.disabled = false; }
-    };
-  } else {
-    submit.onclick = async () => {
-      const mode = document.querySelector('#tkMode').value;
-      const points = Number(document.querySelector('#tkPoints').value || 0);
-      if(!points || points <= 0){ show('请输入提现积分', true); return; }
-      submit.disabled = true;
-      try{
-        const r = await api('/api/user/withdraw', {method:'POST', body:{mode, points}});
-        show(r.message || '已提交'); await loadTickets();
-      }catch(err){ show(err.message || '提现失败', true); submit.disabled = false; }
-    };
-  }
+  submit.onclick = async () => {
+    const title = document.querySelector('#tkSubject').value.trim();
+    const nodeId = Number(document.querySelector('#tkNode').value || 0);
+    const ed = document.querySelector('#tkEditor');
+    if(!title){ show('请填写工单主题', true); return; }
+    if(!ed.innerText.trim()){ show('请填写沟通内容', true); return; }
+    submit.disabled = true;
+    try{
+      const r = await api('/api/user/tickets/create', {method:'POST', body:{node_id:nodeId, title, content:ed.innerHTML, attachments:window.__tkAtts || []}});
+      show(r.message || '已提交'); await loadTickets();
+    }catch(err){ show(err.message || '提交失败', true); submit.disabled = false; }
+  };
+}
+
+async function loadPayoutTickets(){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
+  let income = 0, payouts = [], acc = { method: 'alipay', account: '', holder: '', qr_token: '' };
+  try{
+    const [a, b] = await Promise.all([api('/api/user/payouts'), api('/api/user/payout-account')]);
+    income = Number(a.income || 0); payouts = a.payouts || []; acc = b.account || acc;
+  }catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
+  const hasAcc = !!(acc.account && acc.holder);
+  const rows = payouts.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td><b>${p.points}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td><span class="status-badge ${p.status === 'paid' ? 'ok' : (p.status === 'pending' ? 'warn' : 'bad')}"><i></i>${p.status === 'paid' ? '已打款' : (p.status === 'pending' ? '待处理' : '已拒绝')}</span></td><td>${fmtTs(p.created_at)}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">暂无提现记录</td></tr>';
+  app.innerHTML = appLayoutHtml(`
+    <div class="ov-page-head"><div><span class="section-kicker">PAYOUTS</span><h1>提现工单</h1><p>把托管收益转入余额，或提现到已配置的收款账户。</p></div></div>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('key')}申请提现</h2><p>可提现收益 <b>${income}</b> 积分${hasAcc ? '' : ' · 尚未配置收款信息'}</p></div><span class="section-count">${hasAcc ? esc(acc.method + ' ' + acc.account) : '未配置'}</span></div>
+      <form id="withdrawForm" class="grid">
+        <div><label>提现方式</label><select name="mode"><option value="balance">转入余额</option><option value="external"${hasAcc ? '' : ' disabled'}>提现到收款账户</option></select></div>
+        <div><label>积分数量</label><input name="points" type="number" min="1" max="${income}" value="${income > 0 ? income : ''}" ${income > 0 ? '' : 'disabled'}></div>
+        <div class="span-2 muted small">${hasAcc ? '收款信息可在「个人中心」修改。' : '提现到收款账户前，请先在「个人中心」配置收款信息。'}</div>
+        <div class="form-actions span-2"><button type="submit" ${income > 0 ? '' : 'disabled'}>提交提现工单</button></div>
+      </form>
+    </section>
+    <section class="card"><div class="section-title"><div><h2>提现记录</h2><p>共 ${payouts.length} 条</p></div></div><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>积分</th><th>方式</th><th>账号</th><th>状态</th><th>时间</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+  `, 'dashboard-payouts', '提现工单');
+  const form = document.querySelector('#withdrawForm');
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(form));
+    try{
+      const r = await api('/api/user/withdraw', {method:'POST', body:{mode:fd.mode, points:Number(fd.points)}});
+      show(r.message || '已提交'); await loadPayoutTickets();
+    }catch(err){ show(err.message || '提现失败', true); }
+  };
 }
 
 async function loadTicketDetail(id, scope){
@@ -1645,7 +1622,7 @@ async function loadAdminTickets(){
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
   const rows = tickets.map((t, i) => `<tr><td>${i + 1}</td><td>${esc(t.ticket_no)}</td><td>${TICKET_KIND[t.kind] || t.kind}</td><td>${esc(t.title)}</td><td>${esc(t.username)}</td><td>${t.node_id ? esc(t.node_name || ('#' + t.node_id)) : '不关联'}</td><td><span class="status-badge ${t.status === 'closed' ? '' : (t.status === 'open' ? 'warn' : 'ok')}"><i></i>${TICKET_STATUS[t.status] || t.status}</span></td><td>${fmtTs(t.created_at)}</td><td class="actions node-actions"><button type="button" class="node-action" onclick="loadTicketDetail(${t.id}, 'admin')">查看</button></td></tr>`).join('') || '<tr><td colspan="9" class="muted">暂无工单</td></tr>';
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>工单</h1><p>全部用户提交的工单</p></div></div>
+    <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>故障工单</h1><p>全部用户提交的故障工单</p></div></div>
     <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>编号</th><th>类型</th><th>标题</th><th>提交人</th><th>节点</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
   `, 'admin-tickets', '工单');
 }
@@ -1685,7 +1662,7 @@ async function loadAdminPayouts(){
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
   const rows = payouts.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td>${esc(p.username)}</td><td><b>${p.points}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${esc(p.holder)}</td><td>${p.qr_token ? `<img class="qr-thumb" src="/api/upload/${encodeURIComponent(p.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(p.qr_token)}')">` : '-'}</td><td><span class="status-badge ${p.status === 'paid' ? 'ok' : (p.status === 'pending' ? 'warn' : 'bad')}"><i></i>${p.status === 'paid' ? '已打款' : (p.status === 'pending' ? '待处理' : '已拒绝')}</span></td><td>${fmtTs(p.created_at)}</td><td class="actions node-actions">${p.status === 'pending' ? `<button class="node-action" onclick="reviewPayout(${p.id}, 'paid')">标记已打款</button><button class="node-action node-action-danger" onclick="reviewPayout(${p.id}, 'reject')">拒绝</button>` : '<span class="muted small">—</span>'}</td></tr>`).join('') || '<tr><td colspan="11" class="muted">暂无提现申请</td></tr>';
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">PAYOUTS</span><h1>提现</h1><p>处理供给方的收款提现申请</p></div><button type="button" class="secondary" onclick="loadAdminPayouts()">刷新</button></div>
+    <div class="ov-page-head"><div><span class="section-kicker">PAYOUTS</span><h1>提现工单</h1><p>处理供给方的收款提现申请</p></div><button type="button" class="secondary" onclick="loadAdminPayouts()">刷新</button></div>
     <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>用户</th><th>积分</th><th>方式</th><th>账号</th><th>姓名</th><th>收款码</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
   `, 'admin-payouts', '提现');
 }
@@ -1773,7 +1750,7 @@ async function loadAdminHosts(){
   const hosts = data.hosts || [];
   const pending = hosts.filter(h => h.status === 'pending').length;
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">HOSTING</span><h1>托管中心</h1><p>审核用户提交的母鸡，通过后自动创建节点。</p></div>
+    <div class="ov-page-head"><div><span class="section-kicker">HOSTING</span><h1>托管申请</h1><p>审核用户提交的母鸡，通过后自动创建节点。</p></div>
       <div class="row" style="gap:10px"><span class="section-count">待审核 ${pending}</span><button type="button" class="secondary" onclick="loadAdminHosts()">刷新</button></div></div>
     <section class="card host-rules">
       <div class="section-title"><div><h2>${stIcon('shield')}托管规则与准则</h2><p>审核时请对照以下约定</p></div></div>
@@ -1781,7 +1758,7 @@ async function loadAdminHosts(){
     </section>
     <section class="card"><div class="section-title"><div><h2>${stIcon('cloud')}托管列表</h2><p>共 ${hosts.length} 条</p></div></div>
       <table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>到期时间</th><th>带宽 / 流量</th><th>提交人</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${hostRowsHtml(hosts, true)}</tbody></table>
-    </section>`, 'admin-hosts', '托管中心');
+    </section>`, 'admin-hosts', '托管申请');
 }
 
 async function hostReview(id, action){
