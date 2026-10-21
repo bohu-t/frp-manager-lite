@@ -1926,3 +1926,10 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .sidebar-group-label{margin:14px 0 6px;font-size:11px;letter-spacing:.08em;color:var(--muted)}
 .side-sublink{padding-left:34px!important}
 .side-sublink .side-link-label{font-size:13px}
+.side-group{display:flex;flex-direction:column}
+.side-group-toggle{width:100%}
+.side-group-chevron{margin-left:auto;font-size:14px;transition:transform .18s;color:var(--muted)}
+.side-group-toggle[aria-expanded="true"] .side-group-chevron{transform:rotate(90deg)}
+.side-subnav{display:none;flex-direction:column}
+.side-subnav.open{display:flex}
+.side-subnav .side-link{width:100%}

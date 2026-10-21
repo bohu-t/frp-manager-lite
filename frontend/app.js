@@ -745,7 +745,7 @@ function initPasswordForm(){
 function appSidebarHtml(kind='dashboard'){
   const isAdmin = currentUser?.role === 'admin';
   const username = currentUser?.username || '用户';
-  const items = isAdmin ? [
+  const mainItems = isAdmin ? [
     ['admin-dashboard','home','运行总览'],
     ['admin','users','用户管理','users'],
     ['admin','license','套餐','plans'],
@@ -755,36 +755,41 @@ function appSidebarHtml(kind='dashboard'){
     ['admin-proxies','monitor','映射监控','proxies'],
     ['admin-announcements','bell','公告'],
     ['admin','risk','风控审计','risk'],
-    ['admin-settings','gear','设置'],
-    ['__group__','','工单'],
-    ['admin-tickets','log','故障工单'],
-    ['admin-payouts','key','提现工单'],
-    ['admin-hosts','cloud','托管申请'],
+    ['admin-settings','gear','设置']
   ] : [
     ['dashboard','home','概览'],
     ['dashboard-nodes','node','新建实例'],
     ['dashboard-myplans','license','我的实例'],
-    ['dashboard-points','bolt','账单与充值'],
-    ['__group__','','工单'],
+    ['dashboard-points','bolt','账单与充值']
+  ];
+  const tailItems = isAdmin ? [] : [['dashboard-profile','user','个人中心']];
+  const ticketItems = isAdmin ? [
+    ['admin-tickets','log','故障工单'],
+    ['admin-payouts','key','提现工单'],
+    ['admin-hosts','cloud','托管申请']
+  ] : [
     ['dashboard-tickets','log','故障工单'],
     ['dashboard-payouts','key','提现工单'],
-    ['dashboard-hosts','cloud','托管申请'],
-    ['dashboard-profile','user','个人中心'],
+    ['dashboard-hosts','cloud','托管申请']
   ];
-  let inGroup = false;
-  const links = items.map(([action, icon, label, section]) => {
-    if(action === '__group__'){
-      inGroup = true;
-      return `<div class="sidebar-section-label sidebar-group-label">${label}</div>`;
-    }
+  const linkHtml = ([action, icon, label, section], sub) => {
     const active = kind === action || (section && kind === section) ? ' active' : '';
-    return `<button class="side-link${inGroup ? ' side-sublink' : ''}${active}" data-nav="${action}"${section ? ` data-section="${section}"` : ''}>${sideIcon(icon)}<span class="side-link-label">${label}</span><span class="side-link-arrow">›</span></button>`;
-  }).join('');
+    return `<button class="side-link${sub ? ' side-sublink' : ''}${active}" data-nav="${action}"${section ? ` data-section="${section}"` : ''}>${sideIcon(icon)}<span class="side-link-label">${label}</span><span class="side-link-arrow">›</span></button>`;
+  };
+  const ticketActive = ticketItems.some(([a]) => kind === a);
+  const stored = localStorage.getItem('sideTicketsOpen');
+  const open = ticketActive || stored === '1';
+  const ticketsBlock = `<div class="side-group">
+      <button type="button" class="side-link side-group-toggle${ticketActive ? ' active' : ''}" onclick="toggleSideGroup(this)" aria-expanded="${open ? 'true' : 'false'}">
+        ${sideIcon('log')}<span class="side-link-label">工单</span><span class="side-group-chevron">›</span>
+      </button>
+      <div class="side-subnav${open ? ' open' : ''}">${ticketItems.map(x => linkHtml(x, true)).join('')}</div>
+    </div>`;
   const brandName = 'Frp 管理台';
   const brandSub = '内网穿透管理平台';
   return `<aside class="app-sidebar">
     <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>${brandName}</strong><span>${brandSub}</span></div></div>
-    <div class="sidebar-section-label">工作空间</div>${links}
+    <div class="sidebar-section-label">工作空间</div>${mainItems.map(x => linkHtml(x, false)).join('')}${ticketsBlock}${tailItems.map(x => linkHtml(x, false)).join('')}
     ${isAdmin ? '' : `<div class="sidebar-section-label sidebar-tools-label">快速工具</div>
       <button class="side-link${kind === 'dashboard-config' ? ' active' : ''}" data-nav="dashboard-config">${sideIcon('download')}<span class="side-link-label">配置下载</span><span class="side-link-arrow">›</span></button>
       <button class="side-link${kind === 'dashboard-editor' ? ' active' : ''}" data-nav="dashboard-editor">${sideIcon('edit')}<span class="side-link-label">在线配置</span><span class="side-link-arrow">›</span></button>`}
@@ -792,6 +797,15 @@ function appSidebarHtml(kind='dashboard'){
     <div class="sidebar-service-status"><span class="sidebar-service-dot"></span><span class="sidebar-service-copy">${sidebarServiceCopyHtml()}</span></div>
     <div class="sidebar-user-card"><span class="sidebar-user-avatar">${avatarSvg(username, currentUser?.role, 32)}</span><span class="sidebar-user-copy"><strong>${esc(username)}</strong><small>${isAdmin ? '系统管理员' : '普通用户'}</small></span><button type="button" data-nav="logout" title="退出登录" aria-label="退出登录">↗</button></div>
   </aside>`;
+}
+
+function toggleSideGroup(btn){
+  const sub = btn.parentElement.querySelector('.side-subnav');
+  if(!sub) return;
+  const open = !sub.classList.contains('open');
+  sub.classList.toggle('open', open);
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  localStorage.setItem('sideTicketsOpen', open ? '1' : '0');
 }
 
 function settingsTopbarHtml(title){
