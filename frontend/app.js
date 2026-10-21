@@ -1352,7 +1352,17 @@ function removeTicketAtt(i){
 function attsHtml(tokens){
   const list = Array.isArray(tokens) ? tokens : [];
   if(!list.length) return '';
-  return `<div class="ticket-atts">${list.map(t => `<a href="/api/upload/${encodeURIComponent(t)}" target="_blank" rel="noopener"><img src="/api/upload/${encodeURIComponent(t)}" alt="附件"></a>`).join('')}</div>`;
+  return `<div class="ticket-atts">${list.map(t => `<img src="/api/upload/${encodeURIComponent(t)}" alt="附件" onclick="showImageViewer('/api/upload/${encodeURIComponent(t)}')">`).join('')}</div>`;
+}
+
+function showImageViewer(url){
+  const old = document.querySelector('#imgViewer');
+  if(old) old.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div class="img-viewer" id="imgViewer"><img src="${url}" alt="图片预览"></div>`);
+  const box = document.querySelector('#imgViewer');
+  box.onclick = () => box.remove();
+  const onKey = (e) => { if(e.key === 'Escape'){ box.remove(); document.removeEventListener('keydown', onKey); } };
+  document.addEventListener('keydown', onKey);
 }
 
 async function loadTicketNew(){
@@ -1551,7 +1561,7 @@ async function loadAdminPayouts(){
   let payouts = [];
   try{ payouts = (await api('/api/admin/payouts')).payouts || []; }
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
-  const rows = payouts.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td>${esc(p.username)}</td><td><b>${p.points}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${esc(p.holder)}</td><td>${p.qr_token ? `<a href="/api/upload/${encodeURIComponent(p.qr_token)}" target="_blank" rel="noopener"><img class="qr-thumb" src="/api/upload/${encodeURIComponent(p.qr_token)}" alt="收款码"></a>` : '-'}</td><td><span class="status-badge ${p.status === 'paid' ? 'ok' : (p.status === 'pending' ? 'warn' : 'bad')}"><i></i>${p.status === 'paid' ? '已打款' : (p.status === 'pending' ? '待处理' : '已拒绝')}</span></td><td>${fmtTs(p.created_at)}</td><td class="actions node-actions">${p.status === 'pending' ? `<button class="node-action" onclick="reviewPayout(${p.id}, 'paid')">标记已打款</button><button class="node-action node-action-danger" onclick="reviewPayout(${p.id}, 'reject')">拒绝</button>` : '<span class="muted small">—</span>'}</td></tr>`).join('') || '<tr><td colspan="11" class="muted">暂无提现申请</td></tr>';
+  const rows = payouts.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td>${esc(p.username)}</td><td><b>${p.points}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${esc(p.holder)}</td><td>${p.qr_token ? `<img class="qr-thumb" src="/api/upload/${encodeURIComponent(p.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(p.qr_token)}')">` : '-'}</td><td><span class="status-badge ${p.status === 'paid' ? 'ok' : (p.status === 'pending' ? 'warn' : 'bad')}"><i></i>${p.status === 'paid' ? '已打款' : (p.status === 'pending' ? '待处理' : '已拒绝')}</span></td><td>${fmtTs(p.created_at)}</td><td class="actions node-actions">${p.status === 'pending' ? `<button class="node-action" onclick="reviewPayout(${p.id}, 'paid')">标记已打款</button><button class="node-action node-action-danger" onclick="reviewPayout(${p.id}, 'reject')">拒绝</button>` : '<span class="muted small">—</span>'}</td></tr>`).join('') || '<tr><td colspan="11" class="muted">暂无提现申请</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">PAYOUTS</span><h1>提现</h1><p>处理供给方的收款提现申请</p></div><button type="button" class="secondary" onclick="loadAdminPayouts()">刷新</button></div>
     <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>用户</th><th>积分</th><th>方式</th><th>账号</th><th>姓名</th><th>收款码</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
@@ -2773,7 +2783,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
           <div><label>收款方式</label><select name="method"><option value="alipay"${payoutAcc.method === 'alipay' ? ' selected' : ''}>支付宝</option><option value="wechat"${payoutAcc.method === 'wechat' ? ' selected' : ''}>微信</option><option value="bank"${payoutAcc.method === 'bank' ? ' selected' : ''}>银行卡</option></select></div>
           <div><label>收款账号</label><input name="account" value="${esc(payoutAcc.account || '')}" required placeholder="支付宝账号 / 微信号 / 银行卡号"></div>
           <div><label>姓名</label><input name="holder" value="${esc(payoutAcc.holder || '')}" required placeholder="收款人姓名"></div>
-          <div class="span-2"><label>收款码（可选）</label><input type="file" id="qrFile" accept="image/png,image/jpeg,image/webp"><input type="hidden" name="qr_token" value="${esc(payoutAcc.qr_token || '')}"><div id="qrPreview" class="qr-preview">${payoutAcc.qr_token ? `<img src="/api/upload/${encodeURIComponent(payoutAcc.qr_token)}" alt="收款码">` : ''}</div></div>
+          <div class="span-2"><label>收款码（可选）</label><input type="file" id="qrFile" accept="image/png,image/jpeg,image/webp"><input type="hidden" name="qr_token" value="${esc(payoutAcc.qr_token || '')}"><div id="qrPreview" class="qr-preview">${payoutAcc.qr_token ? `<img src="/api/upload/${encodeURIComponent(payoutAcc.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(payoutAcc.qr_token)}')">` : ''}</div></div>
           <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存收款信息</button></div>
         </form>
       </section>`, 'dashboard-profile', '个人中心');
