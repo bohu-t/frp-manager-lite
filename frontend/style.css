@@ -1828,3 +1828,11 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .my-node-section>.section-title{margin-bottom:12px}
 .config-node-pick{display:flex;align-items:center;gap:10px;margin-bottom:14px;font-size:13px;color:var(--muted)}
 .config-node-pick select{height:34px;border:1px solid var(--border);border-radius:8px;padding:0 10px;background:var(--surface);color:var(--text-strong)}
+.seg-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 16px;border-bottom:1px solid var(--border);padding-bottom:0}
+.seg-tab{background:none;border:0;border-bottom:2px solid transparent;padding:9px 14px;font-size:13px;color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.seg-tab:hover{color:var(--text-strong)}
+.seg-tab.active{color:#1677FF;border-bottom-color:#1677FF;font-weight:600}
+.seg-tab span{font-size:11px;background:var(--elevated);border-radius:999px;padding:1px 7px;color:var(--muted)}
+.seg-tab.active span{background:rgba(22,119,255,.12);color:#1677FF}
+.host-rules-details{margin-top:14px;border-top:1px dashed var(--border);padding-top:12px}
+.host-rules-details summary{cursor:pointer;font-size:13px;color:var(--muted)}
