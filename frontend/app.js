@@ -1294,7 +1294,7 @@ async function loadTickets(){
       <td>${t.node_id ? esc((nodeById[Number(t.node_id)] || {}).name || ('#' + t.node_id)) : '-'}</td>
       <td><span class="status-badge ${t.status === 'closed' ? '' : (t.status === 'open' ? 'warn' : 'ok')}"><i></i>${TICKET_STATUS[t.status] || t.status}</span></td>
       <td>${fmtTs(t.created_at)}</td>
-      <td class="actions node-actions"><button type="button" class="node-action" onclick="openTicket(${t.id})">查看</button></td>
+      <td class="actions node-actions"><button type="button" class="node-action" onclick="loadTicketDetail(${t.id})">查看</button></td>
     </tr>`).join('') || `<tr><td colspan="8" class="muted">${ticketsTab === 'mine' ? '还没有提交过工单' : '还没有收到工单'}</td></tr>`;
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>工单</h1><p>母鸡故障、服务异常可以提交工单通知机主。</p></div>
@@ -1454,36 +1454,83 @@ async function loadTicketNew(){
   }
 }
 
-async function openTicket(id){
+async function loadTicketDetail(id){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
   let data;
   try{ data = await api('/api/user/tickets?id=' + Number(id)); }
-  catch(err){ show(err.message, true); return; }
+  catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
   const t = data.ticket || {};
   const msgs = data.messages || [];
-  const thread = msgs.map(m => `<div class="ticket-msg ${m.role}"><div class="ticket-msg-head"><b>${esc(m.username)}</b><span>${m.role === 'owner' ? '机主' : (m.role === 'admin' ? '管理员' : '用户')} · ${fmtTs(m.created_at)}</span></div><p>${ticketBodyHtml(m.content)}</p>${attsHtml(m.attachments)}</div>`).join('');
-  document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="ticketModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeTicketModal()">
-    <section class="modal-page card app-dialog">
-      <div class="section-title modal-title"><div><h2>${esc(t.title || '工单')}</h2><p>${esc(t.ticket_no || '')} · ${TICKET_STATUS[t.status] || ''}</p></div></div>
-      <div class="ticket-thread">
-        <div class="ticket-msg user"><div class="ticket-msg-head"><b>${esc(t.username || '')}</b><span>用户 · ${fmtTs(t.created_at)}</span></div><p>${ticketBodyHtml(t.content)}</p>${attsHtml(t.attachments)}</div>
-        ${thread}
-      </div>
-      ${t.status !== 'closed' ? `<form id="ticketReplyForm" class="grid"><div class="span-2"><label>回复</label><textarea name="content" rows="3" maxlength="2000" required placeholder="补充信息或回复机主"></textarea></div><div class="form-actions span-2"><button type="button" class="secondary" onclick="closeTicketModal()">关闭窗口</button><button type="button" class="secondary" onclick="closeTicket(${Number(t.id)})">结束工单</button><button type="submit">发送回复</button></div></form>` : '<p class="muted small">该工单已关闭</p>'}
-    </section></div>`);
-  const form = document.querySelector('#ticketReplyForm');
-  if(form) form.onsubmit = async (e) => {
-    e.preventDefault();
+  const isClosed = t.status === 'closed';
+  const thread = [
+    `<div class="ticket-msg user"><div class="ticket-msg-head"><b>${esc(t.username || '')}</b><span>用户 · ${fmtTs(t.created_at)}</span></div><p>${ticketBodyHtml(t.content)}</p>${attsHtml(t.attachments)}</div>`,
+    ...msgs.map(m => `<div class="ticket-msg ${m.role}"><div class="ticket-msg-head"><b>${esc(m.username)}</b><span>${m.role === 'owner' ? '机主' : (m.role === 'admin' ? '管理员' : '用户')} · ${fmtTs(m.created_at)}</span></div><p>${ticketBodyHtml(m.content)}</p>${attsHtml(m.attachments)}</div>`)
+  ].join('');
+  app.innerHTML = appLayoutHtml(`
+    <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="loadTickets()">工单</a> <span class="crumb-inline">›</span> ${esc(t.ticket_no || '')}</h1><p>${esc(t.title || '')}</p></div>
+      <button type="button" class="secondary" onclick="loadTickets()">‹ 返回列表</button></div>
+    <div class="ticket-layout">
+      <section class="card ticket-main">
+        <div class="section-title"><div><h2>${stIcon('log')}沟通记录</h2><p>用户与机主在本页沟通，图片可点开查看原图</p></div><span class="status-badge ${isClosed ? '' : (t.status === 'open' ? 'warn' : 'ok')}"><i></i>${TICKET_STATUS[t.status] || t.status}</span></div>
+        <div class="ticket-thread">${thread}</div>
+        ${isClosed ? `<p class="muted small">该工单已关闭${t.resolution ? ' · 处理结果：' + ticketBodyHtml(t.resolution) : ''}</p>` : `
+        <div class="ticket-reply">
+          <label class="tk-field"><span>回复内容</span><textarea id="tkReplyText" rows="4" placeholder="输入回复内容"></textarea></label>
+          <div class="row" style="gap:8px;align-items:center">
+            <button type="button" class="secondary" onclick="document.querySelector('#tkReplyFile').click()">＋ 图片</button>
+            <input type="file" id="tkReplyFile" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+            <div id="tkReplyAtts" class="tk-atts"></div>
+            <button type="button" id="tkReplySubmit" style="margin-left:auto">发送</button>
+          </div>
+        </div>`}
+      </section>
+      <aside class="card ticket-side">
+        <div class="section-title"><div><h2>工单信息</h2></div></div>
+        <div class="instance-action-meta">
+          <div><span>编号</span><b>${esc(t.ticket_no || '')}</b></div>
+          <div><span>类型</span><b>${TICKET_KIND[t.kind] || t.kind}</b></div>
+          <div><span>实例节点</span><b>${t.node_id ? '#' + t.node_id : '不关联'}</b></div>
+          <div><span>状态</span><b>${TICKET_STATUS[t.status] || t.status}</b></div>
+          <div><span>创建时间</span><b>${fmtTs(t.created_at)}</b></div>
+        </div>
+        ${!isClosed ? `<button type="button" class="secondary" onclick="closeTicket(${Number(t.id)})">结束工单</button>` : ''}
+      </aside>
+    </div>
+  `, 'dashboard-tickets', '工单');
+  window.__replyAtts = [];
+  const fileInput = document.querySelector('#tkReplyFile');
+  if(fileInput) fileInput.onchange = async () => {
+    for(const f of Array.from(fileInput.files || [])){
+      try{ window.__replyAtts.push(await uploadImage(f, 'ticket')); }catch(err){ show(err.message || '上传失败', true); }
+    }
+    fileInput.value = '';
+    renderReplyAtts();
+  };
+  renderReplyAtts();
+  const btn = document.querySelector('#tkReplySubmit');
+  if(btn) btn.onclick = async () => {
+    const text = document.querySelector('#tkReplyText').value.trim();
+    if(!text && !(window.__replyAtts || []).length){ show('请输入回复内容或上传图片', true); return; }
+    btn.disabled = true;
     try{
-      await api('/api/user/tickets/reply', {method:'POST', body:{id:Number(t.id), content:form.elements.content.value}});
-      closeTicketModal(); await openTicket(t.id);
-    }catch(err){ show(err.message, true); }
+      await api('/api/user/tickets/reply', {method:'POST', body:{id:Number(t.id), content:text, attachments:window.__replyAtts || []}});
+      await loadTicketDetail(t.id);
+    }catch(err){ show(err.message || '发送失败', true); btn.disabled = false; }
   };
 }
 
-function closeTicketModal(){ const el = document.querySelector('#ticketModal'); if(el) el.remove(); }
+function renderReplyAtts(){
+  const box = document.querySelector('#tkReplyAtts');
+  if(!box) return;
+  const list = window.__replyAtts || [];
+  box.innerHTML = list.map((tok, i) => `<span class="tk-att"><img src="/api/upload/${encodeURIComponent(tok)}" alt=""><button type="button" onclick="removeReplyAtt(${i})">×</button></span>`).join('');
+}
+function removeReplyAtt(i){ (window.__replyAtts || []).splice(i, 1); renderReplyAtts(); }
+
 async function closeTicket(id){
-  if(!await appConfirm('确认结束这个工单？', {title:'结束工单', okText:'确认结束'})) return;
-  try{ await api('/api/user/tickets/close', {method:'POST', body:{id:Number(id)}}); closeTicketModal(); show('工单已结束'); await loadTickets(); }
+  const resolution = await appPrompt('处理结果（可选，填了会展示在工单里）', '', {title:'结束工单'});
+  if(resolution === null) return;
+  try{ await api('/api/user/tickets/close', {method:'POST', body:{id:Number(id), resolution}}); show('工单已结束'); await loadTicketDetail(id); }
   catch(err){ show(err.message, true); }
 }
 
@@ -1492,10 +1539,10 @@ async function loadAdminTickets(){
   let tickets = [];
   try{ tickets = (await api('/api/admin/tickets')).tickets || []; }
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
-  const rows = tickets.map((t, i) => `<tr><td>${i + 1}</td><td>${esc(t.ticket_no)}</td><td>${TICKET_KIND[t.kind] || t.kind}</td><td>${esc(t.title)}</td><td>${esc(t.username)}</td><td>${t.node_id ? '#' + t.node_id : '-'}</td><td><span class="status-badge ${t.status === 'closed' ? '' : (t.status === 'open' ? 'warn' : 'ok')}"><i></i>${TICKET_STATUS[t.status] || t.status}</span></td><td>${fmtTs(t.created_at)}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">暂无工单</td></tr>';
+  const rows = tickets.map((t, i) => `<tr><td>${i + 1}</td><td>${esc(t.ticket_no)}</td><td>${TICKET_KIND[t.kind] || t.kind}</td><td>${esc(t.title)}</td><td>${esc(t.username)}</td><td>${t.node_id ? '#' + t.node_id : '-'}</td><td><span class="status-badge ${t.status === 'closed' ? '' : (t.status === 'open' ? 'warn' : 'ok')}"><i></i>${TICKET_STATUS[t.status] || t.status}</span></td><td>${fmtTs(t.created_at)}</td><td class="actions node-actions"><button type="button" class="node-action" onclick="loadTicketDetail(${t.id})">查看</button></td></tr>`).join('') || '<tr><td colspan="9" class="muted">暂无工单</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>工单</h1><p>全部用户提交的工单</p></div></div>
-    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>编号</th><th>类型</th><th>标题</th><th>提交人</th><th>节点</th><th>状态</th><th>时间</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>编号</th><th>类型</th><th>标题</th><th>提交人</th><th>节点</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
   `, 'admin-tickets', '工单');
 }
 

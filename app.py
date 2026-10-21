@@ -2870,6 +2870,7 @@ def init_db() -> None:
                 title TEXT NOT NULL DEFAULT '',
                 content TEXT NOT NULL DEFAULT '',
                 attachments TEXT NOT NULL DEFAULT '[]',
+                resolution TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
@@ -3117,6 +3118,7 @@ def init_db() -> None:
         for tbl, col, ddl in (
             ("payout_accounts", "qr_token", "TEXT NOT NULL DEFAULT ''"),
             ("tickets", "attachments", "TEXT NOT NULL DEFAULT '[]'"),
+            ("tickets", "resolution", "TEXT NOT NULL DEFAULT ''"),
             ("ticket_messages", "attachments", "TEXT NOT NULL DEFAULT '[]'"),
             ("payouts", "qr_token", "TEXT NOT NULL DEFAULT ''"),
         ):
@@ -3686,6 +3688,7 @@ def ticket_public(row: sqlite3.Row) -> dict[str, Any]:
         "user_id": int(row["user_id"]), "username": row["username"], "node_id": int(row["node_id"] or 0),
         "owner_id": int(row["owner_id"] or 0), "title": row["title"], "content": row["content"],
         "attachments": json.loads(row["attachments"] or "[]") if "attachments" in row.keys() else [],
+        "resolution": (row["resolution"] if "resolution" in row.keys() else "") or "",
         "created_at": int(row["created_at"] or 0), "updated_at": int(row["updated_at"] or 0),
     }
 
@@ -6328,9 +6331,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/provider/tickets":
             with db() as conn:
-                rows = conn.execute(
-                    """SELECT t.* FROM tickets t JOIN nodes n ON n.id=t.node_id
-                       WHERE n.owner_id=? ORDER BY t.id DESC LIMIT 100""", (int(user["id"]),)).fetchall()
+                if user["role"] == "admin":
+                    rows = conn.execute("SELECT * FROM tickets ORDER BY id DESC LIMIT 100").fetchall()
+                else:
+                    rows = conn.execute(
+                        """SELECT t.* FROM tickets t JOIN nodes n ON n.id=t.node_id
+                           WHERE n.owner_id=? ORDER BY t.id DESC LIMIT 100""", (int(user["id"]),)).fetchall()
             self.send_json({"ok": True, "tickets": [ticket_public(r) for r in rows]})
             return
         if path == "/api/admin/payouts":
@@ -6974,7 +6980,8 @@ class Handler(BaseHTTPRequestHandler):
                 if int(row["user_id"]) != int(user["id"]) and int(row["owner_id"] or 0) != int(user["id"]) and user["role"] != "admin":
                     self.send_json({"ok": False, "error": "无权关闭该工单"}, 403)
                     return
-                conn.execute("UPDATE tickets SET status='closed', updated_at=? WHERE id=?", (now(), tid))
+                resolution = sanitize_ticket_html(str(data.get("resolution", "")))[:1000]
+                conn.execute("UPDATE tickets SET status='closed', resolution=?, updated_at=? WHERE id=?", (resolution, now(), tid))
             self.send_json({"ok": True, "message": "工单已关闭"})
             return
 
