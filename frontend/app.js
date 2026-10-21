@@ -1519,7 +1519,7 @@ async function nnPickPlan(id){
   nnState.planId = Number(id);
   const plan = ((window.__nnData || {}).plans || []).find(p => Number(p.id) === Number(id)) || {};
   const maxPorts = Math.max(1, Math.min(20, Number(plan.max_ports || 1)));
-  nnState.tunnels = [{ name: 'tcp-1', proxy_type: 'tcp', local_port: 8080, remote_port: 0 }];
+  nnState.tunnels = [{ name: '', proxy_type: 'tcp', local_port: 8080, remote_port: 0 }];
   nnState.ports = [];
   renderNewNode();
   try{
@@ -1542,7 +1542,7 @@ function nnTunnelAdd(){
   if((nnState.tunnels || []).length >= Math.min(maxPorts, (nnState.ports || []).length || maxPorts)) return;
   const used = new Set(nnState.tunnels.map(t => Number(t.remote_port || 0)));
   const free = (nnState.ports || []).find(pt => !used.has(Number(pt))) || 0;
-  nnState.tunnels.push({ name: 'tcp-' + (nnState.tunnels.length + 1), proxy_type: 'tcp', local_port: 8080 + nnState.tunnels.length, remote_port: free });
+  nnState.tunnels.push({ name: '', proxy_type: 'tcp', local_port: 8080 + nnState.tunnels.length, remote_port: free });
   renderNewNode();
 }
 
@@ -1576,7 +1576,12 @@ async function nnPay(){
     okBtn.disabled = true;
     okBtn.textContent = '支付中…';
     try{
-      const tunnels = (nnState.tunnels || []).filter(t => t.name && Number(t.local_port) > 0).map(t => ({name:t.name, proxy_type:t.proxy_type, local_port:Number(t.local_port), remote_port:Number(t.remote_port || 0)}));
+      const fail = (msg) => { show(msg, true); okBtn.disabled = false; okBtn.textContent = '确认支付'; };
+      const named = (nnState.tunnels || []).filter(t => String(t.name || '').trim());
+      if((nnState.tunnels || []).length && named.length !== (nnState.tunnels || []).length){ fail('有隧道未填写名称'); return; }
+      const dupNames = named.map(t => String(t.name).trim()).filter((n, i, arr) => arr.indexOf(n) !== i);
+      if(dupNames.length){ fail(`隧道名称「${dupNames[0]}」重复，请更换`); return; }
+      const tunnels = named.map(t => ({name:String(t.name).trim(), proxy_type:t.proxy_type, local_port:Number(t.local_port), remote_port:Number(t.remote_port || 0)}));
       const r = await api('/api/user/orders', {method:'POST', body:{plan_id:nnState.planId, node_id:nnState.nodeId, tunnels}});
       nnPayClose();
       nnState = { region:'', nodeId:0, planId:0, ports:[], tunnels:[] };

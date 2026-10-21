@@ -4786,6 +4786,18 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
         if plan_node_id and plan_node_id != int(node_id or 0):
             return False, "该套餐不适用于所选节点，请重新选择", None
 
+        if tunnels and int(node_id or 0):
+            seen: set[str] = set()
+            for item in tunnels:
+                nm = str(item.get("name", "")).strip()
+                if not nm:
+                    return False, "请填写隧道名称", None
+                if nm in seen:
+                    return False, f"隧道名称「{nm}」重复，请更换", None
+                seen.add(nm)
+                if conn.execute("SELECT 1 FROM tunnels WHERE node_id=? AND name=?", (int(node_id), nm)).fetchone():
+                    return False, f"隧道名称「{nm}」已被使用，请更换", None
+
         cost = int(row_val(plan, "price_points", 0) or 0)
         balance = int(row_val(conn.execute("SELECT points FROM users WHERE id=?", (user["id"],)).fetchone(), "points", 0) or 0)
         if cost > balance:
@@ -4852,13 +4864,8 @@ def create_preconfigured_tunnels(conn: sqlite3.Connection, user: sqlite3.Row, no
             if not port:
                 continue
             free.remove(port)
-            # 隧道名在同一账号内唯一，重名时自动加后缀，避免静默创建失败
             if conn.execute("SELECT 1 FROM tunnels WHERE node_id=? AND name=?", (node_id, name)).fetchone():
-                base = name[:36]
-                suffix = 2
-                while conn.execute("SELECT 1 FROM tunnels WHERE node_id=? AND name=?", (node_id, f"{base}-{suffix}")).fetchone():
-                    suffix += 1
-                name = f"{base}-{suffix}"
+                continue
             conn.execute(
                 "INSERT INTO tunnels(node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (node_id, user["id"], name, proxy_type, local_ip, local_port, port, "", "", now()))
