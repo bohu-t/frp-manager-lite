@@ -82,6 +82,7 @@ LOGIN_RATE_LIMIT = 8
 HSTS_MAX_AGE = int(os.getenv("FML_HSTS_MAX_AGE", "0") or "0")
 PROVIDER_COMMISSION_PCT = float(os.getenv("FML_PROVIDER_COMMISSION", "10") or "10")
 PROVIDER_SETTLE_DAYS = float(os.getenv("FML_PROVIDER_SETTLE_DAYS", "7") or "7")
+NODE_OFFLINE_SUSPEND_HOURS = float(os.getenv("FML_NODE_OFFLINE_SUSPEND_HOURS", "6") or "6")
 REGISTER_RATE_LIMIT = 5
 # 开放注册：不要求邀请码；默认值由环境变量控制，dev 可开，生产保持关闭
 OPEN_REGISTRATION = os.getenv("FML_OPEN_REGISTRATION", "0").strip().lower() in ("1", "true", "yes", "on")
@@ -1891,12 +1892,46 @@ def node_health_lookup(node: dict[str, Any]) -> dict[str, Any] | None:
     return dict(cached)
 
 
+def apply_node_offline_policy(rows: list[dict[str, Any]]) -> None:
+    """节点长时间离线自动停售；恢复在线后自动重新上架（不触发退款）。"""
+    if NODE_OFFLINE_SUSPEND_HOURS <= 0:
+        return
+    threshold = int(NODE_OFFLINE_SUSPEND_HOURS * 3600)
+    ts = now()
+    with db() as conn:
+        for n in rows:
+            try:
+                nid = int(n.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if not nid:
+                continue
+            row = conn.execute("SELECT active, auto_suspended, last_online_at FROM nodes WHERE id=?", (nid,)).fetchone()
+            if not row:
+                continue
+            online = n.get("auth_status") == "online"
+            if online:
+                conn.execute("UPDATE nodes SET last_online_at=? WHERE id=?", (ts, nid))
+                if int(row["auto_suspended"] or 0):
+                    conn.execute("UPDATE nodes SET active=1, auto_suspended=0 WHERE id=?", (nid,))
+                    audit("node_auto_resume", None, nid, None, "", "节点恢复在线，自动重新上架")
+            else:
+                last = int(row["last_online_at"] or 0)
+                if int(row["active"] or 0) and not int(row["auto_suspended"] or 0) and last and (ts - last) >= threshold:
+                    conn.execute("UPDATE nodes SET active=0, auto_suspended=1 WHERE id=?", (nid,))
+                    audit("node_auto_suspend", None, nid, None, "", f"离线超过 {NODE_OFFLINE_SUSPEND_HOURS:g} 小时，自动停售")
+
+
 def refresh_node_health_snapshot() -> None:
     global _node_health_ts
     with db() as conn:
         rows = [node_public(r) for r in conn.execute("SELECT * FROM nodes ORDER BY id")]
     if rows:
         probe_node_auth_ports(rows)
+    try:
+        apply_node_offline_policy(rows)
+    except Exception:
+        pass
     cache: dict[str, dict[str, Any]] = {}
     for n in rows:
         cache[_node_health_key(n)] = {k: n.get(k) for k in ("auth_status", "auth_port_ok", "auth_checked_at", "auth_latency_ms", "auth_message")}
@@ -2975,6 +3010,10 @@ def init_db() -> None:
         node_cols = {r["name"] for r in conn.execute("PRAGMA table_info(nodes)").fetchall()}
         if "owner_id" not in node_cols:
             conn.execute("ALTER TABLE nodes ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 0")
+        if "last_online_at" not in node_cols:
+            conn.execute("ALTER TABLE nodes ADD COLUMN last_online_at INTEGER NOT NULL DEFAULT 0")
+        if "auto_suspended" not in node_cols:
+            conn.execute("ALTER TABLE nodes ADD COLUMN auto_suspended INTEGER NOT NULL DEFAULT 0")
         conn.execute(
             """UPDATE nodes SET owner_id=(SELECT h.user_id FROM hosts h WHERE h.node_id=nodes.id AND h.status='approved' ORDER BY h.id LIMIT 1)
                WHERE owner_id=0 AND EXISTS (SELECT 1 FROM hosts h WHERE h.node_id=nodes.id AND h.status='approved')"""
@@ -5158,6 +5197,8 @@ def provider_nodes_payload(conn: sqlite3.Connection, user_id: int) -> list[dict[
             "id": nid, "name": n["name"], "region": n["region"],
             "server_addr": n["server_addr"], "server_port": int(n["server_port"] or 0),
             "active": bool(n["active"]),
+            "auto_suspended": bool(row_val(n, "auto_suspended", 0)),
+            "last_online_at": int(row_val(n, "last_online_at", 0) or 0),
             "port_start": int(n["port_start"] or 0), "port_end": int(n["port_end"] or 0),
             "ports_total": int(total_ports), "ports_used": int(used_ports),
             "ports_free": max(0, int(total_ports) - int(used_ports)),

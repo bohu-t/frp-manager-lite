@@ -1224,8 +1224,8 @@ async function loadHosts(){
     </section>
 
     <section class="card"><div class="section-title"><div><h2>${stIcon('node')}我的节点</h2><p>${pNodes.length ? '已接入平台的主机' : '提交母鸡并通过审核后，这里会显示你的节点'}</p></div></div>
-      ${pNodes.length ? `<div class="table-wrap"><table><thead><tr><th>序号</th><th>节点</th><th>地区</th><th>接入地址</th><th>端口（已用/总）</th><th>本月流量</th><th>实例</th><th>状态</th></tr></thead><tbody>
-        ${pNodes.map((n, i) => `<tr><td>${i + 1}</td><td><b>${esc(n.name)}</b></td><td>${esc(n.region)}</td><td>${esc(n.server_addr)}:${n.server_port}</td><td>${n.ports_used} / ${n.ports_total}</td><td>${fmtBytes(n.month_used_bytes)} / ${n.monthly_traffic_bytes > 0 ? fmtBytes(n.monthly_traffic_bytes) : '不限'}</td><td>${n.active_plans}</td><td><span class="status-badge ${n.active ? 'ok' : 'bad'}"><i></i>${n.active ? '在线' : '停用'}</span></td></tr>`).join('')}
+      ${pNodes.length ? `<div class="table-wrap"><table><thead><tr><th>序号</th><th>节点</th><th>地区</th><th>接入地址</th><th>端口（已用/总）</th><th>本月流量</th><th>实例</th><th>状态</th><th>上次在线</th></tr></thead><tbody>
+        ${pNodes.map((n, i) => `<tr><td>${i + 1}</td><td><b>${esc(n.name)}</b></td><td>${esc(n.region)}</td><td>${esc(n.server_addr)}:${n.server_port}</td><td>${n.ports_used} / ${n.ports_total}</td><td>${fmtBytes(n.month_used_bytes)} / ${n.monthly_traffic_bytes > 0 ? fmtBytes(n.monthly_traffic_bytes) : '不限'}</td><td>${n.active_plans}</td><td><span class="status-badge ${n.auto_suspended ? 'bad' : (n.active ? 'ok' : 'bad')}"><i></i>${n.auto_suspended ? '已停售' : (n.active ? '在线' : '已停用')}</span></td><td>${n.last_online_at ? fmtTs(n.last_online_at) : '-'}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="empty-state"><strong>还没有节点</strong><p class="muted small">先在下方「添加母鸡」，审核通过后自动成为你的节点。</p></div>'}
     </section>
     <section class="card"><div class="section-title"><div><h2>${stIcon('bolt')}收益</h2><p>平台抽成 ${pct}%，结算后计入</p></div><span class="section-count">累计 ${pTotal} 积分</span></div>
