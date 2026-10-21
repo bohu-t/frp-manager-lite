@@ -790,7 +790,7 @@ function appSidebarHtml(kind='dashboard'){
       <div class="side-subnav${open ? ' open' : ''}">${items.map(x => linkHtml(x, true)).join('')}</div>
     </div>`;
   };
-  const ticketsBlock = groupBlock('工单', ticketItems, 'sideTicketsOpen', 'log');
+  const ticketsBlock = groupBlock('技术支持', ticketItems, 'sideTicketsOpen', 'log');
   const brandName = 'Frp 管理台';
   const brandSub = '内网穿透管理平台';
   return `<aside class="app-sidebar">
