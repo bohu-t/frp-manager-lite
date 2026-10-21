@@ -1298,7 +1298,7 @@ async function loadTickets(){
     </tr>`).join('') || `<tr><td colspan="8" class="muted">${ticketsTab === 'mine' ? '还没有提交过工单' : '还没有收到工单'}</td></tr>`;
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>工单</h1><p>母鸡故障、服务异常可以提交工单通知机主。</p></div>
-      <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadTickets()">刷新</button><button type="button" onclick="ticketFormModal()">＋ 新建工单</button></div></div>
+      <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadTickets()">刷新</button><button type="button" onclick="loadTicketNew()">＋ 新建工单</button></div></div>
     <nav class="seg-tabs">
       <button type="button" class="seg-tab${ticketsTab === 'mine' ? ' active' : ''}" onclick="switchTicketsTab('mine')">我提交的${mine.length ? `<span>${mine.length}</span>` : ''}</button>
       <button type="button" class="seg-tab${ticketsTab === 'received' ? ' active' : ''}" onclick="switchTicketsTab('received')">我收到的${received.length ? `<span>${received.length}</span>` : ''}</button>
@@ -1309,55 +1309,60 @@ async function loadTickets(){
 
 function switchTicketsTab(tab){ ticketsTab = tab; loadTickets(); }
 
-function ticketFormModal(){
-  const nodes = window.__ticketNodes || [];
-  if(!nodes.length){ appAlert('你还没有购买实例，暂时无法提交节点工单', {title:'无法提交'}); return; }
-  const opts = nodes.map(n => `<option value="${n.id}">${esc(n.name)}（${esc(n.region || '')}）</option>`).join('');
-  document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="ticketFormModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeTicketForm()">
-    <section class="modal-page card app-dialog">
-      <div class="section-title modal-title"><div><h2>新建工单</h2><p>提交后会通知节点机主处理</p></div></div>
+async function loadTicketNew(){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
+  let nodes = [], plans = [], income = 0, acc = { method: 'alipay', account: '', holder: '' };
+  try{
+    const [a, b, c, d] = await Promise.all([
+      api('/api/user/nodes').catch(() => ({nodes: []})),
+      api('/api/dashboard').catch(() => ({my_plans: []})),
+      api('/api/user/payouts').catch(() => ({income: 0})),
+      api('/api/user/payout-account').catch(() => ({}))
+    ]);
+    nodes = a.nodes || []; plans = b.my_plans || []; income = Number(c.income || 0);
+    acc = (d.account) || acc;
+  }catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
+  const nodeById = {}; nodes.forEach(n => { nodeById[Number(n.id)] = n; });
+  const ids = [...new Set(plans.filter(p => p.status !== 'cancelled').map(p => Number(p.node_id)))].filter(Boolean);
+  const opts = ids.map(id => `<option value="${id}">${esc((nodeById[id] || {}).name || ('#' + id))}（${esc((nodeById[id] || {}).region || '')}）</option>`).join('');
+  const hasAcc = !!(acc.account && acc.holder);
+  app.innerHTML = appLayoutHtml(`
+    <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="loadTickets()">工单</a> <span class="crumb-inline">›</span> 新建</h1><p>问题工单通知机主处理；提现工单把收益转入余额或收款账户。</p></div></div>
+    <section class="card">
+      <div class="section-title"><div><div class="section-kicker">ISSUE</div><h2>${stIcon('log')}问题工单</h2><p>${ids.length ? '选择出问题的实例节点，描述现象' : '你还没有购买实例，暂时无法提交节点工单'}</p></div></div>
       <form id="ticketForm" class="grid">
-        <div><label>节点</label><select name="node_id">${opts}</select></div>
+        <div><label>节点</label><select name="node_id" ${ids.length ? '' : 'disabled'}>${opts || '<option value="">暂无可用节点</option>'}</select></div>
         <div><label>标题</label><input name="title" maxlength="80" required placeholder="例如：节点无法连接"></div>
-        <div class="span-2"><label>问题描述</label><textarea name="content" rows="5" maxlength="2000" required placeholder="出现时间、现象、已尝试的操作"></textarea></div>
-        <div class="form-actions span-2"><button type="button" class="secondary" onclick="closeTicketForm()">取消</button><button type="submit">提交工单</button></div>
+        <div class="span-2"><label>问题描述</label><textarea name="content" rows="4" maxlength="2000" required placeholder="出现时间、现象、已尝试的操作"></textarea></div>
+        <div class="form-actions span-2"><button type="submit" ${ids.length ? '' : 'disabled'}>提交问题工单</button></div>
       </form>
-    </section></div>`);
+    </section>
+    <section class="card">
+      <div class="section-title"><div><div class="section-kicker">WITHDRAW</div><h2>${stIcon('key')}提现工单</h2><p>可提现收益 <b>${income}</b> 积分${hasAcc ? '' : ' · 尚未配置收款信息'}</p></div><span class="section-count">${hasAcc ? esc(acc.method + ' ' + acc.account) : '未配置'}</span></div>
+      <form id="withdrawForm" class="grid">
+        <div><label>提现方式</label><select name="mode"><option value="balance">转入余额</option><option value="external"${hasAcc ? '' : ' disabled'}>提现到收款账户</option></select></div>
+        <div><label>积分数量</label><input name="points" type="number" min="1" max="${income}" value="${income > 0 ? income : ''}" required ${income > 0 ? '' : 'disabled'}></div>
+        <div class="span-2 muted small">${hasAcc ? '收款信息可在「个人中心」修改。' : '提现到收款账户前，请先在「个人中心」配置收款信息。'}</div>
+        <div class="form-actions span-2"><button type="submit" ${income > 0 ? '' : 'disabled'}>提交提现工单</button></div>
+      </form>
+    </section>
+  `, 'dashboard-tickets', '工单');
   const form = document.querySelector('#ticketForm');
   form.onsubmit = async (e) => {
     e.preventDefault();
     try{
-      const fd = Object.fromEntries(new FormData(form));
-      const r = await api('/api/user/tickets/create', {method:'POST', body:fd});
-      closeTicketForm(); show(r.message || '已提交'); await loadTickets();
+      const r = await api('/api/user/tickets/create', {method:'POST', body:Object.fromEntries(new FormData(form))});
+      show(r.message || '已提交'); await loadTickets();
     }catch(err){ show(err.message || '提交失败', true); }
   };
-}
-function closeTicketForm(){ const el = document.querySelector('#ticketFormModal'); if(el) el.remove(); }
-
-async function openTicket(id){
-  let data;
-  try{ data = await api('/api/user/tickets?id=' + Number(id)); }
-  catch(err){ show(err.message, true); return; }
-  const t = data.ticket || {};
-  const msgs = data.messages || [];
-  const thread = msgs.map(m => `<div class="ticket-msg ${m.role}"><div class="ticket-msg-head"><b>${esc(m.username)}</b><span>${m.role === 'owner' ? '机主' : (m.role === 'admin' ? '管理员' : '用户')} · ${fmtTs(m.created_at)}</span></div><p>${esc(m.content).replace(/\n/g,'<br>')}</p></div>`).join('') || '<p class="muted">暂无回复</p>';
-  document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="ticketModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeTicketModal()">
-    <section class="modal-page card app-dialog">
-      <div class="section-title modal-title"><div><h2>${esc(t.title || '工单')}</h2><p>${esc(t.ticket_no || '')} · ${TICKET_STATUS[t.status] || ''}</p></div></div>
-      <div class="ticket-thread">
-        <div class="ticket-msg user"><div class="ticket-msg-head"><b>${esc(t.username || '')}</b><span>用户 · ${fmtTs(t.created_at)}</span></div><p>${esc(t.content || '').replace(/\n/g,'<br>')}</p></div>
-        ${thread}
-      </div>
-      ${t.status !== 'closed' ? `<form id="ticketReplyForm" class="grid"><div class="span-2"><label>回复</label><textarea name="content" rows="3" maxlength="2000" required placeholder="补充信息或回复机主"></textarea></div><div class="form-actions span-2"><button type="button" class="secondary" onclick="closeTicketModal()">关闭窗口</button><button type="button" class="secondary" onclick="closeTicket(${Number(t.id)})">结束工单</button><button type="submit">发送回复</button></div></form>` : '<p class="muted small">该工单已关闭</p>'}
-    </section></div>`);
-  const form = document.querySelector('#ticketReplyForm');
-  if(form) form.onsubmit = async (e) => {
+  const wf = document.querySelector('#withdrawForm');
+  wf.onsubmit = async (e) => {
     e.preventDefault();
+    const fd = Object.fromEntries(new FormData(wf));
     try{
-      await api('/api/user/tickets/reply', {method:'POST', body:{id:Number(t.id), content:form.elements.content.value}});
-      closeTicketModal(); await openTicket(t.id);
-    }catch(err){ show(err.message, true); }
+      const r = await api('/api/user/withdraw', {method:'POST', body:{mode:fd.mode, points:Number(fd.points)}});
+      show(r.message || '已提交'); await loadTickets();
+    }catch(err){ show(err.message || '提现失败', true); }
   };
 }
 function closeTicketModal(){ const el = document.querySelector('#ticketModal'); if(el) el.remove(); }
