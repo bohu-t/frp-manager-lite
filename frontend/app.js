@@ -1309,6 +1309,22 @@ async function loadTickets(){
 
 function switchTicketsTab(tab){ ticketsTab = tab; loadTickets(); }
 
+let ticketNewKind = 'issue';
+
+function switchTicketNewKind(kind){ ticketNewKind = kind; loadTicketNew(); }
+
+function ticketBodyHtml(c){
+  const raw = String(c || '');
+  if(/<[a-z][\s\S]*>/i.test(raw)) return raw;
+  return esc(raw).replace(/\n/g, '<br>');
+}
+
+function tkCmd(cmd){
+  document.execCommand(cmd, false, null);
+  const ed = document.querySelector('#tkEditor');
+  if(ed) ed.focus();
+}
+
 async function loadTicketNew(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
   let nodes = [], plans = [], income = 0, acc = { method: 'alipay', account: '', holder: '' };
@@ -1324,47 +1340,100 @@ async function loadTicketNew(){
   }catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
   const nodeById = {}; nodes.forEach(n => { nodeById[Number(n.id)] = n; });
   const ids = [...new Set(plans.filter(p => p.status !== 'cancelled').map(p => Number(p.node_id)))].filter(Boolean);
-  const opts = ids.map(id => `<option value="${id}">${esc((nodeById[id] || {}).name || ('#' + id))}（${esc((nodeById[id] || {}).region || '')}）</option>`).join('');
+  const opts = '<option value="0">不关联实例</option>' + ids.map(id => `<option value="${id}">${esc((nodeById[id] || {}).name || ('#' + id))}（${esc((nodeById[id] || {}).region || '')}）</option>`).join('');
   const hasAcc = !!(acc.account && acc.holder);
+  const issuePanel = `
+    <section class="tk-panel">
+      <label class="tk-field"><span>工单主题</span><input id="tkSubject" maxlength="80" placeholder="简述您的问题"></label>
+      <label class="tk-field"><span>关联实例</span><select id="tkNode">${opts}</select></label>
+      <div class="tk-field"><span>沟通内容</span>
+        <div class="tk-editor-wrap">
+          <div class="tk-toolbar">
+            <button type="button" title="加粗" onclick="tkCmd('bold')"><b>B</b></button>
+            <button type="button" title="斜体" onclick="tkCmd('italic')"><i>I</i></button>
+            <button type="button" title="下划线" onclick="tkCmd('underline')"><u>U</u></button>
+            <button type="button" title="列表" onclick="tkCmd('insertUnorderedList')">• 列表</button>
+          </div>
+          <div id="tkEditor" class="tk-editor" contenteditable="true" data-placeholder="详细描述您的问题..."></div>
+        </div>
+      </div>
+      <button type="button" class="tk-submit" id="tkSubmit">提交</button>
+    </section>`;
+  const withdrawPanel = `
+    <section class="tk-panel">
+      <label class="tk-field"><span>可提现收益</span><input value="${income} 积分" disabled></label>
+      <label class="tk-field"><span>提现方式</span><select id="tkMode"><option value="balance">转入余额</option><option value="external"${hasAcc ? '' : ' disabled'}>提现到收款账户</option></select></label>
+      <label class="tk-field"><span>提现积分</span><input id="tkPoints" type="number" min="1" max="${income}" value="${income > 0 ? income : ''}" ${income > 0 ? '' : 'disabled'}></label>
+      <p class="muted small">${hasAcc ? '收款信息可在「个人中心」修改。' : '提现到收款账户前，请先在「个人中心」配置收款信息。'}</p>
+      <button type="button" class="tk-submit" id="tkSubmit" ${income > 0 ? '' : 'disabled'}>提交</button>
+    </section>`;
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="loadTickets()">工单</a> <span class="crumb-inline">›</span> 新建</h1><p>问题工单通知机主处理；提现工单把收益转入余额或收款账户。</p></div></div>
-    <section class="card">
-      <div class="section-title"><div><div class="section-kicker">ISSUE</div><h2>${stIcon('log')}问题工单</h2><p>${ids.length ? '选择出问题的实例节点，描述现象' : '你还没有购买实例，暂时无法提交节点工单'}</p></div></div>
-      <form id="ticketForm" class="grid">
-        <div><label>节点</label><select name="node_id" ${ids.length ? '' : 'disabled'}>${opts || '<option value="">暂无可用节点</option>'}</select></div>
-        <div><label>标题</label><input name="title" maxlength="80" required placeholder="例如：节点无法连接"></div>
-        <div class="span-2"><label>问题描述</label><textarea name="content" rows="4" maxlength="2000" required placeholder="出现时间、现象、已尝试的操作"></textarea></div>
-        <div class="form-actions span-2"><button type="submit" ${ids.length ? '' : 'disabled'}>提交问题工单</button></div>
-      </form>
-    </section>
-    <section class="card">
-      <div class="section-title"><div><div class="section-kicker">WITHDRAW</div><h2>${stIcon('key')}提现工单</h2><p>可提现收益 <b>${income}</b> 积分${hasAcc ? '' : ' · 尚未配置收款信息'}</p></div><span class="section-count">${hasAcc ? esc(acc.method + ' ' + acc.account) : '未配置'}</span></div>
-      <form id="withdrawForm" class="grid">
-        <div><label>提现方式</label><select name="mode"><option value="balance">转入余额</option><option value="external"${hasAcc ? '' : ' disabled'}>提现到收款账户</option></select></div>
-        <div><label>积分数量</label><input name="points" type="number" min="1" max="${income}" value="${income > 0 ? income : ''}" required ${income > 0 ? '' : 'disabled'}></div>
-        <div class="span-2 muted small">${hasAcc ? '收款信息可在「个人中心」修改。' : '提现到收款账户前，请先在「个人中心」配置收款信息。'}</div>
-        <div class="form-actions span-2"><button type="submit" ${income > 0 ? '' : 'disabled'}>提交提现工单</button></div>
-      </form>
-    </section>
+    <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>提交新工单</h1><p>提交工单并获取我们的团队和机主的业务支持。</p></div>
+      <button type="button" class="secondary" onclick="loadTickets()">‹ 返回</button></div>
+    <div class="tk-type-grid">
+      <button type="button" class="tk-type-card${ticketNewKind === 'issue' ? ' active' : ''}" onclick="switchTicketNewKind('issue')">
+        <span class="tk-type-icon issue">💬</span><span class="tk-type-copy"><b>普通工单</b><small>获取团队协助</small></span>
+      </button>
+      <button type="button" class="tk-type-card${ticketNewKind === 'withdraw' ? ' active' : ''}" onclick="switchTicketNewKind('withdraw')">
+        <span class="tk-type-icon withdraw">＄</span><span class="tk-type-copy"><b>提现工单</b><small>提取您的托管余额</small></span>
+      </button>
+    </div>
+    ${ticketNewKind === 'issue' ? issuePanel : withdrawPanel}
   `, 'dashboard-tickets', '工单');
-  const form = document.querySelector('#ticketForm');
-  form.onsubmit = async (e) => {
+  const submit = document.querySelector('#tkSubmit');
+  if(ticketNewKind === 'issue'){
+    submit.onclick = async () => {
+      const title = document.querySelector('#tkSubject').value.trim();
+      const nodeId = Number(document.querySelector('#tkNode').value || 0);
+      const ed = document.querySelector('#tkEditor');
+      if(!title){ show('请填写工单主题', true); return; }
+      if(!ed.innerText.trim()){ show('请填写沟通内容', true); return; }
+      submit.disabled = true;
+      try{
+        const r = await api('/api/user/tickets/create', {method:'POST', body:{node_id:nodeId, title, content:ed.innerHTML}});
+        show(r.message || '已提交'); await loadTickets();
+      }catch(err){ show(err.message || '提交失败', true); submit.disabled = false; }
+    };
+  } else {
+    submit.onclick = async () => {
+      const mode = document.querySelector('#tkMode').value;
+      const points = Number(document.querySelector('#tkPoints').value || 0);
+      if(!points || points <= 0){ show('请输入提现积分', true); return; }
+      submit.disabled = true;
+      try{
+        const r = await api('/api/user/withdraw', {method:'POST', body:{mode, points}});
+        show(r.message || '已提交'); await loadTickets();
+      }catch(err){ show(err.message || '提现失败', true); submit.disabled = false; }
+    };
+  }
+}
+
+async function openTicket(id){
+  let data;
+  try{ data = await api('/api/user/tickets?id=' + Number(id)); }
+  catch(err){ show(err.message, true); return; }
+  const t = data.ticket || {};
+  const msgs = data.messages || [];
+  const thread = msgs.map(m => `<div class="ticket-msg ${m.role}"><div class="ticket-msg-head"><b>${esc(m.username)}</b><span>${m.role === 'owner' ? '机主' : (m.role === 'admin' ? '管理员' : '用户')} · ${fmtTs(m.created_at)}</span></div><p>${ticketBodyHtml(m.content)}</p></div>`).join('');
+  document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="ticketModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeTicketModal()">
+    <section class="modal-page card app-dialog">
+      <div class="section-title modal-title"><div><h2>${esc(t.title || '工单')}</h2><p>${esc(t.ticket_no || '')} · ${TICKET_STATUS[t.status] || ''}</p></div></div>
+      <div class="ticket-thread">
+        <div class="ticket-msg user"><div class="ticket-msg-head"><b>${esc(t.username || '')}</b><span>用户 · ${fmtTs(t.created_at)}</span></div><p>${ticketBodyHtml(t.content)}</p></div>
+        ${thread}
+      </div>
+      ${t.status !== 'closed' ? `<form id="ticketReplyForm" class="grid"><div class="span-2"><label>回复</label><textarea name="content" rows="3" maxlength="2000" required placeholder="补充信息或回复机主"></textarea></div><div class="form-actions span-2"><button type="button" class="secondary" onclick="closeTicketModal()">关闭窗口</button><button type="button" class="secondary" onclick="closeTicket(${Number(t.id)})">结束工单</button><button type="submit">发送回复</button></div></form>` : '<p class="muted small">该工单已关闭</p>'}
+    </section></div>`);
+  const form = document.querySelector('#ticketReplyForm');
+  if(form) form.onsubmit = async (e) => {
     e.preventDefault();
     try{
-      const r = await api('/api/user/tickets/create', {method:'POST', body:Object.fromEntries(new FormData(form))});
-      show(r.message || '已提交'); await loadTickets();
-    }catch(err){ show(err.message || '提交失败', true); }
-  };
-  const wf = document.querySelector('#withdrawForm');
-  wf.onsubmit = async (e) => {
-    e.preventDefault();
-    const fd = Object.fromEntries(new FormData(wf));
-    try{
-      const r = await api('/api/user/withdraw', {method:'POST', body:{mode:fd.mode, points:Number(fd.points)}});
-      show(r.message || '已提交'); await loadTickets();
-    }catch(err){ show(err.message || '提现失败', true); }
+      await api('/api/user/tickets/reply', {method:'POST', body:{id:Number(t.id), content:form.elements.content.value}});
+      closeTicketModal(); await openTicket(t.id);
+    }catch(err){ show(err.message, true); }
   };
 }
+
 function closeTicketModal(){ const el = document.querySelector('#ticketModal'); if(el) el.remove(); }
 async function closeTicket(id){
   if(!await appConfirm('确认结束这个工单？', {title:'结束工单', okText:'确认结束'})) return;

@@ -3618,6 +3618,24 @@ def provider_income_consume(conn: sqlite3.Connection, owner_id: int, points: int
     conn.execute("UPDATE provider_income SET points=points-?, updated_at=? WHERE owner_id=?", (points, now(), owner_id))
 
 
+TICKET_ALLOWED_TAGS = {"b", "strong", "i", "em", "u", "ul", "ol", "li", "br", "p", "div", "span"}
+
+
+def sanitize_ticket_html(raw: str) -> str:
+    """工单内容白名单清洗：只保留基础格式标签，去掉所有属性与脚本。"""
+    text = str(raw or "")[:6000]
+    text = re.sub(r"(?is)<(script|style|iframe|object|embed)[^>]*>.*?</\1>", "", text)
+    def _tag(m):
+        name = re.match(r"</?\s*([a-zA-Z0-9]+)", m.group(0))
+        if not name:
+            return ""
+        tag = name.group(1).lower()
+        if tag not in TICKET_ALLOWED_TAGS:
+            return ""
+        return f"</{tag}>" if m.group(0).startswith("</") else f"<{tag}>"
+    return re.sub(r"(?s)<[^>]+>", _tag, text).strip()
+
+
 def new_ticket_no() -> str:
     return "TK" + time.strftime("%Y%m%d%H%M%S", time.localtime()) + secrets.token_hex(2).upper()
 
@@ -6791,7 +6809,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": False, "error": f"提交过于频繁，请 {retry} 秒后再试"}, 429)
                 return
             title = str(data.get("title", "")).strip()[:80]
-            content = str(data.get("content", "")).strip()[:2000]
+            content = sanitize_ticket_html(str(data.get("content", "")))
             try:
                 node_id = int(data.get("node_id", 0) or 0)
             except (TypeError, ValueError):
@@ -6826,7 +6844,7 @@ class Handler(BaseHTTPRequestHandler):
                 tid = int(data.get("id", 0))
             except (TypeError, ValueError):
                 tid = 0
-            content = str(data.get("content", "")).strip()[:2000]
+            content = sanitize_ticket_html(str(data.get("content", "")))
             if not content:
                 self.send_json({"ok": False, "error": "回复内容不能为空"}, 400)
                 return
