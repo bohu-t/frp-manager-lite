@@ -4771,12 +4771,19 @@ def refund_plans_on_node(conn: sqlite3.Connection, node_id: int, reason: str = "
     for p, price, remaining, keep in items:
         owner = int(p["provider_id"] or 0)
         bonus = 0
-        if keep > 0 and total_remaining > 0 and pools.get(owner, 0) > 0:
-            bonus = min(keep, pools[owner]) * remaining // total_remaining
-            bonus = min(bonus, max(0, price - remaining))
-            if bonus > 0:
-                pools[owner] -= bonus
-                conn.execute("UPDATE provider_guarantee SET points=points-?, updated_at=? WHERE owner_id=?", (bonus, now(), owner))
+        if keep > 0 and pools.get(owner, 0) > 0:
+            available = min(keep, pools[owner])
+            platform_take = available // 2
+            buyer_part = available - platform_take
+            if platform_take > 0:
+                conn.execute(
+                    "INSERT INTO platform_revenue(order_no, plan_id, node_id, points, created_at) VALUES(?,?,?,?,?)",
+                    (str(p["order_no"] or ""), int(p["id"]), int(node_id), platform_take, now()))
+            pools[owner] -= available
+            conn.execute("UPDATE provider_guarantee SET points=points-?, updated_at=? WHERE owner_id=?", (available, now(), owner))
+            if buyer_part > 0 and total_remaining > 0:
+                bonus = buyer_part * remaining // total_remaining
+                bonus = min(bonus, max(0, price - remaining))
         refund = remaining + bonus
         if refund > 0:
             points_change(conn, int(p["user_id"]), refund, "plan_refund", f"node:{node_id}", reason)
