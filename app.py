@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import collections
 import hashlib
+import gzip
 import hmac
 import io
 import ipaddress
@@ -5325,14 +5326,14 @@ class Handler(BaseHTTPRequestHandler):
     def secure_cookie_suffix(self) -> str:
         return "; Secure" if self.request_is_https() else ""
 
-    def send_body(self, body: bytes, status: int = 200, content_type: str = "application/octet-stream", headers: dict[str, str] | None = None) -> None:
+    def send_body(self, body: bytes, status: int = 200, content_type: str = "application/octet-stream", headers: dict[str, str] | None = None, cache_control: str | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache_control or "no-store")
         if HSTS_MAX_AGE > 0 and self.request_is_https():
             self.send_header("Strict-Transport-Security", f"max-age={HSTS_MAX_AGE}; includeSubDomains")
         for k, v in (headers or {}).items():
@@ -5733,7 +5734,23 @@ class Handler(BaseHTTPRequestHandler):
         target = (frontend_root / rel).resolve()
         if not str(target).startswith(str(frontend_root)) or not target.is_file():
             target = frontend_root / "index.html"
-        self.send_body(target.read_bytes(), 200, static_content_type(target))
+        body = target.read_bytes()
+        ctype = static_content_type(target)
+        q = urllib.parse.parse_qs(urlparse(self.path).query)
+        if target.name.endswith(".html"):
+            cache = "no-store"
+        elif q.get("v"):
+            cache = "public, max-age=31536000, immutable"
+        else:
+            cache = "public, max-age=3600"
+        extra: dict[str, str] = {}
+        accept = (self.headers.get("Accept-Encoding") or "").lower()
+        compressible = ctype.startswith("text/") or any(x in ctype for x in ("javascript", "json", "svg", "xml"))
+        if "gzip" in accept and compressible and len(body) > 1024:
+            body = gzip.compress(body, 6)
+            extra["Content-Encoding"] = "gzip"
+            extra["Vary"] = "Accept-Encoding"
+        self.send_body(body, 200, ctype, extra, cache_control=cache)
 
     def host_port_rate_rules(self) -> None:
         """Host-side tc/iptables sync endpoint, authenticated by FML_SETUP_KEY."""
