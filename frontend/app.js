@@ -754,6 +754,7 @@ function appSidebarHtml(kind='dashboard'){
     ['admin-health','pulse','节点健康','health'],
     ['admin-proxies','monitor','映射监控','proxies'],
     ['admin','risk','风控审计','risk'],
+    ['admin-ops','tools','平台维护'],
     ['admin-settings','gear','设置']
   ] : [
     ['dashboard','home','概览'],
@@ -790,17 +791,11 @@ function appSidebarHtml(kind='dashboard'){
     </div>`;
   };
   const ticketsBlock = groupBlock('工单', ticketItems, 'sideTicketsOpen', 'log');
-  const maintItems = [
-    ['admin-ops','tools','运维工具'],
-    ['admin-announcements','bell','公告'],
-    ['admin-recharge','key','积分充值密钥']
-  ];
-  const maintBlock = isAdmin ? groupBlock('平台维护', maintItems, 'sideMaintOpen', 'tools') : '';
   const brandName = 'Frp 管理台';
   const brandSub = '内网穿透管理平台';
   return `<aside class="app-sidebar">
     <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>${brandName}</strong><span>${brandSub}</span></div></div>
-    <div class="sidebar-section-label">工作空间</div>${mainItems.map(x => linkHtml(x, false)).join('')}${ticketsBlock}${maintBlock}${tailItems.map(x => linkHtml(x, false)).join('')}
+    <div class="sidebar-section-label">工作空间</div>${mainItems.map(x => linkHtml(x, false)).join('')}${ticketsBlock}${tailItems.map(x => linkHtml(x, false)).join('')}
     ${isAdmin ? '' : `<div class="sidebar-section-label sidebar-tools-label">快速工具</div>
       <button class="side-link${kind === 'dashboard-config' ? ' active' : ''}" data-nav="dashboard-config">${sideIcon('download')}<span class="side-link-label">配置下载</span><span class="side-link-arrow">›</span></button>
       <button class="side-link${kind === 'dashboard-editor' ? ' active' : ''}" data-nav="dashboard-editor">${sideIcon('edit')}<span class="side-link-label">在线配置</span><span class="side-link-arrow">›</span></button>`}
@@ -1685,12 +1680,56 @@ async function deleteAnnouncement(id){
 
 async function loadAdminOps(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
+  let anns = [], keys = [];
+  try{
+    const [a, b] = await Promise.all([api('/api/admin/announcements'), api('/api/admin/recharge-keys')]);
+    anns = a.announcements || []; keys = b.recharge_keys || [];
+  }catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
+  const annRows = anns.map((a, i) => `<tr><td>${i + 1}</td><td><b>${esc(a.title)}</b></td><td>${esc(String(a.content || '').replace(/<[^>]+>/g, '').slice(0, 50))}</td><td><span class="status-badge ${a.active ? 'ok' : 'bad'}"><i></i>${a.active ? '展示中' : '已下架'}</span></td><td>${fmtTs(a.created_at)}</td><td class="actions node-actions">${a.active ? `<button class="node-action node-action-danger" onclick="deleteAnnouncement(${a.id})">下架</button>` : '<span class="muted small">—</span>'}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">暂无公告</td></tr>';
+  const keyRows = keys.map((k, i) => `<tr><td>${i + 1}</td><td><code class="token">${esc(k.key)}</code></td><td>${k.points}</td><td>${esc(k.note || '—')}</td><td>${k.used_by ? '<span class="bad">已使用</span>' : (k.active ? '<span class="ok">可用</span>' : '<span class="bad">停用</span>')}</td><td>${fmtTs(k.created_at)}</td><td class="actions node-actions">${k.used_by ? '<span class="muted small">已使用</span>' : `<button type="button" class="node-action" onclick="rechargeKeyToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button type="button" class="node-action node-action-danger" onclick="rechargeKeyDelete(${k.id})">删除</button>`}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">还没有充值密钥</td></tr>';
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">MAINTENANCE</span><h1>平台维护</h1><p>运维工具、公告与积分充值密钥</p></div></div>
+    <div class="ov-page-head"><div><span class="section-kicker">MAINTENANCE</span><h1>平台维护</h1><p>运维工具、系统公告与积分充值密钥</p></div></div>
     ${adminOpsCardHtml()}
-    <section class="card"><div class="section-title"><div><h2>${stIcon('bell')}公告</h2><p>发布系统公告，用户可在通知中心查看</p></div><button type="button" onclick="loadAdminAnnouncements()">去发布</button></div></section>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('key')}积分充值密钥</h2><p>生成后发给用户兑换积分</p></div><button type="button" onclick="loadAdminRecharge()">管理密钥</button></div></section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('bell')}系统公告</h2><p>发布后显示在用户的「通知中心 › 系统公告」</p></div><span class="section-count">共 ${anns.length} 条</span></div>
+      <form id="annForm" class="grid" style="margin-bottom:16px">
+        <div class="span-2"><label>标题</label><input name="title" maxlength="120" required></div>
+        <div class="span-2"><label>内容</label><textarea name="content" rows="3" required placeholder="支持简单格式文本"></textarea></div>
+        <div class="form-actions span-2"><button type="submit">发布公告</button></div>
+      </form>
+      <div class="table-wrap"><table><thead><tr><th>序号</th><th>标题</th><th>内容</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${annRows}</tbody></table></div>
+    </section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('key')}积分充值密钥</h2><p>生成后发给用户，在「积分充值」页兑换；每枚只能使用一次</p></div><span class="section-count">可用 ${keys.filter(k => !k.used_by && k.active).length}</span></div>
+      <form id="rechargeKeyForm" class="grid" style="margin-bottom:16px">
+        <div><label>每枚积分</label><input name="points" type="number" value="100" min="1" step="1"></div>
+        <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
+        <div><label>有效期（天）</label><input name="duration_days" type="number" value="0" min="0" max="3650"><span class="muted small">0 表示长期有效</span></div>
+        <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
+        <div class="form-actions" style="grid-column:1/-1;justify-content:flex-end"><button>生成充值密钥</button></div>
+      </form>
+      <div class="table-wrap"><table><thead><tr><th>序号</th><th>密钥</th><th>积分</th><th>备注</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table></div>
+    </section>
   `, 'admin-ops', '平台维护');
+  const annForm = document.querySelector('#annForm');
+  annForm.onsubmit = async (e) => {
+    e.preventDefault();
+    try{
+      const r = await api('/api/admin/announcements/save', {method:'POST', body:Object.fromEntries(new FormData(annForm))});
+      show(r.message || '已发布'); await loadAdminOps();
+    }catch(err){ show(err.message || '发布失败', true); }
+  };
+  const keyForm = document.querySelector('#rechargeKeyForm');
+  keyForm.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(keyForm);
+    const body = {points: fd.get('points'), count: fd.get('count'), note: fd.get('note'), expires_days: fd.get('duration_days')};
+    try{
+      const r = await api('/api/admin/recharge-keys/create', {method:'POST', body});
+      const list = r.keys || [];
+      if(list.length) await copyText(list.join('\n'));
+      await appAlert((r.message || '充值密钥已生成') + (list.length ? '\n已复制到剪贴板。' : ''), {title:'生成完成'});
+      await loadAdminOps();
+    }catch(err){ show(err.message, true); }
+  };
 }
 
 async function loadAdminRecharge(){
@@ -3874,8 +3913,8 @@ async function adminAdjustPoints(id, username){
   }catch(err){ show(err.message, true); }
 }
 
-async function rechargeKeyToggle(id){ await api('/api/admin/recharge-keys/toggle', {method:'POST', body:{id}}).then(()=>loadAdminRecharge().then(()=>show('密钥状态已更新'))).catch(e=>show(e.message,true)); }
-async function rechargeKeyDelete(id){ if(await appConfirm('删除这枚充值密钥？', {title:'删除充值密钥', okText:'删除', danger:true})) await api('/api/admin/recharge-keys/delete', {method:'POST', body:{id}}).then(()=>loadAdminRecharge().then(()=>show('密钥已删除'))).catch(e=>show(e.message,true)); }
+async function rechargeKeyToggle(id){ await api('/api/admin/recharge-keys/toggle', {method:'POST', body:{id}}).then(()=>loadAdminOps().then(()=>show('密钥状态已更新'))).catch(e=>show(e.message,true)); }
+async function rechargeKeyDelete(id){ if(await appConfirm('删除这枚充值密钥？', {title:'删除充值密钥', okText:'删除', danger:true})) await api('/api/admin/recharge-keys/delete', {method:'POST', body:{id}}).then(()=>loadAdminOps().then(()=>show('密钥已删除'))).catch(e=>show(e.message,true)); }
 async function planToggle(id){ await api('/api/admin/plans/toggle', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('套餐状态已更新'))).catch(e=>show(e.message,true)); }
 async function planDelete(id){ if(await appConfirm('删除这个套餐？删除后不再展示，历史订单和套餐数据仍保留。', {title:'删除套餐', okText:'删除', danger:true})) await api('/api/admin/plans/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('套餐已删除'))).catch(e=>show(e.message,true)); }
 async function orderComplete(orderNo){ if(await appConfirm('确认手动开通该订单？将立即分配端口并延长有效期。', {title:'手动开通'})) await api('/api/admin/orders/complete', {method:'POST', body:{order_no:orderNo}}).then(r=>loadAdmin().then(()=>appAlert(r.message || '已开通', {title:'开通完成'}))).catch(e=>show(e.message,true)); }
