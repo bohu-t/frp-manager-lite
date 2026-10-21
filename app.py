@@ -2820,6 +2820,17 @@ def init_db() -> None:
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'system',
+                title TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                link TEXT NOT NULL DEFAULT '',
+                read_at INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, id DESC);
             CREATE TABLE IF NOT EXISTS uploads (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 token TEXT NOT NULL UNIQUE,
@@ -3626,6 +3637,19 @@ def clear_session(cookie_header: str | None) -> None:
     if morsel:
         with db() as conn:
             conn.execute("DELETE FROM sessions WHERE token=?", (morsel.value,))
+
+
+def notify_user(conn: sqlite3.Connection, user_id: int, kind: str, title: str, content: str = "", link: str = "") -> None:
+    if not user_id:
+        return
+    conn.execute(
+        "INSERT INTO notifications(user_id, kind, title, content, link, read_at, created_at) VALUES(?,?,?,?,?,0,?)",
+        (int(user_id), str(kind)[:24], str(title)[:120], str(content)[:500], str(link)[:200], now()))
+
+
+def notify_admins(conn: sqlite3.Connection, kind: str, title: str, content: str = "", link: str = "") -> None:
+    for r in conn.execute("SELECT id FROM users WHERE role='admin' AND active=1"):
+        notify_user(conn, int(r["id"]), kind, title, content, link)
 
 
 def provider_income_balance(conn: sqlite3.Connection, owner_id: int) -> int:
@@ -6296,6 +6320,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_body(bytes(row["data"]), 200, row["mime"] or "application/octet-stream", cache_control="private, max-age=86400")
             return
+        if path == "/api/notifications":
+            with db() as conn:
+                rows = conn.execute("SELECT * FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 30", (int(user["id"]),)).fetchall()
+                unread = conn.execute("SELECT COUNT(*) FROM notifications WHERE user_id=? AND read_at=0", (int(user["id"]),)).fetchone()[0]
+            self.send_json({"ok": True, "notifications": [dict(r) for r in rows], "unread": int(unread or 0)})
+            return
         if path == "/api/user/payout-account":
             with db() as conn:
                 row = conn.execute("SELECT * FROM payout_accounts WHERE user_id=?", (int(user["id"]),)).fetchone()
@@ -6800,6 +6830,23 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, "message": "套餐已下架"})
             return
 
+        if path == "/api/notifications/read":
+            user = self.require_user()
+            if not user:
+                return
+            if data.get("all"):
+                with db() as conn:
+                    conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? AND read_at=0", (now(), int(user["id"])))
+            else:
+                try:
+                    nid = int(data.get("id", 0))
+                except (TypeError, ValueError):
+                    nid = 0
+                with db() as conn:
+                    conn.execute("UPDATE notifications SET read_at=? WHERE id=? AND user_id=?", (now(), nid, int(user["id"])))
+            self.send_json({"ok": True})
+            return
+
         if path == "/api/user/upload":
             user = self.require_user()
             if not user:
@@ -6890,6 +6937,7 @@ class Handler(BaseHTTPRequestHandler):
                         "INSERT INTO tickets(ticket_no, user_id, username, kind, status, node_id, owner_id, title, content, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                         (new_ticket_no(), int(user["id"]), user["username"], "withdraw", "open", 0, 0,
                          f"提现 {points} 积分", f"提现单号 {pno}，方式 {acc['method']}，账号 {acc['account']}，姓名 {acc['holder']}", now(), now()))
+                    notify_admins(conn, "payout", f"提现申请：{points} 积分", f"{user['username']} 提交了提现申请", "payouts")
                 self.send_json({"ok": True, "message": "提现申请已提交，等待管理员处理"})
             except ValueError as e:
                 self.send_json({"ok": False, "error": str(e)}, 400)
@@ -6929,6 +6977,10 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     "INSERT INTO tickets(ticket_no, user_id, username, kind, status, node_id, owner_id, title, content, attachments, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                     (tno, int(user["id"]), user["username"], "issue", "open", node_id, owner_id, title, content, att, now(), now()))
+                if owner_id:
+                    notify_user(conn, owner_id, "ticket", f"新工单：{title}", f"{user['username']} 提交了工单", f"ticket:{int(conn.execute('SELECT last_insert_rowid()').fetchone()[0])}")
+                else:
+                    notify_admins(conn, "ticket", f"新工单：{title}", f"{user['username']} 提交了平台工单", "tickets")
             self.send_json({"ok": True, "message": "工单已提交"})
             return
 
@@ -6962,6 +7014,13 @@ class Handler(BaseHTTPRequestHandler):
                     "INSERT INTO ticket_messages(ticket_id, user_id, username, role, content, attachments, created_at) VALUES(?,?,?,?,?,?,?)",
                     (tid, int(user["id"]), user["username"], role, content, att, now()))
                 conn.execute("UPDATE tickets SET status=CASE WHEN status='open' THEN 'processing' ELSE status END, updated_at=? WHERE id=?", (now(), tid))
+                if role == "user":
+                    if int(row["owner_id"] or 0):
+                        notify_user(conn, int(row["owner_id"]), "ticket", f"工单回复：{row['title']}", f"{user['username']} 回复了工单", f"ticket:{tid}")
+                    else:
+                        notify_admins(conn, "ticket", f"工单回复：{row['title']}", f"{user['username']} 回复了工单", f"ticket:{tid}")
+                else:
+                    notify_user(conn, int(row["user_id"]), "ticket", f"工单回复：{row['title']}", f"{user['username']} 回复了你的工单", f"ticket:{tid}")
             self.send_json({"ok": True, "message": "已回复"})
             return
 
