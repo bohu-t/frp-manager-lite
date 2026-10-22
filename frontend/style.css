@@ -2029,3 +2029,6 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .side-dot.hidden{display:none}
 tr.need-action td{background:rgba(251,191,36,.07)}
 tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
+.filter-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 14px}
+.filter-bar select,.filter-bar input{height:34px;border:1px solid var(--line);border-radius:8px;padding:0 10px;background:var(--panel);color:var(--text);font-size:13px}
+.filter-bar input{min-width:200px;flex:1;max-width:320px}

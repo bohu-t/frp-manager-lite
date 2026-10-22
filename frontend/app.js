@@ -3314,6 +3314,50 @@ async function loadAdminProxies(page=adminProxyPage){
   };
 }
 
+function orderRowHtml(o, i){
+  const st = window.__adminOrderStatusText || {};
+  return `<tr>
+      <td>${i + 1}</td>
+      <td>${esc(o.order_no)}</td>
+      <td>${esc(o.username)}</td>
+      <td>${o.kind === 'points' ? '积分充值' : '套餐购买'}</td>
+      <td>${esc(o.plan_name)}</td>
+      <td>${o.points ? (o.kind === 'points' ? '+' : '-') + o.points : '-'}</td>
+      <td>${o.kind === 'points' ? '¥' + o.amount_text : '-'}</td>
+      <td><span class="status-badge ${o.status === 'paid' ? 'ok' : (o.status === 'pending' ? '' : 'bad')}"><i></i>${st[o.status] || esc(o.status)}</span></td>
+      <td>${esc(o.provider || '-')}</td>
+      <td>${fmtTs(o.created_at)}</td>
+      <td class="actions node-actions">${o.status === 'pending' ? `<button type="button" class="node-action" onclick="orderComplete('${esc(o.order_no)}')">手动开通</button>` : '<span class="muted small">—</span>'}</td>
+    </tr>`;
+}
+
+function applyOrderFilter(){
+  const all = window.__adminOrderList || [];
+  const status = (document.querySelector('#ofStatus') || {}).value || '';
+  const kind = (document.querySelector('#ofKind') || {}).value || '';
+  const q = ((document.querySelector('#ofQ') || {}).value || '').trim().toLowerCase();
+  const list = all.filter(o => {
+    if(status && o.status !== status) return false;
+    if(kind && o.kind !== kind) return false;
+    if(q){
+      const hay = [o.order_no, o.username, o.plan_name].join(' ').toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const body = document.querySelector('#adminOrderBody');
+  if(body) body.innerHTML = list.map((o, i) => orderRowHtml(o, i)).join('') || '<tr><td colspan="11" class="muted">没有符合条件的订单</td></tr>';
+  const cnt = document.querySelector('#adminOrderCount');
+  if(cnt) cnt.textContent = `筛选 ${list.length} / 共 ${all.length} 条`;
+}
+
+function resetOrderFilter(){
+  const s = document.querySelector('#ofStatus'); if(s) s.value = '';
+  const k = document.querySelector('#ofKind'); if(k) k.value = '';
+  const q = document.querySelector('#ofQ'); if(q) q.value = '';
+  applyOrderFilter();
+}
+
 async function loadAdmin(section=currentAdminSection){
   clearAdminDashboardTimer();
   hideFlash();
@@ -3453,22 +3497,27 @@ async function loadAdmin(section=currentAdminSection){
       <td class="actions node-actions"><button type="button" class="node-action" onclick="editPlan(${p.id})">编辑</button><button type="button" class="node-action" onclick="planToggle(${p.id})">${p.active ? '下架' : '上架'}</button><button type="button" class="node-action node-action-danger" onclick="planDelete(${p.id})">删除</button></td>
     </tr>`).join('') || '<tr><td colspan="9" class="muted">还没有套餐，先在上方创建</td></tr>';
   const orderStatusText = {pending:'待支付', paid:'已支付', cancelled:'已取消', expired:'已过期', refunded:'已退款'};
-  const orderRows = orderList.map((o, i) => `<tr>
-      <td>${i + 1}</td>
-      <td>${esc(o.order_no)}</td>
-      <td>${esc(o.username)}</td>
-      <td>${o.kind === 'points' ? '积分充值' : '套餐购买'}</td>
-      <td>${esc(o.plan_name)}</td>
-      <td>${o.points ? (o.kind === 'points' ? '+' : '-') + o.points : '-'}</td>
-      <td>${o.kind === 'points' ? '¥' + o.amount_text : '-'}</td>
-      <td><span class="status-badge ${o.status === 'paid' ? 'ok' : (o.status === 'pending' ? '' : 'bad')}"><i></i>${orderStatusText[o.status] || esc(o.status)}</span></td>
-      <td>${esc(o.provider || '-')}</td>
-      <td>${fmtTs(o.created_at)}</td>
-      <td class="actions node-actions">${o.status === 'pending' ? `<button type="button" class="node-action" onclick="orderComplete('${esc(o.order_no)}')">手动开通</button>` : '<span class="muted small">—</span>'}</td>
-    </tr>`).join('') || '<tr><td colspan="11" class="muted">暂无订单</td></tr>';
+  window.__adminOrderList = orderList;
+  window.__adminOrderStatusText = orderStatusText;
   const ordersHtml = `
-    <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}订单</h2><p>最近 100 条；待支付订单可手动开通</p></div><span class="section-count">已支付 ${orderList.filter(o => o.status === 'paid').length} / 共 ${orderList.length}</span></div>
-      <table><thead><tr><th>序号</th><th>订单号</th><th>用户</th><th>类型</th><th>套餐 / 内容</th><th>积分</th><th>金额</th><th>状态</th><th>支付方式</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}订单</h2><p>最近 100 条；待支付订单可手动开通</p></div><span class="section-count" id="adminOrderCount">共 ${orderList.length} 条</span></div>
+      <div class="filter-bar">
+        <select id="ofStatus" onchange="applyOrderFilter()">
+          <option value="">全部状态</option>
+          <option value="paid">已支付</option>
+          <option value="pending">待支付</option>
+          <option value="cancelled">已取消</option>
+          <option value="refunded">已退款</option>
+        </select>
+        <select id="ofKind" onchange="applyOrderFilter()">
+          <option value="">全部类型</option>
+          <option value="plan">套餐购买</option>
+          <option value="points">积分充值</option>
+        </select>
+        <input id="ofQ" placeholder="订单号 / 用户 / 套餐" oninput="applyOrderFilter()">
+        <button type="button" class="secondary" onclick="resetOrderFilter()">重置</button>
+      </div>
+      <table><thead><tr><th>序号</th><th>订单号</th><th>用户</th><th>类型</th><th>套餐 / 内容</th><th>积分</th><th>金额</th><th>状态</th><th>支付方式</th><th>创建时间</th><th>操作</th></tr></thead><tbody id="adminOrderBody">${orderList.map((o, i) => orderRowHtml(o, i)).join('') || '<tr><td colspan="11" class="muted">暂无订单</td></tr>'}</tbody></table>
     </section>`;
   const plansHtml = `
     <section class="card" id="plans"><div class="section-title"><h2>${stIcon('license')}套餐模板</h2><p>用户按套餐在线购买，支付成功后自动分配端口与有效期</p></div>
