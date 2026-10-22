@@ -2042,3 +2042,11 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 .nn-chip-copy small{font-size:12px;color:var(--muted)}
 .nn-region-chips{justify-content:flex-start}
 .nn-chip-copy{align-items:flex-start;text-align:left}
+.nn-chip{flex-direction:column;align-items:stretch;gap:8px;padding:16px 14px;width:140px;border-radius:12px;justify-content:space-between}
+.nn-chip-flag{font-size:30px;line-height:1;text-align:center}
+.nn-chip-copy{align-items:center;text-align:center;gap:4px}
+.nn-chip-copy b{font-size:15px}
+.nn-chip-copy small{font-size:12px;color:#1677FF;font-weight:600}
+.nn-chip:hover{border-color:#1677FF}
+.nn-chip.active{border-color:#1677FF;background:#eef5ff}
+.nn-chip-flag{display:block;width:100%;text-align:center}
