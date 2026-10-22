@@ -1513,16 +1513,23 @@ async function loadTickets(){
   const myNodeIds = [...new Set(plans.filter(p => p.status !== 'cancelled').map(p => Number(p.node_id)))].filter(Boolean);
   window.__ticketNodes = myNodeIds.map(id => ({ id, name: (nodeById[id] || {}).name || ('#' + id), region: (nodeById[id] || {}).region || '' }));
   const list = ticketsTab === 'mine' ? mine : received;
-  const rows = list.map((t, i) => `<tr>
+  const rows = list.map((t, i) => {
+    const need = ticketsTab === 'received' ? t.status === 'open' : t.status === 'processing';
+    const needText = ticketsTab === 'received' ? '待处理' : '待你确认';
+    const statusBadge = need
+      ? `<span class="status-badge warn"><i></i>${needText}</span>`
+      : `<span class="status-badge ${t.status === 'closed' ? '' : (t.status === 'open' ? 'warn' : 'ok')}"><i></i>${TICKET_STATUS[t.status] || t.status}</span>`;
+    return `<tr class="${need ? 'need-action' : ''}">
       <td>${i + 1}</td>
       <td>${esc(t.ticket_no)}</td>
       <td>${TICKET_KIND[t.kind] || t.kind}</td>
       <td>${esc(t.title)}</td>
       <td>${t.node_id ? esc(t.node_name || (nodeById[Number(t.node_id)] || {}).name || ('#' + t.node_id)) : '不关联'}</td>
-      <td><span class="status-badge ${t.status === 'closed' ? '' : (t.status === 'open' ? 'warn' : 'ok')}"><i></i>${TICKET_STATUS[t.status] || t.status}</span></td>
+      <td>${statusBadge}</td>
       <td>${fmtTs(t.created_at)}</td>
       <td class="actions node-actions"><button type="button" class="node-action" onclick="loadTicketDetail(${t.id})">查看</button></td>
-    </tr>`).join('') || `<tr><td colspan="8" class="muted">${ticketsTab === 'mine' ? '还没有提交过工单' : '还没有收到工单'}</td></tr>`;
+    </tr>`;
+  }).join('') || `<tr><td colspan="8" class="muted">${ticketsTab === 'mine' ? '还没有提交过工单' : '还没有收到工单'}</td></tr>`;
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>故障工单</h1><p>节点或实例出现故障时，提交工单通知机主处理。</p></div>
       <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadTickets()">刷新</button><button type="button" onclick="loadTicketNew()">＋ 新建工单</button></div></div>
