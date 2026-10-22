@@ -2020,3 +2020,5 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
   .ann-node{width:100%;margin-left:0!important;padding:0 0 14px 22px}
   .ann-node .ann-node-dot{left:2px;right:auto}
 }
+.ann-timeline:before{bottom:18px}
+.ann-card-head small{color:var(--soft)}
