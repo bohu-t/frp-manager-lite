@@ -2174,3 +2174,31 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 :root[data-theme="dark"] .nn-sum-tag{background:rgba(22,119,255,.18)}
 @media (max-width:1280px){.nn-grid3{grid-template-columns:300px minmax(0,1fr)}.nn-col-right{grid-column:1 / -1;position:static}.nn-summary{display:grid;grid-template-columns:1fr 1fr;gap:0 24px;align-items:start}.nn-sum-head,.nn-sum-name,.nn-sum-node{grid-column:1}.nn-sum-rows{grid-column:2;grid-row:1 / span 3;border-top:0;padding-top:0}.nn-sum-price,.nn-sum-pay,.nn-sum-note{grid-column:1 / -1}}
 @media (max-width:900px){.nn-grid3{grid-template-columns:1fr}.nn-col-scroll{max-height:none}.nn-summary{display:block}.nn-sum-rows{border-top:1px dashed var(--border);padding-top:14px}.nn-toolbar{width:100%}.nn-search{flex:1}.nn-search input{width:100%}}
+/* 实例配置：紧凑表单 */
+.nn-tunnel-wrap{margin-top:2px}
+.nn-tunnel-wrap>p{margin:0 0 12px}
+.nn-tunnel-list{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+.nn-tunnel-row{display:grid;grid-template-columns:84px minmax(0,1fr) minmax(0,1fr) 58px;gap:8px;align-items:end;padding:12px;border:1px solid var(--border);border-radius:12px;background:#f8fafc}
+.nn-tunnel-row .nn-field:first-child{grid-column:1 / -1}
+.nn-field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.nn-field>span{font-size:11px;color:var(--muted);line-height:1}
+.nn-field>input,.nn-field>select{height:36px;width:100%;padding:0 10px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--text);font-size:13px;outline:0;box-sizing:border-box}
+.nn-field>input:focus,.nn-field>select:focus{border-color:#1677FF;box-shadow:0 0 0 3px rgba(22,119,255,.12)}
+.nn-field>input[type=number]{text-align:left}
+.nn-tunnel-row .node-action{height:36px;padding:0 10px;font-size:12px;border-radius:9px;white-space:nowrap}
+.nn-tunnel-wrap>.secondary{margin-top:2px}
+:root[data-theme="dark"] .nn-tunnel-row{background:rgba(90,140,220,.06)}
+@media (max-width:640px){.nn-tunnel-row{grid-template-columns:1fr 1fr}.nn-tunnel-row .nn-field:first-child{grid-column:1 / -1}.nn-tunnel-row .node-action{grid-column:1 / -1;justify-self:start}}
+.nn-tunnel-row{padding:10px 12px;gap:8px 8px}
+.nn-field{gap:5px}
+.nn-field>input,.nn-field>select{height:34px}
+.nn-tunnel-row .node-action{height:34px}
+.nn-tunnel-list{gap:8px}
+/* 隧道行改为两行紧凑排布：名称+协议+删除 / 本地端口+公网端口 */
+.nn-tunnel-row{grid-template-columns:minmax(0,1fr) 88px 58px;align-items:end;row-gap:10px}
+.nn-tunnel-row .nn-field:first-child{grid-column:1;grid-row:1}
+.nn-tunnel-row .nn-field:nth-child(2){grid-column:2;grid-row:1}
+.nn-tunnel-row .nn-field:nth-child(3){grid-column:1;grid-row:2}
+.nn-tunnel-row .nn-field:nth-child(4){grid-column:2;grid-row:2}
+.nn-tunnel-row .node-action{grid-column:3;grid-row:1;align-self:end}
+.nn-field>input[type=number]{max-width:120px}
