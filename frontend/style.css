@@ -2040,3 +2040,5 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 .nn-chip-flag{font-size:24px;line-height:1}
 .nn-chip-copy b{font-size:15px}
 .nn-chip-copy small{font-size:12px;color:var(--muted)}
+.nn-region-chips{justify-content:flex-start}
+.nn-chip-copy{align-items:flex-start;text-align:left}

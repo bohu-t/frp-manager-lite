@@ -2071,7 +2071,7 @@ function renderNewNode(){
     const min = regionPrice(name);
     return `<button type="button" class="nn-chip${active ? ' active' : ''}" onclick="nnPickRegion('${esc(name)}')">
       <span class="nn-chip-flag">${regionFlag(name)}</span>
-      <span class="nn-chip-copy"><b>${esc(name)}</b><small>${min === null ? '暂无套餐' : '¥' + min + ' 起'}</small></span>
+      <span class="nn-chip-copy"><b>${esc(name)}</b><small>${min === null ? '暂无套餐' : '价格 ¥' + min + ' 起'}</small></span>
     </button>`;
   }).join('') || emptyHint('暂无可用地区')}</div>`;
 
