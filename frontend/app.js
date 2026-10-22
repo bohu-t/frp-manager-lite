@@ -852,7 +852,8 @@ async function loadNotifications(){
   try{
     const r = await api('/api/notifications');
     window.__notifs = r.notifications || [];
-    window.__notifUnread = Number(r.unread || 0);
+    window.__notifUnread = Number(r.unread_notifications ?? r.unread ?? 0);
+    window.__annUnread = Number(r.unseen_announcements ?? 0);
     renderNotifBadge();
   }catch(e){}
 }
@@ -860,20 +861,12 @@ async function loadNotifications(){
 function renderNotifBadge(){
   const el = document.querySelector('#notifBadge');
   if(!el) return;
-  const n = Number(window.__notifUnread || 0);
+  const n = Number(window.__notifUnread || 0) + Number(window.__annUnread || 0);
   el.textContent = n > 99 ? '99+' : String(n);
   el.classList.toggle('hidden', n <= 0);
 }
 
 let notifTab = 'notif';
-
-function renderNotifBadge(){
-  const el = document.querySelector('#notifBadge');
-  if(!el) return;
-  const n = Number(window.__notifUnread || 0);
-  el.textContent = n > 99 ? '99+' : String(n);
-  el.classList.toggle('hidden', n <= 0);
-}
 
 async function loadAnnouncements(){
   try{
@@ -892,7 +885,7 @@ function notifModalHtml(){
       <div class="section-title modal-title"><div><h2>通知中心</h2><p>工单、提现与系统公告</p></div><button type="button" class="secondary modal-close" onclick="closeNotifModal()">关闭 ×</button></div>
       <nav class="seg-tabs notif-tabs">
         <button type="button" class="seg-tab${notifTab === 'notif' ? ' active' : ''}" onclick="switchNotifTab('notif')">通知${(window.__notifUnread||0) > 0 ? `<span>${window.__notifUnread}</span>` : ''}</button>
-        <button type="button" class="seg-tab${notifTab === 'ann' ? ' active' : ''}" onclick="switchNotifTab('ann')">系统公告${(window.__announcements||[]).length ? `<span>${window.__announcements.length}</span>` : ''}</button>
+        <button type="button" class="seg-tab${notifTab === 'ann' ? ' active' : ''}" onclick="switchNotifTab('ann')">系统公告${Number(window.__annUnread||0) > 0 ? `<span>${window.__annUnread}</span>` : ''}</button>
       </nav>
       <div class="notif-body">
         ${notifTab === 'notif' ? `<div class="notif-list">${notifHtml}</div><div class="notif-foot"><button type="button" class="link-btn" onclick="markAllNotifsRead()">全部标为已读</button></div>` : `<div class="ann-list">${annHtml}</div>`}
