@@ -3374,7 +3374,7 @@ async function loadAdmin(section=currentAdminSection){
   const allUsers = data.users || [];
   const userQuery = adminUserSearch.trim().toLocaleLowerCase();
   const filteredUsers = allUsers.filter(u => {
-    const searchable = [u.username, u.invite_key_used, u.node_region, u.node_name, u.id].join(' ').toLocaleLowerCase();
+    const searchable = [u.username, u.node_region, u.node_name, u.id].join(' ').toLocaleLowerCase();
     if(userQuery && !searchable.includes(userQuery)) return false;
     if(adminUserNode && String(u.node_id ?? '') !== String(adminUserNode)) return false;
     if(adminUserStatus === 'active' && (!u.active || u.expired)) return false;
@@ -3396,7 +3396,6 @@ async function loadAdmin(section=currentAdminSection){
       <td>${(usersPage - 1) * ADMIN_PAGE_SIZE + i + 1}</td><td>${esc(u.username)}</td><td>${u.email ? esc(u.email) : '—'}</td><td>${esc(u.role)}</td><td><b>${Number(u.points || 0)}</b></td><td>${esc(u.node_region || '-')} / ${esc(u.node_name || '-')}</td><td>${u.port_count}/${u.max_ports}</td><td>${u.tunnel_count}</td>
       <td>${fmtBytes(u.traffic_limit_bytes)} / ${u.bandwidth_limit_kbps ? `${(Number(u.bandwidth_limit_kbps) / 1024).toFixed(1)} MB/s` : '不限'}</td>
       <td>${u.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
-      <td><code class="token" title="${esc(u.invite_key_used || '')}">${esc(u.invite_key_used || '后台创建')}</code></td>
       <td class="actions node-actions user-actions">
         <button class="node-action" onclick="adminToggle(${u.id})">${u.active ? '停用' : '启用'}</button>
         <button class="node-action" onclick="openAdminLimits(${u.id}, ${Number(u.traffic_limit_bytes || 0)}, ${Number(u.bandwidth_limit_kbps || 0)}, '${esc(u.username)}')">流量限制</button>
@@ -3560,14 +3559,14 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>有效期天数</label><input name="expires_days" type="number" value="30" min="0" max="3650"><span class="muted small">0 表示永不过期</span></div>
       <div style="align-self:end"><button>创建</button></div>
     </form></section>
-    <section class="card" id="users"><div class="section-title"><h2>${stIcon('users')}用户列表</h2><p>管理状态、续期、注册密钥和删除账号</p></div>
+    <section class="card" id="users"><div class="section-title"><h2>${stIcon('users')}用户列表</h2><p>管理状态、续期和删除账号</p></div>
       <form id="adminUserFilterForm" class="grid admin-user-filters">
-        <div><label for="adminUserSearch">搜索用户</label><input id="adminUserSearch" name="search" value="${esc(adminUserSearch)}" placeholder="用户名、ID、注册密钥"></div>
+        <div><label for="adminUserSearch">搜索用户</label><input id="adminUserSearch" name="search" value="${esc(adminUserSearch)}" placeholder="用户名、ID"></div>
         <div><label for="adminUserNode">接入节点</label><select id="adminUserNode" name="node"><option value="">全部节点</option>${(data.nodes || []).map(n => `<option value="${n.id}" ${String(n.id)===String(adminUserNode)?'selected':''}>${esc(n.region)} / ${esc(n.name)}</option>`).join('')}</select></div>
         <div><label for="adminUserStatus">账号状态</label><select id="adminUserStatus" name="status"><option value="all" ${adminUserStatus==='all'?'selected':''}>全部状态</option><option value="active" ${adminUserStatus==='active'?'selected':''}>正常启用</option><option value="disabled" ${adminUserStatus==='disabled'?'selected':''}>已停用</option><option value="expired" ${adminUserStatus==='expired'?'selected':''}>已到期</option></select></div>
         <div class="form-actions"><button type="submit">筛选</button><button type="button" class="secondary" id="adminUserFilterReset">重置</button></div>
       </form>
-      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>序号</th><th>用户</th><th>邮箱</th><th>角色</th><th>积分</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>状态</th><th>注册密钥</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>
+      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>序号</th><th>用户</th><th>邮箱</th><th>角色</th><th>积分</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>
     <div id="adminLimitsModal" class="modal-backdrop modal-center hidden" role="dialog" aria-modal="true" aria-labelledby="adminLimitsTitle" onclick="if(event.target===this)closeAdminLimits()">
       <section class="modal-page card admin-limits-modal">
         <div class="section-title modal-title">
