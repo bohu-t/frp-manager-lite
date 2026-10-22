@@ -1372,6 +1372,7 @@ async function resumePay(orderNo){
 let hostsTab = 'nodes';
 
 let nnState = { region: '', nodeId: 0, planId: 0, ports: [], tunnels: [] };
+let nnFilter = { q: '', min: '', max: '', sort: 'default' };
 
 
 const HOST_STATUS_CLASS = {pending:'', approved:'ok', rejected:'bad', blacklisted:'bad'};
@@ -2059,6 +2060,14 @@ function renderNewNode(){
     (regions[key] = regions[key] || []).push(n);
   });
   const regionNames = Object.keys(regions);
+  const nnKw = String(nnFilter.q || '').trim().toLowerCase();
+  const nnMin = Number(nnFilter.min || 0) || 0;
+  const nnMax = Number(nnFilter.max || 0) || 0;
+  const nodeMatch = (n) => !nnKw || [n.name, n.note, n.region].some(x => String(x || '').toLowerCase().includes(nnKw));
+  const nodePrice = (n) => {
+    const list = plans.filter(p => Number(p.node_id || 0) === 0 || Number(p.node_id) === Number(n.id));
+    return list.length ? Math.min(...list.map(p => Number(p.price_points || 0))) : null;
+  };
   const regionPrice = (name) => {
     const ids = regions[name].map(n => Number(n.id));
     const list = plans.filter(p => Number(p.node_id || 0) === 0 || ids.includes(Number(p.node_id)));
@@ -2098,10 +2107,16 @@ function renderNewNode(){
       }).join('')}
     </div>`;
 
-  const step1 = `<div class="nn-region-chips">${regionNames.map(name => {
+  const visibleRegions = regionNames.filter(name => (regions[name] || []).some(nodeMatch));
+  const totalMatched = nodes.filter(nodeMatch).length;
+  const regionTabs = `<div class="nn-tabs">
+    <button type="button" class="nn-tab${!nnState.region ? ' active' : ''}" onclick="nnPickRegion('')">全部 <b>${totalMatched}</b></button>
+    ${visibleRegions.map(name => `<button type="button" class="nn-tab${nnState.region === name ? ' active' : ''}" onclick="nnPickRegion('${esc(name)}')">${esc(regionLabel(name).replace(/[【】]/g, ''))} <b>${(regions[name] || []).filter(nodeMatch).length}</b></button>`).join('')}
+  </div>`;
+  const step1 = `<div class="nn-region-chips">${visibleRegions.map(name => {
     const active = nnState.region === name;
     const min = regionPrice(name);
-    const count = (regions[name] || []).length;
+    const count = (regions[name] || []).filter(nodeMatch).length;
     return `<button type="button" class="nn-chip${active ? ' active' : ''}" onclick="nnPickRegion('${esc(name)}')">
       <span class="nn-chip-flag">${regionFlag(name)}</span>
       <span class="nn-chip-name">${esc(regionLabel(name))}</span>
@@ -2110,8 +2125,13 @@ function renderNewNode(){
     </button>`;
   }).join('') || emptyHint('暂无可用地区')}</div>`;
 
-  const regionNodes = nnState.region ? (regions[nnState.region] || []) : [];
-  const step2 = !nnState.region ? emptyHint('请先在上方选择地区') : `<div class="nn-node-cards">${regionNodes.map(n => {
+  const sortNodes = (list) => {
+    if(nnFilter.sort === 'price-asc') return [...list].sort((a, b) => (nodePrice(a) ?? 1e9) - (nodePrice(b) ?? 1e9));
+    if(nnFilter.sort === 'price-desc') return [...list].sort((a, b) => (nodePrice(b) ?? -1) - (nodePrice(a) ?? -1));
+    return list;
+  };
+  const regionNodes = sortNodes((nnState.region ? (regions[nnState.region] || []) : nodes).filter(nodeMatch));
+  const step2 = !regionNodes.length ? emptyHint('该条件下暂无可用实例') : `<div class="nn-node-cards">${regionNodes.map(n => {
     const active = Number(nnState.nodeId) === Number(n.id);
     const online = !!n.auth_port_ok;
     const exceeded = !!n.traffic_exceeded;
@@ -2141,7 +2161,12 @@ function renderNewNode(){
     </button>`;
   }).join('') || emptyHint('该地区暂无可用实例')}</div>`;
 
-  const nodePlans = nnState.nodeId ? nnPlansFor(nnState.nodeId) : [];
+  const nodePlans = (nnState.nodeId ? nnPlansFor(nnState.nodeId) : []).filter(p => {
+    const price = Number(p.price_points || 0);
+    if(nnMin && price < nnMin) return false;
+    if(nnMax && price > nnMax) return false;
+    return true;
+  });
   const planIcon = (mode, hasQuota, hasDays) => {
     if(mode === 'traffic') return '<svg viewBox="0 0 24 24"><path d="M7 18h9a4 4 0 0 0 .4-8A5.5 5.5 0 0 0 6.6 9.6 4.2 4.2 0 0 0 7 18Z" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>';
     if(mode === 'time' && hasQuota) return '<svg viewBox="0 0 24 24"><rect x="3.5" y="6" width="17" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3.5 10h17M8 3v4M16 3v4" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>';
@@ -2212,30 +2237,100 @@ function renderNewNode(){
       <button type="button" class="nn-pay${ready ? ' ready' : ''}" ${ready ? '' : 'disabled'} onclick="nnPay()">${ready ? '立即支付并开通' : '请完成上方步骤'}</button>
     </div>`;
 
+  const sumDays = chosenPlan ? Number(chosenPlan.duration_days || 0) : 0;
+  const sumGb = chosenPlan ? Number(chosenPlan.traffic_limit_gb || 0) : 0;
+  const sumPorts = chosenPlan ? Number(chosenPlan.max_ports || 0) : 0;
+  const sumTunnels = (nnState.tunnels || []).filter(t => t.name).length;
+  const stepPill = (n) => `<span class="nn-step-pill">步骤${n}</span>`;
+
+  const toolbar = `<div class="nn-toolbar">
+      <label class="nn-search"><span>⌕</span><input id="nnSearch" placeholder="搜索实例" value="${esc(nnFilter.q)}" oninput="nnSetFilter('q',this.value)"></label>
+      <div class="nn-price-range">
+        <span>¥</span><input id="nnPriceMin" type="number" min="0" placeholder="最低价" value="${esc(nnFilter.min)}" oninput="nnSetFilter('min',this.value)">
+        <i>—</i>
+        <input id="nnPriceMax" type="number" min="0" placeholder="最高价" value="${esc(nnFilter.max)}" oninput="nnSetFilter('max',this.value)">
+      </div>
+      <select id="nnSort" class="nn-sort" onchange="nnSetFilter('sort',this.value)">
+        <option value="default"${nnFilter.sort === 'default' ? ' selected' : ''}>默认排序</option>
+        <option value="price-asc"${nnFilter.sort === 'price-asc' ? ' selected' : ''}>价格从低到高</option>
+        <option value="price-desc"${nnFilter.sort === 'price-desc' ? ' selected' : ''}>价格从高到低</option>
+      </select>
+    </div>`;
+
+  const summaryCard = `<aside class="nn-col-right">
+      <section class="card nn-summary">
+        <div class="nn-sum-head"><b>订单摘要</b>${nnState.region ? `<span class="nn-sum-tag">${regionFlag(nnState.region)} ${esc(regionLabel(nnState.region))}</span>` : ''}</div>
+        <h3 class="nn-sum-name">${chosenPlan ? esc(chosenPlan.name) : '待选择套餐'}</h3>
+        <p class="nn-sum-node">${chosenNode ? esc(chosenNode.name) : '待选择实例'}</p>
+        <div class="nn-sum-rows">
+          <span><i>📅</i>时长<b>${sumDays ? sumDays + ' 天' : '不限'}</b></span>
+          <span><i>🔌</i>端口<b>${sumPorts || '-'}</b></span>
+          <span><i>📊</i>流量<b>${sumGb ? sumGb + ' GB' : '不限'}</b></span>
+          <span><i>🧩</i>隧道<b>${sumTunnels} 条</b></span>
+        </div>
+        <div class="nn-sum-price"><small>应付金额</small><b>¥${chosenPlan ? Number(chosenPlan.price_points) : 0}</b></div>
+        <button type="button" class="nn-sum-pay${ready ? ' ready' : ''}" ${ready ? '' : 'disabled'} onclick="nnPay()">${ready ? '立即创建' : '请完成左侧步骤'}</button>
+        <div class="nn-sum-note">
+          <p><b>购买须知</b></p>
+          <p>实例由不同托管方提供，购买时长代表预付周期，不代表绝对可用时长。</p>
+          <p>实例持续异常或提前下架时可退订，按剩余价值退回账户余额。</p>
+        </div>
+      </section>
+    </aside>`;
+
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">NEW NODE</span><h1>新建实例</h1><p>五步完成：选择地区、实例、套餐，配置隧道后支付立即开通。</p></div></div>
-    ${stepper}
-    <section class="card nn-block">
-      <div class="nn-block-head"><span class="nn-block-icon">${stIcon('node')}</span><div><h2>1. 选择地区</h2><p>选择离你更近的地区，延迟更低</p></div></div>
+    <div class="ov-page-head"><div><span class="section-kicker">NEW NODE</span><h1>新建实例</h1><p>选择地区与实例，配置套餐和隧道，右侧确认后立即创建。</p></div></div>
+
+    <section class="card nn-block nn-block-region">
+      <div class="nn-block-head">
+        ${stepPill(1)}
+        <div class="nn-head-copy"><h2>选择地区</h2><p>选择离你更近的地区，延迟更低</p></div>
+        ${toolbar}
+      </div>
+      ${regionTabs}
       ${step1}
     </section>
-    <section class="card nn-block">
-      <div class="nn-block-head"><span class="nn-block-icon">${stIcon('pulse')}</span><div><h2>2. 选择实例</h2><p>${nnState.region ? esc(nnState.region) + ' · ' + regionNodes.length + ' 个实例' : '先选择地区'}</p></div></div>
-      ${step2}
-    </section>
-    <section class="card nn-block">
-      <div class="nn-block-head"><span class="nn-block-icon">${stIcon('license')}</span><div><h2>3. 选择套餐</h2><p>时间、流量或组合套餐</p></div></div>
-      ${step3}
-    </section>
-    <section class="card nn-block">
-      <div class="nn-block-head"><span class="nn-block-icon">${stIcon('link')}</span><div><h2>4. 创建隧道</h2><p>端口预分配，开通即可使用</p></div></div>
-      ${step4}
-    </section>
-    <section class="card nn-block">
-      <div class="nn-block-head"><span class="nn-block-icon">${stIcon('bolt')}</span><div><h2>5. 支付开通</h2><p>确认信息后完成支付，立即生效</p></div></div>
-      ${step5}
-    </section>
+
+    <div class="nn-grid3">
+      <section class="card nn-block nn-col-left">
+        <div class="nn-block-head">
+          ${stepPill(2)}
+          <div class="nn-head-copy"><h2>选择实例</h2><p>${(nnState.region ? esc(regionLabel(nnState.region)) : '全部地区') + ' · ' + regionNodes.length + ' 个实例'}</p></div>
+        </div>
+        <div class="nn-col-scroll">${step2}</div>
+      </section>
+
+      <div class="nn-col-mid">
+        <section class="card nn-block">
+          <div class="nn-block-head">
+            ${stepPill(3)}
+            <div class="nn-head-copy"><h2>选择配置</h2><p>时间、流量或组合套餐</p></div>
+          </div>
+          ${step3}
+        </section>
+        <section class="card nn-block">
+          <div class="nn-block-head">
+            ${stepPill(4)}
+            <div class="nn-head-copy"><h2>实例配置</h2><p>端口预分配，开通即可使用</p></div>
+          </div>
+          ${step4}
+        </section>
+      </div>
+
+      ${summaryCard}
+    </div>
   `, 'dashboard-nodes', '新建实例');
+}
+
+function nnSetFilter(key, value){
+  nnFilter[key] = value;
+  renderNewNode();
+  const map = { q: 'nnSearch', min: 'nnPriceMin', max: 'nnPriceMax' };
+  const el = document.getElementById(map[key]);
+  if(el){
+    el.focus();
+    if(el.setSelectionRange && el.value) el.setSelectionRange(el.value.length, el.value.length);
+  }
 }
 
 function nnPickRegion(name){
