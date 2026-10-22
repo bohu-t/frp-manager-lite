@@ -29,7 +29,6 @@ let tunnelFormDraft = {};
 let editingTunnelId = null;
 let lastTunnels = [];
 let adminSetupKey = '';
-let adminFrpcUsers = [];
 let adminSmtp = {};
 let adminCurrentPage = 'dashboard';
 let adminFrpcDraftRows = [{name:'web', proxy_type:'tcp', local_ip:'127.0.0.1', local_port:'80', remote_port:'', custom_domains:'', secret_key:''}];
@@ -1726,15 +1725,7 @@ async function loadAdminOps(){
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">MAINTENANCE</span><h1>平台维护</h1><p>运维工具、系统公告与积分充值密钥</p></div></div>
 
-    <section class="card maint-tools">
-      <div class="section-title"><div><h2>${stIcon('tools')}运维工具</h2><p>日常维护快捷入口</p></div></div>
-      <div class="maint-tool-grid">
-        <button type="button" class="maint-tool" onclick="openAdminFrpcModal()">
-          <span class="maint-tool-icon blue">${stIcon('file')}</span>
-          <span class="maint-tool-copy"><b>生成 frpc 配置</b><small>选择用户、添加隧道，下载配置与部署脚本</small></span>
-        </button>
-      </div>
-    </section>
+    
 
     <div class="maint-grid">
       <section class="card maint-panel">
@@ -3713,114 +3704,6 @@ async function saveR2Config(e){
 }
 
 
-function openAdminFrpcModal(){
-  adminFrpcModalOpen = true;
-  const modal = document.querySelector('#adminFrpcModal');
-  if(modal) modal.classList.remove('hidden');
-}
-function closeAdminFrpcModal(){
-  adminFrpcModalOpen = false;
-  const modal = document.querySelector('#adminFrpcModal');
-  if(modal) modal.classList.add('hidden');
-}
-function selectedAdminFrpcUser(){
-  const form = document.querySelector('#adminFrpcForm');
-  const userId = Number(form && form.user_id ? form.user_id.value : 0);
-  return adminFrpcUsers.find(u => Number(u.id) === userId) || adminFrpcUsers[0] || null;
-}
-function adminFrpcPortOptions(value=''){
-  const user = selectedAdminFrpcUser();
-  const assigned = user && Array.isArray(user.assigned_ports) ? user.assigned_ports : [];
-  const used = new Set(user && Array.isArray(user.used_remote_ports) ? user.used_remote_ports.map(Number) : []);
-  const valueNum = Number(value || 0);
-  const options = assigned.map(p => {
-    const n = Number(p);
-    const disabled = used.has(n) && n !== valueNum;
-    return `<option value="${esc(n)}" ${String(n)===String(value)?'selected':''} ${disabled?'disabled':''}>${esc(n)}${disabled?'（已用）':''}</option>`;
-  }).join('');
-  return `<option value="">自动选择可用端口</option>${options}`;
-}
-function saveAdminFrpcDraft(){
-  const form = document.querySelector('#adminFrpcForm');
-  if(!form) return;
-  adminFrpcDraftRows = [...form.querySelectorAll('.admin-frpc-row')].map(row => ({
-    name: row.querySelector('[name="name"]')?.value || '',
-    proxy_type: row.querySelector('[name="proxy_type"]')?.value || 'tcp',
-    local_ip: row.querySelector('[name="local_ip"]')?.value || '127.0.0.1',
-    local_port: row.querySelector('[name="local_port"]')?.value || '80',
-    remote_port: row.querySelector('[name="remote_port"]')?.value || '',
-    custom_domains: row.querySelector('[name="custom_domains"]')?.value || '',
-    secret_key: row.querySelector('[name="secret_key"]')?.value || '',
-  }));
-}
-function adminFrpcRowHtml(row={}, idx=0){
-  const type = row.proxy_type || 'tcp';
-  return `<div class="admin-frpc-row" data-index="${idx}">
-    <div class="section-title mini-title"><h3>隧道 ${idx + 1}</h3><p>${idx === 0 ? '默认第一条，可继续添加更多隧道' : `<button type="button" class="secondary" onclick="removeAdminFrpcRow(${idx})">删除</button>`}</p></div>
-    <div class="grid">
-      <div><label>隧道名称</label><input name="name" value="${esc(row.name || `web${idx ? idx + 1 : ''}`)}" required></div>
-      <div><label>类型</label><select name="proxy_type" onchange="syncAdminFrpcFields()">${(window.adminProxyTypeOptions || ['tcp','udp','http','https','stcp','xtcp','tcpmux']).map(t => `<option value="${esc(t)}" ${t===type?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
-      <div><label>本地 IP</label><input name="local_ip" value="${esc(row.local_ip || '127.0.0.1')}" required></div>
-      <div><label>本地端口</label><input name="local_port" type="number" min="1" max="65535" value="${esc(row.local_port || '80')}" required></div>
-      <div class="admin-remote-port-field"><label>公网端口</label><select name="remote_port">${adminFrpcPortOptions(row.remote_port || '')}</select></div>
-      <div class="admin-domain-field hidden"><label>自定义域名</label><input name="custom_domains" value="${esc(row.custom_domains || '')}" placeholder="app.example.com"></div>
-      <div class="admin-secret-field hidden"><label>访问密钥</label><input name="secret_key" value="${esc(row.secret_key || '')}" placeholder="留空自动生成"></div>
-    </div>
-  </div>`;
-}
-function renderAdminFrpcRows(){
-  const box = document.querySelector('#adminFrpcRows');
-  if(!box) return;
-  box.innerHTML = adminFrpcDraftRows.map(adminFrpcRowHtml).join('');
-  syncAdminFrpcFields();
-}
-function addAdminFrpcRow(){
-  saveAdminFrpcDraft();
-  adminFrpcDraftRows.push({name:`web${adminFrpcDraftRows.length + 1}`, proxy_type:'tcp', local_ip:'127.0.0.1', local_port:'80', remote_port:'', custom_domains:'', secret_key:''});
-  renderAdminFrpcRows();
-}
-function removeAdminFrpcRow(idx){
-  saveAdminFrpcDraft();
-  if(adminFrpcDraftRows.length <= 1) return;
-  adminFrpcDraftRows.splice(idx, 1);
-  renderAdminFrpcRows();
-}
-function syncAdminFrpcFields(){
-  const form = document.querySelector('#adminFrpcForm');
-  if(!form) return;
-  form.querySelectorAll('.admin-frpc-row').forEach(row => {
-    const type = row.querySelector('[name="proxy_type"]').value;
-    row.querySelector('.admin-remote-port-field').classList.toggle('hidden', !['tcp','udp'].includes(type));
-    row.querySelector('.admin-domain-field').classList.toggle('hidden', !['http','https','tcpmux'].includes(type));
-    row.querySelector('.admin-secret-field').classList.toggle('hidden', !['stcp','xtcp'].includes(type));
-  });
-}
-async function downloadAdminFrpc(userId){
-  const r = await api('/api/admin/frpc-config', {method:'POST', body:{user_id:userId}});
-  downloadText(r.filename || 'frpc.toml', r.config || '');
-  if(r.deploy_script) downloadText(r.script_filename || 'deploy-frpc.sh', r.deploy_script || '');
-  show('frpc 配置和部署脚本已生成，请交给用户部署');
-}
-async function downloadAdminFrpcOnly(){
-  const form = document.querySelector('#adminFrpcForm');
-  if(!form) return;
-  await downloadAdminFrpc(Number(form.user_id.value || 0));
-}
-async function submitAdminFrpc(e){
-  e.preventDefault();
-  const form = e.target;
-  saveAdminFrpcDraft();
-  const body = {user_id: Number(form.user_id.value || 0), tunnels: adminFrpcDraftRows};
-  try{
-    const r = await api('/api/admin/tunnels/create-for-user', {method:'POST', body});
-    if(r.config) downloadText(r.filename || 'frpc.toml', r.config || '');
-    if(r.deploy_script) downloadText(r.script_filename || 'deploy-frpc.sh', r.deploy_script || '');
-    adminFrpcDraftRows = [{name:'web', proxy_type:'tcp', local_ip:'127.0.0.1', local_port:'80', remote_port:'', custom_domains:'', secret_key:''}];
-    closeAdminFrpcModal();
-    await reloadAdminCurrentPage();
-    show(r.message || '隧道已创建并下载 frpc 配置和部署脚本');
-  }catch(err){ show(err.message, true); }
-}
 function fileToDataUrl(file){
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -4209,24 +4092,6 @@ function reloadAdminCurrentPage(){
   return adminCurrentPage === 'settings' ? loadAdminSettings() : loadAdminDashboard();
 }
 
-function adminOpsCardHtml(){
-  return `<section class="card admin-ops-card">
-    <div class="settings-card-head"><span class="settings-card-icon icon-purple">${stIcon('tools')}</span><div><h2>运维工具</h2><p>提供系统运维维护相关工具和功能。</p></div></div>
-    <div class="ops-list">
-      <button type="button" class="ops-row" onclick="openAdminFrpcModal()">
-        <span class="ops-row-icon">${stIcon('file')}</span>
-        <span class="ops-row-copy"><b>为用户生成 frpc 配置</b><small>选择用户、添加隧道，生成并下载 frpc.toml 与部署脚本。</small></span>
-        <span class="ops-row-arrow">›</span>
-      </button>
-      <button type="button" class="ops-row" onclick="openPwdModal()">
-        <span class="ops-row-icon">${stIcon('key')}</span>
-        <span class="ops-row-copy"><b>修改登录密码</b><small>修改当前管理员账号的登录密码。</small></span>
-        <span class="ops-row-arrow">›</span>
-      </button>
-    </div>
-  </section>`;
-}
-
 function adminPaymentCardHtml(pay){
   pay = pay || {};
   const enabledChannels = (pay.providers || []).map(x => x.key);
@@ -4419,20 +4284,6 @@ function adminR2CardHtml(r2, r2Status, r2Source){
   </section>`;
 }
 
-function adminFrpcModalHtml(frpcUserOptions){
-  return `<div id="adminFrpcModal" class="modal-backdrop${adminFrpcModalOpen ? '' : ' hidden'}" role="dialog" aria-modal="true" aria-labelledby="adminFrpcModalTitle">
-      <section class="modal-page card admin-frpc-modal">
-        <div class="section-title modal-title"><div><h2 id="adminFrpcModalTitle">为用户配置并下载 frpc</h2><p>选择普通用户，可一次添加多条隧道；TCP/UDP 公网端口从该用户已分配端口中选择。</p></div><button type="button" class="secondary modal-close" onclick="closeAdminFrpcModal()" aria-label="关闭 frpc 配置">关闭 ×</button></div>
-        ${frpcUserOptions ? `<form id="adminFrpcForm">
-          <div class="grid"><div><label>用户</label><select name="user_id" required onchange="saveAdminFrpcDraft(); renderAdminFrpcRows(); renderAdminDeployScriptAddress();">${frpcUserOptions}</select></div></div>
-          <div id="adminDeployScriptAddress">${adminDeployScriptAddressHtml()}</div>
-          <div id="adminFrpcRows" class="admin-frpc-rows"></div>
-          <div class="form-actions"><button>创建隧道并下载</button><button type="button" class="secondary" onclick="addAdminFrpcRow()">添加一条隧道</button><button type="button" class="secondary" onclick="downloadAdminFrpcOnly()">只下载现有配置</button></div>
-        </form>` : '<p class="muted">暂无普通用户，先创建用户后再下载 frpc 配置。</p>'}
-      </section>
-    </div>`;
-}
-
 function selectNotifyChannel(type){
   type = type || '';
   const sel = document.querySelector('#notifyTypeSelect');
@@ -4575,15 +4426,12 @@ async function loadAdminSettings(){
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
   const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
   const frpcUsers = data.frpc_users || [];
-  adminFrpcUsers = frpcUsers;
   window.adminProxyTypeOptions = data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux'];
-  const frpcUserOptions = frpcUsers.map(u => `<option value="${u.id}">${esc(u.username)} · ${esc(u.node_region || '-')} / ${esc(u.node_name || '-')} · 端口 ${u.port_count || 0} · 可用 ${(u.available_ports || []).length} · 隧道 ${u.tunnel_count || 0}</option>`).join('');
   app.innerHTML = appLayoutHtml(`
     <div class="admin-settings-grid">
       <div class="admin-settings-col">${adminNotifyCardHtml(notify)}${adminPaymentCardHtml(data.payment)}</div>
       <div class="admin-settings-col">${adminSmtpCardHtml(smtp)}${adminBackupCardHtml(r2, r2Status, r2Source)}${adminR2CardHtml(r2, r2Status, r2Source)}</div>
     </div>
-    ${adminFrpcModalHtml(frpcUserOptions)}
     ${adminPwdModalHtml()}
   `, 'admin-settings', '管理员设置');
   wireAdminSettingsForms();
@@ -4615,7 +4463,6 @@ async function loadAdminDashboard(auto=false){
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
   const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
   const frpcUsers = data.frpc_users || [];
-  adminFrpcUsers = frpcUsers;
   window.adminProxyTypeOptions = data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux'];
   const frpcUserOptions = frpcUsers.map(u => `<option value="${u.id}">${esc(u.username)} · ${esc(u.node_region || '-')} / ${esc(u.node_name || '-')} · 端口 ${u.port_count || 0} · 可用 ${(u.available_ports || []).length} · 隧道 ${u.tunnel_count || 0}</option>`).join('');
   const proxyTypeOptions = (data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux']).map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');

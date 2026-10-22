@@ -5902,25 +5902,6 @@ class Handler(BaseHTTPRequestHandler):
             audit("backup_restore", admin, None, None, "", f"{info.get('source_filename','')} pre={info.get('pre_restore_backup','')}")
         self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "restore": info}, 200 if ok else 400)
 
-    def admin_frpc_config(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
-        if not self.require_admin():
-            return
-        user_id = int(data.get("user_id", 0))
-        with db() as conn:
-            target = conn.execute("SELECT * FROM users WHERE id=? AND role!='admin'", (user_id,)).fetchone()
-            if not target:
-                self.send_json({"ok": False, "error": "用户不存在"}, 404)
-                return
-            node = conn.execute("SELECT * FROM nodes WHERE id=?", (target["node_id"],)).fetchone()
-            tunnels = conn.execute("SELECT * FROM tunnels WHERE user_id=? ORDER BY id", (target["id"],)).fetchall()
-        if not node:
-            self.send_json({"ok": False, "error": "用户所属节点不存在"}, 400)
-            return
-        cfg = tunnel_config(target, node, tunnels)
-        script = frpc_deploy_script(cfg)
-        audit("admin_frpc_config_download", admin, target["node_id"], None, "", f"target={target['username']}")
-        self.send_json({"ok": True, "filename": f"frpc-{target['username']}.toml", "config": cfg, "script_filename": f"deploy-frpc-{target['username']}.sh", "deploy_script": script})
-
     def admin_tunnel_create_for_user(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
         if not self.require_admin():
             return
@@ -7425,8 +7406,6 @@ class Handler(BaseHTTPRequestHandler):
             self.admin_restore_backup(user, data)
         elif path == "/api/admin/tunnels/create-for-user":
             self.admin_tunnel_create_for_user(user, data)
-        elif path == "/api/admin/frpc-config":
-            self.admin_frpc_config(user, data)
         elif path == "/api/admin/software-licenses/create":
             self.admin_software_license_create(data)
         elif path == "/api/admin/software-licenses/toggle":
