@@ -1549,6 +1549,12 @@ function ticketBodyHtml(c){
   return esc(raw).replace(/\n/g, '<br>');
 }
 
+function attsHtml(tokens){
+  const list = Array.isArray(tokens) ? tokens : [];
+  if(!list.length) return '';
+  return `<div class="ticket-atts">${list.map(t => `<img src="/api/upload/${encodeURIComponent(t)}" alt="附件" onclick="showImageViewer('/api/upload/${encodeURIComponent(t)}')">`).join('')}</div>`;
+}
+
 function tkCmd(cmd){
   document.execCommand(cmd, false, null);
   const ed = document.querySelector('#tkEditor');
