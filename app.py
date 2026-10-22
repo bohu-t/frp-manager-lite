@@ -1541,6 +1541,7 @@ def node_public(row: sqlite3.Row) -> dict[str, Any]:
         "name": row["name"],
         "server_addr": row["server_addr"],
         "server_port": row["server_port"],
+        "frps_version": row_val(row, "frps_version", "") or "",
         "bandwidth_mbps": int(row_val(row, "bandwidth_mbps", 0) or 0),
         "monthly_traffic_bytes": int(row_val(row, "monthly_traffic_bytes", 0) or 0),
         "monthly_traffic_gb": round(int(row_val(row, "monthly_traffic_bytes", 0) or 0) / 1024 / 1024 / 1024, 2),
@@ -3136,6 +3137,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE nodes ADD COLUMN auto_suspended INTEGER NOT NULL DEFAULT 0")
         if "expires_at" not in node_cols:
             conn.execute("ALTER TABLE nodes ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0")
+        if "frps_version" not in node_cols:
+            conn.execute("ALTER TABLE nodes ADD COLUMN frps_version TEXT NOT NULL DEFAULT ''")
         for tbl, col, ddl in (
             ("payout_accounts", "qr_token", "TEXT NOT NULL DEFAULT ''"),
             ("tickets", "attachments", "TEXT NOT NULL DEFAULT '[]'"),
@@ -8379,10 +8382,13 @@ class Handler(BaseHTTPRequestHandler):
 
             panel_token = str(metas.get("panelToken") or metas.get("panel_token") or content.get("panelToken") or "")
             callback_node_id, callback_node_token = plugin_node_from_query(self.path)
+            frp_version = str(payload.get("version") or content.get("version") or "")[:32]
             reject = False
             reason = ""
 
             with db() as conn:
+                if frp_version and callback_node_id and op.lower() == "login":
+                    conn.execute("UPDATE nodes SET frps_version=? WHERE id=?", (frp_version, int(callback_node_id)))
                 user = conn.execute("SELECT * FROM users WHERE username=? AND active=1", (user_name,)).fetchone()
                 if not user:
                     reject, reason = True, "unknown, disabled or expired user"

@@ -3410,12 +3410,13 @@ async function loadAdmin(section=currentAdminSection){
   const nodeRows = nodesSlice.map((n, i) => `
     <tr>
       <td>${(nodesPage - 1) * ADMIN_PAGE_SIZE + i + 1}</td><td>${esc(n.region)}</td><td>${esc(n.name)}</td><td>${esc(n.server_addr)}:${n.server_port}</td>
+      <td>${esc(n.frps_version || '-')}</td>
       <td>${n.port_start}-${n.port_end}</td><td>${n.free_count}/${n.port_count}</td>
       <td>${n.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
       <td>${Number(n.month_used_gb || 0)} / ${Number(n.monthly_traffic_gb || 0) > 0 ? Number(n.monthly_traffic_gb) + ' GB' : '不限'}${n.traffic_exceeded ? ' <span class="bad">已用尽</span>' : ''}</td>
       <td>${esc(n.note)}</td>
       <td class="actions node-actions"><button class="node-action" onclick='editNode(${JSON.stringify(n)})'>编辑</button><button class="node-action" onclick="nodeToggle(${n.id})">${n.active ? '停用' : '启用'}</button><a class="btn node-action" href="/config/frps.example.toml?node_id=${n.id}">frps配置</a><button class="node-action node-action-danger" onclick="nodeDelete(${n.id})">删除</button></td>
-    </tr>`).join('') || emptyRow(9, '还没有节点');
+    </tr>`).join('') || emptyRow(10, '还没有节点');
   const KEY_KIND_LABEL = {register: '注册', renew: '续期', reset: '重置'};
   const keyRows = keysSlice.map(k => {
     const kind = ['register', 'renew', 'reset'].includes(k.kind) ? k.kind : 'register';
@@ -3477,7 +3478,7 @@ async function loadAdmin(section=currentAdminSection){
       <div class="form-actions" style="grid-column:1/-1"><button>创建节点</button></div>
     </form>
     <div id="nodeDeployScriptBox" class="deploy-script-item hidden" style="margin-top:14px"><div class="label">一键部署脚本（复制到新节点机器上执行）</div><div class="copy-line"><code class="token deploy-token" id="nodeDeployScriptCmd"></code><button type="button" class="secondary" onclick="copyNodeDeployScript()">复制命令</button></div><p class="muted small">脚本从公开仓库拉取，不依赖本面板；执行时会把该节点注册到当前面板（地址、密钥与节点信息已按上方表单预填）。</p></div></section>
-    <section class="card" id="nodes"><div class="section-title"><h2>${stIcon('node')}节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>序号</th><th>地区</th><th>节点</th><th>frps</th><th>端口池</th><th>剩余</th><th>状态</th><th>月流量</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table>${paginationHtml('nodes', nodesPage, (data.nodes || []).length, ADMIN_PAGE_SIZE)}</section>`;
+    <section class="card" id="nodes"><div class="section-title"><h2>${stIcon('node')}节点列表</h2><p>启用节点优先，剩余端口多的排前面</p></div><table><thead><tr><th>序号</th><th>地区</th><th>节点</th><th>frps</th><th>版本</th><th>端口池</th><th>剩余</th><th>状态</th><th>月流量</th><th>备注</th><th>操作</th></tr></thead><tbody>${nodeRows}</tbody></table>${paginationHtml('nodes', nodesPage, (data.nodes || []).length, ADMIN_PAGE_SIZE)}</section>`;
   const plansList = data.plans || [];
   const orderList = data.orders || [];
   window.__fmlPlans = plansList;
