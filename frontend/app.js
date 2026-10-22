@@ -2098,6 +2098,8 @@ function renderNewNode(){
       <span class="nn-node-card-top"><b>${esc(n.name || '')}</b><span class="status-badge ${exceeded ? 'bad' : (online ? 'ok' : 'bad')}"><i></i>${exceeded ? '流量用尽' : (online ? '在线' : '维护中')}</span></span>
       <span class="nn-node-card-meta"><span>frps 版本</span><b>${esc(n.frps_version || '-')}</b></span>
       <span class="nn-node-card-meta"><span>上架天数</span><b>${days} 天</b></span>
+      <span class="nn-node-card-meta"><span>最大续期时间</span><b>${n.expires_at ? fmtTs(n.expires_at).slice(0, 10) : '不限'}</b></span>
+      <span class="nn-node-card-meta"><span>月流量限制</span><b>${Number(n.monthly_traffic_gb || 0) > 0 ? Number(n.monthly_traffic_gb) + ' GB' : '不限'}</b></span>
       <span class="nn-node-card-note" title="${esc(note || '合理使用严禁一切非法业务')}">${esc(note || '合理使用严禁一切非法业务')}</span>
     </button>`;
   }).join('') || emptyHint('该地区暂无可用实例')}</div>`;
