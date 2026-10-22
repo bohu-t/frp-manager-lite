@@ -759,12 +759,13 @@ function initPasswordForm(){
 function appSidebarHtml(kind='dashboard'){
   const isAdmin = currentUser?.role === 'admin';
   const username = currentUser?.username || '用户';
-  const mainItems = isAdmin ? [
+  const layoutItems = isAdmin ? [
     ['admin-dashboard','home','运行总览'],
     ['admin','users','用户管理','users'],
+    ['admin','nodePlus','新增节点','nodes'],
     ['admin','license','套餐','plans'],
     ['admin','chart','订单','orders'],
-    ['admin','nodePlus','新增节点','nodes'],
+    '__tickets__',
     ['admin-health','pulse','节点健康','health'],
     ['admin-proxies','monitor','映射监控','proxies'],
     ['admin','risk','风控审计','risk'],
@@ -772,11 +773,12 @@ function appSidebarHtml(kind='dashboard'){
     ['admin-settings','gear','设置']
   ] : [
     ['dashboard','home','概览'],
-    ['dashboard-nodes','node','新建实例'],
     ['dashboard-myplans','license','我的实例'],
-    ['dashboard-points','bolt','账单与充值']
+    ['dashboard-nodes','node','新建实例'],
+    '__tickets__',
+    ['dashboard-points','bolt','账单与充值'],
+    ['dashboard-profile','user','个人中心']
   ];
-  const tailItems = isAdmin ? [] : [['dashboard-profile','user','个人中心']];
   const ticketItems = isAdmin ? [
     ['admin-tickets','log','故障工单'],
     ['admin-payouts','key','提现工单'],
@@ -809,7 +811,7 @@ function appSidebarHtml(kind='dashboard'){
   const brandSub = '内网穿透管理平台';
   return `<aside class="app-sidebar">
     <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>${brandName}</strong><span>${brandSub}</span></div></div>
-    <div class="sidebar-section-label">工作空间</div>${mainItems.map(x => linkHtml(x, false)).join('')}${ticketsBlock}${tailItems.map(x => linkHtml(x, false)).join('')}
+    <div class="sidebar-section-label">工作空间</div>${layoutItems.map(x => x === '__tickets__' ? ticketsBlock : linkHtml(x, false)).join('')}
     ${isAdmin ? '' : `<div class="sidebar-section-label sidebar-tools-label">快速工具</div>
       <button class="side-link${kind === 'dashboard-config' ? ' active' : ''}" data-nav="dashboard-config">${sideIcon('download')}<span class="side-link-label">配置下载</span><span class="side-link-arrow">›</span></button>
       <button class="side-link${kind === 'dashboard-editor' ? ' active' : ''}" data-nav="dashboard-editor">${sideIcon('edit')}<span class="side-link-label">在线配置</span><span class="side-link-arrow">›</span></button>`}
