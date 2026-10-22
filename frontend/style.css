@@ -2035,3 +2035,8 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 .filter-bar select{width:auto;flex:0 0 auto;min-width:118px;max-width:150px}
 .filter-bar input{flex:0 1 280px;width:auto;min-width:180px}
 .filter-bar button{flex:0 0 auto;height:34px}
+.nn-region-chips{gap:12px}
+.nn-chip{padding:14px 18px;min-width:160px;border-radius:14px}
+.nn-chip-flag{font-size:24px;line-height:1}
+.nn-chip-copy b{font-size:15px}
+.nn-chip-copy small{font-size:12px;color:var(--muted)}

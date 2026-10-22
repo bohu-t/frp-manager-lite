@@ -2041,8 +2041,13 @@ function renderNewNode(){
     return Math.min(...list.map(p => Number(p.price_points || 0)));
   };
   const regionFlag = (name) => {
-    const map = {'中国':'🇨🇳','中国大陆':'🇨🇳','香港':'🇭🇰','美国':'🇺🇸','日本':'🇯🇵','新加坡':'🇸🇬','欧洲':'🇪🇺','台湾':'🇹🇼','韩国':'🇰🇷','英国':'🇬🇧','德国':'🇩🇪'};
-    return map[name] || '📍';
+    const text = String(name || '');
+    const hk = /香港|澳门|台湾/.test(text);
+    if(!hk && /中国|河南|河北|山东|山西|陕西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|湖北|湖南|广东|广西|海南|四川|贵州|云南|甘肃|青海|宁夏|新疆|西藏|内蒙古|北京|上海|天津|重庆/.test(text)){
+      return '🌸';
+    }
+    const map = {'中国':'🇨🇳','中国大陆':'🇨🇳','香港':'🇭🇰','澳门':'🇲🇴','台湾':'🇹🇼','美国':'🇺🇸','日本':'🇯🇵','新加坡':'🇸🇬','欧洲':'🇪🇺','韩国':'🇰🇷','英国':'🇬🇧','德国':'🇩🇪','法国':'🇫🇷','荷兰':'🇳🇱','加拿大':'🇨🇦','澳大利亚':'🇦🇺','俄罗斯':'🇷🇺','印度':'🇮🇳','泰国':'🇹🇭','越南':'🇻🇳','马来西亚':'🇲🇾','菲律宾':'🇵🇭','土耳其':'🇹🇷','巴西':'🇧🇷'};
+    return map[text] || '🌍';
   };
   const emptyHint = (text) => `<div class="nn-empty">${stIcon('node')}<p>${text}</p></div>`;
   const currentStep = !nnState.region ? 1 : (!nnState.nodeId ? 2 : (!nnState.planId ? 3 : 4));
@@ -2066,7 +2071,7 @@ function renderNewNode(){
     const min = regionPrice(name);
     return `<button type="button" class="nn-chip${active ? ' active' : ''}" onclick="nnPickRegion('${esc(name)}')">
       <span class="nn-chip-flag">${regionFlag(name)}</span>
-      <span class="nn-chip-copy"><b>${esc(name)}</b><small>${min === null ? '暂无套餐' : min + ' 积分起'}</small></span>
+      <span class="nn-chip-copy"><b>${esc(name)}</b><small>${min === null ? '暂无套餐' : '¥' + min + ' 起'}</small></span>
     </button>`;
   }).join('') || emptyHint('暂无可用地区')}</div>`;
 
@@ -2110,7 +2115,7 @@ function renderNewNode(){
       <span class="nn-plan-title">${main}</span>
       <span class="nn-plan-sub">${sub}</span>
       <span class="nn-plan-stock ${soldOut ? 'out' : ''}">${esc(p.stock_text || '')}</span>
-      <span class="nn-plan-price"><b>${Number(p.price_points)}</b> 积分</span>
+      <span class="nn-plan-price"><b>¥${Number(p.price_points)}</b></span>
       <span class="nn-plan-foot">${hasQuota && !isTraffic ? '含流量额度' : (isTraffic ? '用完即止' : '不限流量')}</span>
     </button>`;
   }).join('') || emptyHint('该实例暂无可购买套餐');
@@ -2153,7 +2158,7 @@ function renderNewNode(){
         <div><span>节点</span><b>${chosenNode ? esc(chosenNode.name) : '未选择'}</b></div>
         <div><span>套餐</span><b>${chosenPlan ? esc(chosenPlan.name) : '未选择'}</b></div>
         <div><span>隧道</span><b>${tunnelSummary || '暂未配置'}</b></div>
-        <div><span>应付</span><b class="nn-pay-amount">${chosenPlan ? Number(chosenPlan.price_points) : 0} 积分</b></div>
+        <div><span>应付</span><b class="nn-pay-amount">¥${chosenPlan ? Number(chosenPlan.price_points) : 0}</b></div>
       </div>
       <button type="button" class="nn-pay${ready ? ' ready' : ''}" ${ready ? '' : 'disabled'} onclick="nnPay()">${ready ? '立即支付并开通' : '请完成上方步骤'}</button>
     </div>`;
@@ -2239,7 +2244,7 @@ async function nnPay(){
         <div><span>实例</span><b>${esc(node.name || '')}</b></div>
         <div><span>套餐</span><b>${esc(plan.name || '')}</b></div>
         <div><span>隧道</span><b>${(nnState.tunnels || []).filter(t => t.name).map(t => esc(t.name) + ' ' + t.proxy_type.toUpperCase() + ' ' + (t.remote_port || '-')).join('、') || '暂未配置'}</b></div>
-        <div><span>应付</span><b class="nn-pay-amount">${Number(plan.price_points || 0)} 积分</b></div>
+        <div><span>应付</span><b class="nn-pay-amount">¥${Number(plan.price_points || 0)}</b></div>
       </div>
       <p class="muted small" id="nnPayHint">10 分钟内且端口未产生流量，可全额退订。</p>
       <div class="form-actions app-dialog-actions">
