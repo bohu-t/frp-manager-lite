@@ -1610,6 +1610,9 @@ def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int | None) 
         conn.execute("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
     if "traffic_limit_bytes" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN traffic_limit_bytes INTEGER NOT NULL DEFAULT 0")
+    if "announcement_seen_at" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN announcement_seen_at INTEGER NOT NULL DEFAULT 0")
+        conn.execute("UPDATE users SET announcement_seen_at=?", (now(),))
     if "bandwidth_limit_kbps" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0")
 
@@ -6324,7 +6327,9 @@ class Handler(BaseHTTPRequestHandler):
             with db() as conn:
                 rows = conn.execute("SELECT * FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 30", (int(user["id"]),)).fetchall()
                 unread = conn.execute("SELECT COUNT(*) FROM notifications WHERE user_id=? AND read_at=0", (int(user["id"]),)).fetchone()[0]
-            self.send_json({"ok": True, "notifications": [dict(r) for r in rows], "unread": int(unread or 0)})
+                seen = int(row_val(conn.execute("SELECT announcement_seen_at FROM users WHERE id=?", (int(user["id"]),)).fetchone(), "announcement_seen_at", 0) or 0)
+                unseen_ann = conn.execute("SELECT COUNT(*) FROM announcements WHERE active=1 AND created_at>?", (seen,)).fetchone()[0]
+            self.send_json({"ok": True, "notifications": [dict(r) for r in rows], "unread": int(unread or 0) + int(unseen_ann or 0), "unread_notifications": int(unread or 0), "unseen_announcements": int(unseen_ann or 0)})
             return
         if path == "/api/user/payout-account":
             with db() as conn:
@@ -6859,9 +6864,13 @@ class Handler(BaseHTTPRequestHandler):
             user = self.require_user()
             if not user:
                 return
-            if data.get("all"):
+            if data.get("announcements"):
+                with db() as conn:
+                    conn.execute("UPDATE users SET announcement_seen_at=? WHERE id=?", (now(), int(user["id"])))
+            elif data.get("all"):
                 with db() as conn:
                     conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? AND read_at=0", (now(), int(user["id"])))
+                    conn.execute("UPDATE users SET announcement_seen_at=? WHERE id=?", (now(), int(user["id"])))
             else:
                 try:
                     nid = int(data.get("id", 0))

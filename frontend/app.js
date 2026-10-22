@@ -854,7 +854,6 @@ async function loadNotifications(){
     window.__notifs = r.notifications || [];
     window.__notifUnread = Number(r.unread || 0);
     renderNotifBadge();
-    renderNotifList();
   }catch(e){}
 }
 
@@ -912,6 +911,10 @@ function closeNotifModal(){ const el = document.querySelector('#notifModal'); if
 
 async function switchNotifTab(tab){
   notifTab = tab;
+  if(tab === 'ann'){
+    try{ await api('/api/notifications/read', {method:'POST', body:{announcements:true}}); }catch(e){}
+    await loadNotifications();
+  }
   const el = document.querySelector('#notifModal');
   if(el){ el.remove(); document.body.insertAdjacentHTML('beforeend', notifModalHtml()); }
 }
