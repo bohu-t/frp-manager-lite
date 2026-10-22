@@ -734,7 +734,21 @@ function adminPwdModalHtml(){
       </section>
     </div>`;
 }
-function openPwdModal(){ const m = document.querySelector('#pwdModal'); if(m) m.classList.remove('hidden'); }
+function openPwdModal(){
+  const um = document.querySelector('#userMenu');
+  if(um) um.classList.add('hidden');
+  let m = document.querySelector('#pwdModal');
+  if(!m){
+    document.body.insertAdjacentHTML('beforeend', adminPwdModalHtml());
+    m = document.querySelector('#pwdModal');
+  }
+  m.classList.remove('hidden');
+  const form = m.querySelector('#pwdForm');
+  if(form && !form.dataset.bound){
+    form.dataset.bound = '1';
+    form.onsubmit = (e) => { e.preventDefault(); submitPasswordChange(form, closePwdModal); };
+  }
+}
 function closePwdModal(){ const m = document.querySelector('#pwdModal'); if(m) m.classList.add('hidden'); }
 function initPasswordForm(){
   const form = document.querySelector('#profilePwdForm');
@@ -801,7 +815,17 @@ function appSidebarHtml(kind='dashboard'){
       <button class="side-link${kind === 'dashboard-editor' ? ' active' : ''}" data-nav="dashboard-editor">${sideIcon('edit')}<span class="side-link-label">在线配置</span><span class="side-link-arrow">›</span></button>`}
     <div class="sidebar-spacer"></div>
     <div class="sidebar-service-status"><span class="sidebar-service-dot"></span><span class="sidebar-service-copy">${sidebarServiceCopyHtml()}</span></div>
-    <div class="sidebar-user-card"><span class="sidebar-user-avatar">${avatarSvg(username, currentUser?.role, 32)}</span><span class="sidebar-user-copy"><strong>${esc(username)}</strong><small>${isAdmin ? '系统管理员' : '普通用户'}</small></span><button type="button" data-nav="logout" title="退出登录" aria-label="退出登录">↗</button></div>
+    <div class="sidebar-user-wrap">
+      <div class="sidebar-user-card" onclick="toggleUserMenu(event)" role="button" tabindex="0" aria-label="账号菜单">
+        <span class="sidebar-user-avatar">${avatarSvg(username, currentUser?.role, 32)}</span>
+        <span class="sidebar-user-copy"><strong>${esc(username)}</strong><small>${isAdmin ? '系统管理员' : '普通用户'}</small></span>
+        <span class="sidebar-user-more">⋯</span>
+      </div>
+      <div class="user-menu hidden" id="userMenu">
+        <button type="button" onclick="openPwdModal()">${sideIcon('key')}<span>修改密码</span></button>
+        <button type="button" class="danger" data-nav="logout">${sideIcon('logout')}<span>退出登录</span></button>
+      </div>
+    </div>
   </aside>`;
 }
 
@@ -911,6 +935,18 @@ async function openNotif(id, link){
   if(link === 'payouts'){ if(currentUser && currentUser.role === 'admin') loadAdminPayouts(); return; }
   if(link === 'tickets'){ if(currentUser && currentUser.role === 'admin') loadAdminTickets(); else loadTickets(); }
 }
+
+function toggleUserMenu(ev){
+  if(ev) ev.stopPropagation();
+  const menu = document.querySelector('#userMenu');
+  if(!menu) return;
+  menu.classList.toggle('hidden');
+}
+
+document.addEventListener('click', (e) => {
+  const menu = document.querySelector('#userMenu');
+  if(menu && !menu.classList.contains('hidden') && !e.target.closest('.sidebar-user-wrap')) menu.classList.add('hidden');
+});
 
 function appLayoutHtml(content, kind='dashboard', topTitle='工作区'){
   const username = currentUser?.username || '用户';
@@ -1696,10 +1732,6 @@ async function loadAdminOps(){
         <button type="button" class="maint-tool" onclick="openAdminFrpcModal()">
           <span class="maint-tool-icon blue">${stIcon('file')}</span>
           <span class="maint-tool-copy"><b>生成 frpc 配置</b><small>选择用户、添加隧道，下载配置与部署脚本</small></span>
-        </button>
-        <button type="button" class="maint-tool" onclick="openPwdModal()">
-          <span class="maint-tool-icon green">${stIcon('key')}</span>
-          <span class="maint-tool-copy"><b>修改登录密码</b><small>修改当前管理员账号的登录密码</small></span>
         </button>
       </div>
     </section>

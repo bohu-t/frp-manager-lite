@@ -1963,3 +1963,11 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .maint-table table{width:100%;min-width:460px;table-layout:auto}
 .maint-table th,.maint-table td{white-space:nowrap}
 .maint-table td:nth-child(2){white-space:normal}
+.sidebar-user-wrap{position:relative}
+.sidebar-user-card{cursor:pointer}
+.sidebar-user-more{margin-left:auto;color:var(--muted);font-size:16px;line-height:1}
+.user-menu{position:absolute;left:12px;right:12px;bottom:calc(100% + 8px);background:var(--panel2);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.28);padding:6px;display:flex;flex-direction:column;gap:2px;z-index:60}
+.user-menu.hidden{display:none}
+.user-menu button{display:flex;align-items:center;gap:8px;width:100%;padding:9px 10px;border:0;border-radius:8px;background:transparent;color:var(--text);font-size:13px;text-align:left;cursor:pointer}
+.user-menu button:hover{background:rgba(56,189,248,.1)}
+.user-menu button.danger{color:#fb7185}
