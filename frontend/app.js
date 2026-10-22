@@ -1554,6 +1554,19 @@ function ticketBodyHtml(c){
   return esc(raw).replace(/\n/g, '<br>');
 }
 
+async function uploadImage(file, kind){
+  if(!file || !file.type || !file.type.startsWith('image/')) throw new Error('请选择图片文件');
+  if(file.size > 3 * 1024 * 1024) throw new Error('图片不能超过 3MB');
+  const dataUrl = await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(new Error('读取图片失败'));
+    fr.readAsDataURL(file);
+  });
+  const r = await api('/api/user/upload', {method:'POST', body:{kind, mime:file.type, data:dataUrl}});
+  return r.token;
+}
+
 function attsHtml(tokens){
   const list = Array.isArray(tokens) ? tokens : [];
   if(!list.length) return '';
@@ -1723,6 +1736,18 @@ async function loadTicketDetail(id, scope){
       await loadTicketDetail(t.id, scope);
     }catch(err){ show(err.message || '发送失败', true); btn.disabled = false; }
   };
+}
+
+function renderTicketAtts(){
+  const box = document.querySelector('#tkAtts');
+  if(!box) return;
+  const list = window.__tkAtts || [];
+  box.innerHTML = list.map((tok, i) => `<span class="tk-att"><img src="/api/upload/${encodeURIComponent(tok)}" alt=""><button type="button" onclick="removeTicketAtt(${i})">×</button></span>`).join('');
+}
+
+function removeTicketAtt(i){
+  (window.__tkAtts || []).splice(i, 1);
+  renderTicketAtts();
 }
 
 function renderReplyAtts(){
