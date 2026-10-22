@@ -6346,6 +6346,19 @@ class Handler(BaseHTTPRequestHandler):
                 rows = conn.execute("SELECT * FROM payouts WHERE user_id=? ORDER BY id DESC LIMIT 50", (int(user["id"]),)).fetchall()
             self.send_json({"ok": True, "payouts": [payout_public(r) for r in rows], "income": provider_income_balance(conn, int(user["id"]))})
             return
+        if path == "/api/tickets/summary":
+            with db() as conn:
+                if user["role"] == "admin":
+                    count = conn.execute("SELECT COUNT(*) FROM tickets WHERE status='open'").fetchone()[0]
+                else:
+                    own = conn.execute("SELECT COUNT(*) FROM tickets WHERE user_id=? AND status='processing'", (int(user["id"]),)).fetchone()[0]
+                    owner = conn.execute(
+                        """SELECT COUNT(*) FROM tickets t JOIN nodes n ON n.id=t.node_id
+                           WHERE n.owner_id=? AND t.status='open' AND t.user_id<>?""",
+                        (int(user["id"]), int(user["id"]))).fetchone()[0]
+                    count = int(own or 0) + int(owner or 0)
+            self.send_json({"ok": True, "count": int(count or 0)})
+            return
         if path == "/api/user/tickets":
             qs = urllib.parse.parse_qs(urlparse(self.path).query)
             tid = int_or_none((qs.get("id") or [""])[0])

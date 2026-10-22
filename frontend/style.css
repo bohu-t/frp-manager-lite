@@ -2025,3 +2025,5 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .ann-card{border:0;background:transparent;padding:0 2px;border-radius:0}
 .ann-card-head{margin-bottom:6px}
 .ann-node{padding-bottom:22px}
+.side-dot{width:7px;height:7px;border-radius:50%;background:#e5484d;margin-left:auto;margin-right:4px;flex:0 0 7px}
+.side-dot.hidden{display:none}

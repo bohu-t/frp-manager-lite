@@ -793,18 +793,18 @@ function appSidebarHtml(kind='dashboard'){
   const ticketActive = ticketItems.some(([a]) => kind === a);
   const stored = localStorage.getItem('sideTicketsOpen');
   const open = ticketActive || stored === '1';
-  const groupBlock = (label, items, key, icon) => {
+  const groupBlock = (label, items, key, icon, dotId) => {
     const active = items.some(([a]) => kind === a);
     const stored = localStorage.getItem(key);
     const open = active || stored === '1';
     return `<div class="side-group">
       <button type="button" class="side-link side-group-toggle${active ? ' active' : ''}" data-group="${key}" onclick="toggleSideGroup(this)" aria-expanded="${open ? 'true' : 'false'}">
-        ${sideIcon(icon)}<span class="side-link-label">${label}</span><span class="side-group-chevron">›</span>
+        ${sideIcon(icon)}<span class="side-link-label">${label}</span>${dotId ? `<span class="side-dot hidden" id="${dotId}"></span>` : ''}<span class="side-group-chevron">›</span>
       </button>
       <div class="side-subnav${open ? ' open' : ''}">${items.map(x => linkHtml(x, true)).join('')}</div>
     </div>`;
   };
-  const ticketsBlock = groupBlock('技术支持', ticketItems, 'sideTicketsOpen', 'log');
+  const ticketsBlock = groupBlock('技术支持', ticketItems, 'sideTicketsOpen', 'log', 'ticketDot');
   const brandName = 'Frp 管理台';
   const brandSub = '内网穿透管理平台';
   return `<aside class="app-sidebar">
@@ -857,6 +857,16 @@ async function loadNotifications(){
     window.__annUnread = Number(r.unseen_announcements ?? 0);
     renderNotifBadge();
   }catch(e){}
+  try{
+    const s = await api('/api/tickets/summary');
+    updateTicketDot(Number(s.count || 0));
+  }catch(e){}
+}
+
+function updateTicketDot(count){
+  const el = document.querySelector('#ticketDot');
+  if(!el) return;
+  el.classList.toggle('hidden', !(count > 0));
 }
 
 function renderNotifBadge(){
