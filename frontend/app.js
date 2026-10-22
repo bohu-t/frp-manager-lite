@@ -879,7 +879,10 @@ function notifModalHtml(){
   const list = window.__notifs || [];
   const anns = window.__announcements || [];
   const notifHtml = list.length ? list.map(n => `<button type="button" class="notif-item${Number(n.read_at) ? '' : ' unread'}" onclick="openNotif(${n.id}, '${esc(n.link || '')}')"><b>${esc(n.title)}</b><span>${esc(n.content || '')}</span><small>${fmtTs(n.created_at)}</small></button>`).join('') : '<div class="notif-empty">暂无通知</div>';
-  const annHtml = anns.length ? anns.map(a => `<article class="ann-item"><div class="ann-head"><b>${esc(a.title)}</b><small>${fmtTs(a.created_at)}</small></div><p>${ticketBodyHtml(a.content)}</p></article>`).join('') : '<div class="notif-empty">暂无系统公告</div>';
+  const annHtml = anns.length ? anns.map(a => `<article class="ann-item">
+      <div class="ann-head"><b>${esc(a.title)}</b><small>${fmtTs(a.created_at)}</small></div>
+      <div class="ann-body">${ticketBodyHtml(a.content)}</div>
+    </article>`).join('') : '<div class="notif-empty">暂无系统公告</div>';
   return `<div class="modal-backdrop" id="notifModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeNotifModal()">
     <section class="modal-page card notif-modal">
       <div class="notif-head-bar">
@@ -896,7 +899,7 @@ function notifModalHtml(){
       <div class="notif-foot">
         ${notifTab === 'notif'
           ? `<button type="button" class="notif-btn" onclick="markAllNotifsRead()">全部标为已读</button>`
-          : `<button type="button" class="notif-btn" onclick="dismissAnnToday()">今日关闭</button><button type="button" class="notif-btn primary" onclick="dismissAnnForever()">关闭公告</button>`}
+          : `<button type="button" class="notif-btn" onclick="dismissAnnToday()">今日不再提示</button><button type="button" class="notif-btn primary" onclick="dismissAnnForever()">关闭公告</button>`}
       </div>
     </section></div>`;
 }
