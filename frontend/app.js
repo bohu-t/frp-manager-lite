@@ -2320,6 +2320,7 @@ async function loadMyPlans(){
         <div><span>流量</span><b>${esc(quotaText)}</b></div>
         <div><span>带宽 / 月流量上限</span><b>${bw > 0 ? bw + ' Mbps' : '不限'} / ${limitGb > 0 ? usedGb + '/' + limitGb + ' GB' : '不限'}</b></div>
         <div><span>接入地址</span><b>${esc(n.server_addr || '-')}:${esc(n.server_port ?? '')}</b></div>
+        <div><span>frps 版本</span><b>${esc(n.frps_version || '-')}</b></div>
       </div>
       <div class="my-node-foot">
         <div class="my-node-foot-row"><span>续费价格</span><b class="my-node-price-val">${Number((planById[Number(p.plan_id)] || {}).price_points ?? p.price_points ?? 0)} 积分</b></div>
