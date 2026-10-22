@@ -2121,19 +2121,23 @@ function renderNewNode(){
     const note = String(n.note || '').trim();
     const stateClass = exceeded ? 'exhausted' : (online ? 'online' : 'maintenance');
     const stateText = exceeded ? '流量用尽' : (online ? '在线' : '维护中');
-    return `<button type="button" class="nn-node-card srv${active ? ' active' : ''}${exceeded ? ' disabled' : ''}" ${exceeded ? 'disabled' : ''} onclick="nnPickNode(${Number(n.id)})">
-      <span class="nn-node-head">
-        <span class="nn-node-icon">${stIcon('node')}</span>
-        <b class="nn-node-name">${esc(n.name || '')}</b>
-        <span class="nn-node-badge ${stateClass}">${stateClass === 'maintenance' ? '🔧' : (stateClass === 'online' ? '●' : '!')} ${stateText}</span>
+    const icoCube = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6 21 7.2v9.6L12 21.4 3 16.8V7.2z" fill="#2F6FED"/><path d="M12 2.6 21 7.2 12 11.8 3 7.2z" fill="#5B93FF"/><path d="M12 11.8v9.6L3 16.8V7.2z" fill="#1E56C8"/></svg>';
+    const icoCal = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.4" fill="#3FBF7F"/><rect x="3.5" y="5" width="17" height="4.4" rx="2.4" fill="#2EA968"/><path d="M8 3v4M16 3v4" stroke="#1E8A52" stroke-width="1.8" stroke-linecap="round"/><path d="M7.5 13h2.2M11 13h2.2M14.5 13h2.2M7.5 16.4h2.2M11 16.4h2.2" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg>';
+    const icoClock = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.6" fill="none" stroke="#8B5CF6" stroke-width="2.2"/><path d="M12 7.4V12l3.1 1.9" fill="none" stroke="#8B5CF6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M19.6 4.6v3.4h-3.4" fill="none" stroke="#8B5CF6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    const icoDb = '<svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6.2" rx="7.2" ry="2.8" fill="#22C3D6"/><path d="M4.8 6.2v5.4c0 1.5 3.2 2.8 7.2 2.8s7.2-1.3 7.2-2.8V6.2" fill="#1AA9BC"/><path d="M4.8 11.6V17c0 1.5 3.2 2.8 7.2 2.8s7.2-1.3 7.2-2.8v-5.4" fill="#22C3D6"/></svg>';
+    return `<button type="button" class="nn-node-card srv2${active ? ' active' : ''}${exceeded ? ' disabled' : ''}" ${exceeded ? 'disabled' : ''} onclick="nnPickNode(${Number(n.id)})">
+      <span class="nn-hero">
+        <span class="nn-hero-icon">${stIcon('node')}</span>
+        <b class="nn-hero-name">${esc(n.name || '')}</b>
+        <span class="nn-hero-badge ${stateClass}">${stateClass === 'maintenance' ? '🔧' : (stateClass === 'online' ? '●' : '!')} ${stateText}</span>
       </span>
-      <span class="nn-node-specs">
-        <span class="nn-node-card-meta"><span>frps 版本</span><b>${esc(n.frps_version || '-')}</b></span>
-        <span class="nn-node-card-meta"><span>上架天数</span><b>${days} 天</b></span>
-        <span class="nn-node-card-meta"><span>最大续期时间</span><b>${n.expires_at ? fmtTs(n.expires_at).slice(0, 10) : '不限'}</b></span>
-        <span class="nn-node-card-meta"><span>月流量限制</span><b>${Number(n.monthly_traffic_gb || 0) > 0 ? Number(n.monthly_traffic_gb) + ' GB' : '不限'}</b></span>
+      <span class="nn-rows">
+        <span class="nn-row"><span class="nn-row-icon">${icoCube}</span><span class="nn-row-label">frps 版本</span><b class="nn-row-value">${esc(n.frps_version || '-')}</b></span>
+        <span class="nn-row"><span class="nn-row-icon">${icoCal}</span><span class="nn-row-label">上架天数</span><b class="nn-row-value">${days} 天</b></span>
+        <span class="nn-row"><span class="nn-row-icon">${icoClock}</span><span class="nn-row-label">最大续期时间</span><b class="nn-row-value">${n.expires_at ? fmtTs(n.expires_at).slice(0, 10) : '不限'}</b></span>
+        <span class="nn-row"><span class="nn-row-icon">${icoDb}</span><span class="nn-row-label">月流量限制</span><b class="nn-row-value">${Number(n.monthly_traffic_gb || 0) > 0 ? Number(n.monthly_traffic_gb) + ' GB' : '不限'}</b></span>
       </span>
-      <span class="nn-node-warn">⚠ ${esc(note || '合理使用严禁一切非法业务')}</span>
+      <span class="nn-warn-bar"><span class="nn-warn-mark">⚠</span><span class="nn-warn-sep"></span><b>${esc(note || '合理使用严禁一切非法业务')}</b></span>
     </button>`;
   }).join('') || emptyHint('该地区暂无可用实例')}</div>`;
 
