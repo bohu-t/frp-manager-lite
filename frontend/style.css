@@ -2054,3 +2054,17 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 .nn-node-card-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted)}
 .nn-node-card-meta b{color:var(--text);font-weight:600}
 .nn-node-card-note{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-top:1px dashed var(--line);padding-top:8px;margin-top:2px}
+.nn-node-card.srv{background:linear-gradient(180deg,rgba(240,247,255,.96),rgba(255,255,255,.98));border:1px solid #cfe2ff;border-radius:16px;padding:14px;gap:12px;box-shadow:0 8px 22px rgba(30,90,180,.08)}
+:root[data-theme="dark"] .nn-node-card.srv{background:linear-gradient(180deg,rgba(17,32,54,.96),rgba(15,26,44,.98));border-color:rgba(90,140,220,.35);box-shadow:none}
+.nn-node-head{display:flex;align-items:center;gap:10px}
+.nn-node-icon{width:34px;height:34px;border-radius:9px;background:rgba(22,119,255,.12);color:#1677FF;display:grid;place-items:center;flex:0 0 34px}
+.nn-node-icon svg{width:18px;height:18px}
+.nn-node-name{font-size:15px;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nn-node-badge{font-size:11px;padding:4px 9px;border-radius:999px;white-space:nowrap;font-weight:600}
+.nn-node-badge.online{background:rgba(52,211,153,.14);color:#0f9d68}
+.nn-node-badge.maintenance{background:rgba(250,140,22,.16);color:#d46b08}
+.nn-node-badge.exhausted{background:rgba(251,113,133,.16);color:#d9363e}
+.nn-node-specs{display:flex;flex-direction:column;gap:7px;padding:10px 0;border-top:1px dashed #d9e8ff;border-bottom:1px dashed #d9e8ff}
+:root[data-theme="dark"] .nn-node-specs{border-color:rgba(90,140,220,.25)}
+.nn-node-warn{display:block;background:rgba(250,140,22,.12);color:#b85c00;border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.5}
+.nn-node-card.srv .nn-node-card-note{display:none}

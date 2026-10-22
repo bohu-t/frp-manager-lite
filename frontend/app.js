@@ -2119,13 +2119,21 @@ function renderNewNode(){
     const limit = Number(n.monthly_traffic_gb || 0);
     const days = Math.max(0, Math.floor((Date.now() / 1000 - Number(n.created_at || 0)) / 86400));
     const note = String(n.note || '').trim();
-    return `<button type="button" class="nn-node-card${active ? ' active' : ''}${exceeded ? ' disabled' : ''}" ${exceeded ? 'disabled' : ''} onclick="nnPickNode(${Number(n.id)})">
-      <span class="nn-node-card-top"><b>${esc(n.name || '')}</b><span class="status-badge ${exceeded ? 'bad' : (online ? 'ok' : 'bad')}"><i></i>${exceeded ? '流量用尽' : (online ? '在线' : '维护中')}</span></span>
-      <span class="nn-node-card-meta"><span>frps 版本</span><b>${esc(n.frps_version || '-')}</b></span>
-      <span class="nn-node-card-meta"><span>上架天数</span><b>${days} 天</b></span>
-      <span class="nn-node-card-meta"><span>最大续期时间</span><b>${n.expires_at ? fmtTs(n.expires_at).slice(0, 10) : '不限'}</b></span>
-      <span class="nn-node-card-meta"><span>月流量限制</span><b>${Number(n.monthly_traffic_gb || 0) > 0 ? Number(n.monthly_traffic_gb) + ' GB' : '不限'}</b></span>
-      <span class="nn-node-card-note" title="${esc(note || '合理使用严禁一切非法业务')}">${esc(note || '合理使用严禁一切非法业务')}</span>
+    const stateClass = exceeded ? 'exhausted' : (online ? 'online' : 'maintenance');
+    const stateText = exceeded ? '流量用尽' : (online ? '在线' : '维护中');
+    return `<button type="button" class="nn-node-card srv${active ? ' active' : ''}${exceeded ? ' disabled' : ''}" ${exceeded ? 'disabled' : ''} onclick="nnPickNode(${Number(n.id)})">
+      <span class="nn-node-head">
+        <span class="nn-node-icon">${stIcon('node')}</span>
+        <b class="nn-node-name">${esc(n.name || '')}</b>
+        <span class="nn-node-badge ${stateClass}">${stateClass === 'maintenance' ? '🔧' : (stateClass === 'online' ? '●' : '!')} ${stateText}</span>
+      </span>
+      <span class="nn-node-specs">
+        <span class="nn-node-card-meta"><span>frps 版本</span><b>${esc(n.frps_version || '-')}</b></span>
+        <span class="nn-node-card-meta"><span>上架天数</span><b>${days} 天</b></span>
+        <span class="nn-node-card-meta"><span>最大续期时间</span><b>${n.expires_at ? fmtTs(n.expires_at).slice(0, 10) : '不限'}</b></span>
+        <span class="nn-node-card-meta"><span>月流量限制</span><b>${Number(n.monthly_traffic_gb || 0) > 0 ? Number(n.monthly_traffic_gb) + ' GB' : '不限'}</b></span>
+      </span>
+      <span class="nn-node-warn">⚠ ${esc(note || '合理使用严禁一切非法业务')}</span>
     </button>`;
   }).join('') || emptyHint('该地区暂无可用实例')}</div>`;
 
