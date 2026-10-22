@@ -2022,3 +2022,6 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 }
 .ann-timeline:before{bottom:18px}
 .ann-card-head small{color:var(--soft)}
+.ann-card{border:0;background:transparent;padding:0 2px;border-radius:0}
+.ann-card-head{margin-bottom:6px}
+.ann-node{padding-bottom:22px}
