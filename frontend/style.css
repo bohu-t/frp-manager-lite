@@ -2050,3 +2050,4 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 .nn-chip:hover{border-color:#1677FF}
 .nn-chip.active{border-color:#1677FF;background:#eef5ff}
 .nn-chip-flag{display:block;width:100%;text-align:center}
+.nn-chip .nn-chip-copy{align-items:center;text-align:center;width:100%}
