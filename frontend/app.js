@@ -2092,13 +2092,13 @@ function renderNewNode(){
     const exceeded = !!n.traffic_exceeded;
     const used = Number(n.month_used_gb || 0);
     const limit = Number(n.monthly_traffic_gb || 0);
+    const days = Math.max(0, Math.floor((Date.now() / 1000 - Number(n.created_at || 0)) / 86400));
+    const note = String(n.note || '').trim();
     return `<button type="button" class="nn-node-card${active ? ' active' : ''}${exceeded ? ' disabled' : ''}" ${exceeded ? 'disabled' : ''} onclick="nnPickNode(${Number(n.id)})">
-      <span class="nn-node-card-top"><b>${esc(n.region || '')} - ${esc(n.name || '')}</b><span class="status-badge ${exceeded ? 'bad' : (online ? 'ok' : 'bad')}"><i></i>${exceeded ? '流量用尽' : (online ? '在线' : '维护中')}</span></span>
-      <span class="nn-node-card-mid"><b>${esc(n.name || '')}</b><small>${esc(n.server_addr || '')}</small><small>端口：${esc(n.server_port ?? '')}</small></span>
-      <span class="nn-node-card-stats">
-        <span><small>空闲端口</small><b>${Number(n.free_count || 0)}/${Number(n.port_count || 0)}</b></span>
-        <span><small>流量使用</small><b>${used} GB / ${limit > 0 ? limit + ' GB' : '不限'}</b></span>
-      </span>
+      <span class="nn-node-card-top"><b>${esc(n.name || '')}</b><span class="status-badge ${exceeded ? 'bad' : (online ? 'ok' : 'bad')}"><i></i>${exceeded ? '流量用尽' : (online ? '在线' : '维护中')}</span></span>
+      <span class="nn-node-card-meta"><span>frps 版本</span><b>${esc(n.frps_version || '-')}</b></span>
+      <span class="nn-node-card-meta"><span>上架天数</span><b>${days} 天</b></span>
+      <span class="nn-node-card-note" title="${esc(note)}">${esc(note || '—')}</span>
     </button>`;
   }).join('') || emptyHint('该地区暂无可用实例')}</div>`;
 

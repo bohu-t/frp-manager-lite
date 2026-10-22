@@ -2048,3 +2048,9 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 .nn-chip-line{display:block;height:1px;background:var(--line);margin:2px 0}
 .nn-chip-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted)}
 .nn-chip-foot b{color:#1677FF;font-size:13px}
+.nn-node-card{display:flex;flex-direction:column;gap:6px;align-items:stretch;text-align:left}
+.nn-node-card-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.nn-node-card-top b{font-size:15px;color:var(--text)}
+.nn-node-card-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted)}
+.nn-node-card-meta b{color:var(--text);font-weight:600}
+.nn-node-card-note{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-top:1px dashed var(--line);padding-top:8px;margin-top:2px}
