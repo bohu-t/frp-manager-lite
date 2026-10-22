@@ -478,8 +478,9 @@ function relTime(ts){
   if(diff < 60) return '刚刚';
   if(diff < 3600) return `${Math.floor(diff/60)} 分钟前`;
   if(diff < 86400) return `${Math.floor(diff/3600)} 小时前`;
-  if(diff < 86400*7) return `${Math.floor(diff/86400)} 天前`;
-  return new Date(t*1000).toLocaleDateString('zh-CN');
+  if(diff < 86400*30) return `${Math.floor(diff/86400)} 天前`;
+  if(diff < 86400*365) return `${Math.floor(diff/86400/30)} 个月前`;
+  return `${Math.floor(diff/86400/365)} 年前`;
 }
 
 const PROTO_COLORS = {tcp:'#3b82f6', udp:'#22c55e', http:'#f59e0b', https:'#8b5cf6', stcp:'#06b6d4', xtcp:'#ec4899', tcpmux:'#64748b'};
@@ -879,10 +880,13 @@ function notifModalHtml(){
   const list = window.__notifs || [];
   const anns = window.__announcements || [];
   const notifHtml = list.length ? list.map(n => `<button type="button" class="notif-item${Number(n.read_at) ? '' : ' unread'}" onclick="openNotif(${n.id}, '${esc(n.link || '')}')"><b>${esc(n.title)}</b><span>${esc(n.content || '')}</span><small>${fmtTs(n.created_at)}</small></button>`).join('') : '<div class="notif-empty">暂无通知</div>';
-  const annHtml = anns.length ? anns.map(a => `<article class="ann-item">
-      <div class="ann-head"><b>${esc(a.title)}</b><small>${fmtTs(a.created_at)}</small></div>
-      <div class="ann-body">${ticketBodyHtml(a.content)}</div>
-    </article>`).join('') : '<div class="notif-empty">暂无系统公告</div>';
+  const annHtml = anns.length ? `<div class="ann-timeline">${anns.map((a, i) => `<article class="ann-node ${i % 2 ? 'left' : 'right'}">
+      <span class="ann-node-dot"></span>
+      <div class="ann-card">
+        <div class="ann-card-head"><b>${esc(a.title)}</b><small>${relTime(a.created_at)}</small></div>
+        <div class="ann-body">${ticketBodyHtml(a.content)}</div>
+      </div>
+    </article>`).join('')}</div>` : '<div class="notif-empty">暂无系统公告</div>';
   return `<div class="modal-backdrop" id="notifModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeNotifModal()">
     <section class="modal-page card notif-modal">
       <div class="notif-head-bar">
