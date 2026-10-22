@@ -2040,14 +2040,21 @@ function renderNewNode(){
     if(!list.length) return null;
     return Math.min(...list.map(p => Number(p.price_points || 0)));
   };
+  const CN_REGION = /中国|河南|河北|山东|山西|陕西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|湖北|湖南|广东|广西|海南|四川|贵州|云南|甘肃|青海|宁夏|新疆|西藏|内蒙古|北京|上海|天津|重庆|香港|澳门|台湾/;
   const regionFlag = (name) => {
     const text = String(name || '');
-    const hk = /香港|澳门|台湾/.test(text);
-    if(!hk && /中国|河南|河北|山东|山西|陕西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|湖北|湖南|广东|广西|海南|四川|贵州|云南|甘肃|青海|宁夏|新疆|西藏|内蒙古|北京|上海|天津|重庆/.test(text)){
-      return '🌸';
-    }
-    const map = {'中国':'🇨🇳','中国大陆':'🇨🇳','香港':'🇭🇰','澳门':'🇲🇴','台湾':'🇹🇼','美国':'🇺🇸','日本':'🇯🇵','新加坡':'🇸🇬','欧洲':'🇪🇺','韩国':'🇰🇷','英国':'🇬🇧','德国':'🇩🇪','法国':'🇫🇷','荷兰':'🇳🇱','加拿大':'🇨🇦','澳大利亚':'🇦🇺','俄罗斯':'🇷🇺','印度':'🇮🇳','泰国':'🇹🇭','越南':'🇻🇳','马来西亚':'🇲🇾','菲律宾':'🇵🇭','土耳其':'🇹🇷','巴西':'🇧🇷'};
-    return map[text] || '🌍';
+    if(/香港/.test(text)) return '🇭🇰';
+    if(/澳门/.test(text)) return '🇲🇴';
+    if(/台湾/.test(text)) return '🇹🇼';
+    if(CN_REGION.test(text)) return '🇨🇳';
+    const map = {'美国':'🇺🇸','日本':'🇯🇵','新加坡':'🇸🇬','欧洲':'🇪🇺','韩国':'🇰🇷','英国':'🇬🇧','德国':'🇩🇪','法国':'🇫🇷','荷兰':'🇳🇱','加拿大':'🇨🇦','澳大利亚':'🇦🇺','俄罗斯':'🇷🇺','印度':'🇮🇳','泰国':'🇹🇭','越南':'🇻🇳','马来西亚':'🇲🇾','菲律宾':'🇵🇭','土耳其':'🇹🇷','巴西':'🇧🇷'};
+    return map[text] || '🌐';
+  };
+  const regionLabel = (name) => {
+    const text = String(name || '');
+    if(/香港|澳门|台湾/.test(text)) return `【中国·${text}】`;
+    if(CN_REGION.test(text)) return `【中国·${text.replace(/^中国[·\s]*/, '')}】`;
+    return text;
   };
   const emptyHint = (text) => `<div class="nn-empty">${stIcon('node')}<p>${text}</p></div>`;
   const currentStep = !nnState.region ? 1 : (!nnState.nodeId ? 2 : (!nnState.planId ? 3 : 4));
@@ -2069,9 +2076,12 @@ function renderNewNode(){
   const step1 = `<div class="nn-region-chips">${regionNames.map(name => {
     const active = nnState.region === name;
     const min = regionPrice(name);
+    const count = (regions[name] || []).length;
     return `<button type="button" class="nn-chip${active ? ' active' : ''}" onclick="nnPickRegion('${esc(name)}')">
       <span class="nn-chip-flag">${regionFlag(name)}</span>
-      <span class="nn-chip-copy"><b>${esc(name)}</b><small>${min === null ? '暂无套餐' : '价格 ¥' + min + ' 起'}</small></span>
+      <span class="nn-chip-name">${esc(regionLabel(name))}</span>
+      <span class="nn-chip-line"></span>
+      <span class="nn-chip-foot"><span>${count} 个节点</span><b>${min === null ? '暂无套餐' : '¥' + min + ' 起'}</b></span>
     </button>`;
   }).join('') || emptyHint('暂无可用地区')}</div>`;
 
