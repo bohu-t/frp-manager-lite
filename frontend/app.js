@@ -786,14 +786,14 @@ function appSidebarHtml(kind='dashboard'){
     ['dashboard-payouts','key','提现工单'],
     ['dashboard-hosts','cloud','托管申请']
   ];
-  const linkHtml = ([action, icon, label, section], sub) => {
+  const linkHtml = ([action, icon, label, section], sub, dotId) => {
     const active = kind === action || (section && kind === section) ? ' active' : '';
-    return `<button class="side-link${sub ? ' side-sublink' : ''}${active}" data-nav="${action}"${section ? ` data-section="${section}"` : ''}>${sideIcon(icon)}<span class="side-link-label">${label}</span><span class="side-link-arrow">›</span></button>`;
+    return `<button class="side-link${sub ? ' side-sublink' : ''}${active}" data-nav="${action}"${section ? ` data-section="${section}"` : ''}>${sideIcon(icon)}<span class="side-link-label">${label}</span>${dotId ? `<span class="side-dot hidden" id="${dotId}"></span>` : ''}<span class="side-link-arrow">›</span></button>`;
   };
   const ticketActive = ticketItems.some(([a]) => kind === a);
   const stored = localStorage.getItem('sideTicketsOpen');
   const open = ticketActive || stored === '1';
-  const groupBlock = (label, items, key, icon, dotId) => {
+  const groupBlock = (label, items, key, icon, dotId, dotIds) => {
     const active = items.some(([a]) => kind === a);
     const stored = localStorage.getItem(key);
     const open = active || stored === '1';
@@ -801,10 +801,10 @@ function appSidebarHtml(kind='dashboard'){
       <button type="button" class="side-link side-group-toggle${active ? ' active' : ''}" data-group="${key}" onclick="toggleSideGroup(this)" aria-expanded="${open ? 'true' : 'false'}">
         ${sideIcon(icon)}<span class="side-link-label">${label}</span>${dotId ? `<span class="side-dot hidden" id="${dotId}"></span>` : ''}<span class="side-group-chevron">›</span>
       </button>
-      <div class="side-subnav${open ? ' open' : ''}">${items.map(x => linkHtml(x, true)).join('')}</div>
+      <div class="side-subnav${open ? ' open' : ''}">${items.map((x, i) => linkHtml(x, true, (dotIds || [])[i])).join('')}</div>
     </div>`;
   };
-  const ticketsBlock = groupBlock('技术支持', ticketItems, 'sideTicketsOpen', 'log', 'ticketDot');
+  const ticketsBlock = groupBlock('技术支持', ticketItems, 'sideTicketsOpen', 'log', 'ticketDot', ['ticketDotTickets', 'ticketDotPayouts', 'ticketDotHosts']);
   const brandName = 'Frp 管理台';
   const brandSub = '内网穿透管理平台';
   return `<aside class="app-sidebar">
@@ -859,12 +859,15 @@ async function loadNotifications(){
   }catch(e){}
   try{
     const s = await api('/api/tickets/summary');
-    updateTicketDot(Number(s.count || 0));
+    setSideDot('ticketDot', Number(s.count || 0));
+    setSideDot('ticketDotTickets', Number(s.tickets || 0));
+    setSideDot('ticketDotPayouts', Number(s.payouts || 0));
+    setSideDot('ticketDotHosts', Number(s.hosts || 0));
   }catch(e){}
 }
 
-function updateTicketDot(count){
-  const el = document.querySelector('#ticketDot');
+function setSideDot(id, count){
+  const el = document.querySelector('#' + id);
   if(!el) return;
   el.classList.toggle('hidden', !(count > 0));
 }

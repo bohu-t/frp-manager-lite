@@ -6349,15 +6349,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/tickets/summary":
             with db() as conn:
                 if user["role"] == "admin":
-                    count = conn.execute("SELECT COUNT(*) FROM tickets WHERE status='open'").fetchone()[0]
+                    t_count = conn.execute("SELECT COUNT(*) FROM tickets WHERE status='open'").fetchone()[0]
+                    p_count = conn.execute("SELECT COUNT(*) FROM payouts WHERE status='pending'").fetchone()[0]
+                    h_count = conn.execute("SELECT COUNT(*) FROM hosts WHERE status='pending'").fetchone()[0]
                 else:
-                    own = conn.execute("SELECT COUNT(*) FROM tickets WHERE user_id=? AND status='processing'", (int(user["id"]),)).fetchone()[0]
-                    owner = conn.execute(
+                    t_own = conn.execute("SELECT COUNT(*) FROM tickets WHERE user_id=? AND status='processing'", (int(user["id"]),)).fetchone()[0]
+                    t_owner = conn.execute(
                         """SELECT COUNT(*) FROM tickets t JOIN nodes n ON n.id=t.node_id
                            WHERE n.owner_id=? AND t.status='open' AND t.user_id<>?""",
                         (int(user["id"]), int(user["id"]))).fetchone()[0]
-                    count = int(own or 0) + int(owner or 0)
-            self.send_json({"ok": True, "count": int(count or 0)})
+                    t_count = int(t_own or 0) + int(t_owner or 0)
+                    p_count = 0
+                    h_count = conn.execute("SELECT COUNT(*) FROM hosts WHERE user_id=? AND status='pending'", (int(user["id"]),)).fetchone()[0]
+                total = int(t_count or 0) + int(p_count or 0) + int(h_count or 0)
+            self.send_json({"ok": True, "count": total, "tickets": int(t_count or 0), "payouts": int(p_count or 0), "hosts": int(h_count or 0)})
             return
         if path == "/api/user/tickets":
             qs = urllib.parse.parse_qs(urlparse(self.path).query)
