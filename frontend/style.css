@@ -1971,3 +1971,14 @@ html[data-theme="dark"] .node-pool-track{background:#0f172a}
 .user-menu button{display:flex;align-items:center;gap:8px;width:100%;padding:9px 10px;border:0;border-radius:8px;background:transparent;color:var(--text);font-size:13px;text-align:left;cursor:pointer}
 .user-menu button:hover{background:rgba(56,189,248,.1)}
 .user-menu button.danger{color:#fb7185}
+.notif-head-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
+.notif-head-title{display:flex;align-items:center;gap:8px}
+.notif-head-title h2{margin:0;font-size:17px;color:var(--text)}
+.notif-close{width:32px;height:32px;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:20px;line-height:1;cursor:pointer}
+.notif-close:hover{background:var(--elevated);color:var(--text)}
+.notif-tabs{display:flex;gap:18px;border-bottom:1px solid var(--line);margin-top:6px}
+.notif-tabs .seg-tab{display:inline-flex;align-items:center;gap:6px;padding:10px 2px}
+.notif-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 2px 2px;border-top:1px solid var(--line)}
+.notif-btn{height:34px;padding:0 16px;border:1px solid var(--line);border-radius:8px;background:var(--elevated);color:var(--accent);font-size:13px;cursor:pointer}
+.notif-btn:hover{border-color:var(--accent)}
+.notif-btn.primary{background:rgba(56,189,248,.12);border-color:rgba(56,189,248,.35)}

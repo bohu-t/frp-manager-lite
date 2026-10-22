@@ -882,15 +882,50 @@ function notifModalHtml(){
   const annHtml = anns.length ? anns.map(a => `<article class="ann-item"><div class="ann-head"><b>${esc(a.title)}</b><small>${fmtTs(a.created_at)}</small></div><p>${ticketBodyHtml(a.content)}</p></article>`).join('') : '<div class="notif-empty">暂无系统公告</div>';
   return `<div class="modal-backdrop" id="notifModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeNotifModal()">
     <section class="modal-page card notif-modal">
-      <div class="section-title modal-title"><div><h2>通知中心</h2><p>工单、提现与系统公告</p></div><button type="button" class="secondary modal-close" onclick="closeNotifModal()">关闭 ×</button></div>
+      <div class="notif-head-bar">
+        <div class="notif-head-title">${stIcon('bell')}<h2>系统公告</h2></div>
+        <button type="button" class="notif-close" onclick="closeNotifModal()" aria-label="关闭">×</button>
+      </div>
       <nav class="seg-tabs notif-tabs">
-        <button type="button" class="seg-tab${notifTab === 'notif' ? ' active' : ''}" onclick="switchNotifTab('notif')">通知${(window.__notifUnread||0) > 0 ? `<span>${window.__notifUnread}</span>` : ''}</button>
-        <button type="button" class="seg-tab${notifTab === 'ann' ? ' active' : ''}" onclick="switchNotifTab('ann')">系统公告${Number(window.__annUnread||0) > 0 ? `<span>${window.__annUnread}</span>` : ''}</button>
+        <button type="button" class="seg-tab${notifTab === 'notif' ? ' active' : ''}" onclick="switchNotifTab('notif')">${stIcon('bell')}通知${(window.__notifUnread||0) > 0 ? `<span>${window.__notifUnread}</span>` : ''}</button>
+        <button type="button" class="seg-tab${notifTab === 'ann' ? ' active' : ''}" onclick="switchNotifTab('ann')">${stIcon('log')}系统公告${Number(window.__annUnread||0) > 0 ? `<span>${window.__annUnread}</span>` : ''}</button>
       </nav>
       <div class="notif-body">
-        ${notifTab === 'notif' ? `<div class="notif-list">${notifHtml}</div><div class="notif-foot"><button type="button" class="link-btn" onclick="markAllNotifsRead()">全部标为已读</button></div>` : `<div class="ann-list">${annHtml}</div>`}
+        ${notifTab === 'notif' ? `<div class="notif-list">${notifHtml}</div>` : `<div class="ann-list">${annHtml}</div>`}
+      </div>
+      <div class="notif-foot">
+        ${notifTab === 'notif'
+          ? `<button type="button" class="notif-btn" onclick="markAllNotifsRead()">全部标为已读</button>`
+          : `<button type="button" class="notif-btn" onclick="dismissAnnToday()">今日关闭</button><button type="button" class="notif-btn primary" onclick="dismissAnnForever()">关闭公告</button>`}
       </div>
     </section></div>`;
+}
+
+function dismissAnnToday(){
+  localStorage.setItem('annDismissDate', new Date().toISOString().slice(0, 10));
+  closeNotifModal();
+}
+
+async function dismissAnnForever(){
+  try{ await api('/api/notifications/read', {method:'POST', body:{announcements:true}}); }catch(e){}
+  closeNotifModal();
+  await loadNotifications();
+}
+
+async function maybeShowAnnouncements(){
+  if(!currentUser) return;
+  const today = new Date().toISOString().slice(0, 10);
+  if(localStorage.getItem('annDismissDate') === today) return;
+  if(sessionStorage.getItem('annAutoShown') === '1') return;
+  try{
+    const r = await api('/api/notifications');
+    if(Number(r.unseen_announcements || 0) > 0){
+      sessionStorage.setItem('annAutoShown', '1');
+      notifTab = 'ann';
+      await loadAnnouncements();
+      await openNotifModal();
+    }
+  }catch(e){}
 }
 
 async function openNotifModal(){
@@ -953,6 +988,7 @@ function setNav(){
   document.body.classList.toggle('is-app', !!currentUser);
   if(currentUser){
     setTimeout(loadNotifications, 0);
+    setTimeout(maybeShowAnnouncements, 1200);
     if(!window.__notifTimer) window.__notifTimer = setInterval(loadNotifications, 60000);
   }
   document.body.classList.toggle('is-auth', !currentUser);
