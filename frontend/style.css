@@ -2244,3 +2244,6 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 /* 筛选条真正靠右对齐 */
 .nn-block-region .nn-head-copy{margin-right:0}
 .nn-toolbar{margin-left:auto;margin-right:0}
+/* 价格区间输入框加宽，保证占位文字完整可见 */
+.nn-price-range{padding:0 6px;gap:3px}
+.nn-price-range input{width:56px;font-size:11px;padding:0 2px}
