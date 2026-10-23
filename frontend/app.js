@@ -781,6 +781,7 @@ function appSidebarHtml(kind='dashboard'){
     ['dashboard-myplans','license','我的实例'],
     ['dashboard-nodes','node','新建实例'],
     '__tickets__',
+    ['dashboard-hosts','cloud','托管申请'],
     ['dashboard-points','bolt','账单与充值'],
     ['dashboard-profile','user','个人中心']
   ];
@@ -794,8 +795,7 @@ function appSidebarHtml(kind='dashboard'){
     ['admin-hosts','cloud','托管申请']
   ] : [
     ['dashboard-tickets','log','故障工单'],
-    ['dashboard-payouts','key','提现工单'],
-    ['dashboard-hosts','cloud','托管申请']
+    ['dashboard-payouts','key','提现工单']
   ];
   const linkHtml = ([action, icon, label, section], sub, dotId) => {
     const active = kind === action || (section && kind === section) ? ' active' : '';
