@@ -4402,7 +4402,7 @@ def payment_config(conn: sqlite3.Connection) -> dict[str, Any]:
         "wechat_appid": setting_get(conn, "wechat_appid", ""),
         "wechat_mch_id": setting_get(conn, "wechat_mch_id", ""),
         "wechat_api_key": setting_get(conn, "wechat_api_key", ""),
-        "points_per_yuan": max(1, int(setting_get(conn, "points_per_yuan", "1") or 1)),
+        "points_per_yuan": 1,
         "refund_fee_percent": max(0, min(100, int(setting_get(conn, "refund_fee_percent", "10") or 10))),
     }
 
@@ -4451,7 +4451,7 @@ def payment_public(cfg: dict[str, Any]) -> dict[str, Any]:
         "alipay_gateway": cfg.get("alipay_gateway", DEFAULT_ALIPAY_GATEWAY),
         "wechat_appid": cfg.get("wechat_appid", ""),
         "wechat_mch_id": cfg.get("wechat_mch_id", ""),
-        "points_per_yuan": int(cfg.get("points_per_yuan") or 1),
+        "points_per_yuan": 1,
         "refund_fee_percent": int(cfg.get("refund_fee_percent") or 10),
         "alipay_configured": bool(cfg.get("alipay_app_id") and cfg.get("alipay_private_key") and cfg.get("alipay_public_key")),
         "wechat_configured": bool(cfg.get("wechat_appid") and cfg.get("wechat_mch_id") and cfg.get("wechat_api_key")),
@@ -5300,7 +5300,7 @@ def create_points_order(user: sqlite3.Row, points: int, provider: str = "") -> t
         return False, "充值积分必须在 1-1000000 之间", None
     with db() as conn:
         cfg = payment_config(conn)
-        rate = max(1, int(setting_get(conn, "points_per_yuan", "1") or 1))
+        rate = 1
     enabled = enabled_payment_providers(cfg)
     if not enabled:
         return False, "管理员未配置在线支付，请使用密钥充值", None
@@ -6518,7 +6518,7 @@ class Handler(BaseHTTPRequestHandler):
                 args.append(end_ts)
             clause = (" WHERE " + " AND ".join(where)) if where else ""
             with db() as conn:
-                rate = max(1, int(setting_get(conn, "points_per_yuan", "1") or 1))
+                rate = 1
                 rows = conn.execute(
                     "SELECT * FROM ledger" + clause + " ORDER BY ts DESC, id DESC LIMIT ?", (*args, limit)).fetchall()
                 totals = conn.execute(
@@ -7249,7 +7249,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not row or row["status"] != "pending":
                     self.send_json({"ok": False, "error": "提现单不存在或已处理"}, 404)
                     return
-                rate = max(1, int(setting_get(conn, "points_per_yuan", "1") or 1))
+                rate = 1
                 if action == "paid":
                     conn.execute("UPDATE payouts SET status='paid', updated_at=? WHERE id=?", (now(), pid))
                     ledger_add(conn, "cash", "out", "withdraw_cash", q2(int(row["points"] or 0) / rate),
@@ -8127,12 +8127,8 @@ class Handler(BaseHTTPRequestHandler):
             for key in ("alipay_private_key", "alipay_public_key", "wechat_api_key"):
                 if str(data.get(key, "")).strip():
                     setting_set(conn, key, str(data.get(key, "")).strip())
-            if "points_per_yuan" in data:
-                try:
-                    rate = int(data.get("points_per_yuan", 1) or 1)
-                except (TypeError, ValueError):
-                    rate = 1
-                setting_set(conn, "points_per_yuan", str(max(1, min(10000, rate))))
+            # 汇率固定 1 积分 = 1 元，不再允许修改
+            setting_set(conn, "points_per_yuan", "1")
             if "refund_fee_percent" in data:
                 try:
                     fee = int(data.get("refund_fee_percent", 10) or 0)

@@ -2634,7 +2634,7 @@ async function loadPoints(){
     return;
   }
   const payment = data.payment || {};
-  const rate = Number(payment.points_per_yuan || 1);
+  const rate = 1;
   const usableChannels = (payment.providers || []).filter(x => x.ready && x.key !== 'mock');
   const channelHtml = usableChannels.length > 1
     ? `<div class="span-2"><label>支付方式</label><div class="pay-channels">${usableChannels.map((x, i) => `<label class="check"><input type="radio" name="provider" value="${x.key}"${i === 0 ? ' checked' : ''}> ${x.name}</label>`).join('')}</div></div>`
@@ -3279,7 +3279,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
     const myPlans = data.my_plans || [];
     const activePlans = myPlans.filter(p => !p.expired);
     const payment = data.payment || {};
-    const rate = Number(payment.points_per_yuan || 1);
+    const rate = 1;
     window.__pointsRate = rate;
     const planRows = myPlans.map((p, i) => `<tr>
         <td>${i + 1}</td>
@@ -4437,7 +4437,6 @@ function adminPaymentCardHtml(pay){
         <label class="check"><input type="checkbox" name="providers" value="wechat"${enabledChannels.includes('wechat') ? ' checked' : ''}> 微信支付</label>
       </div><span class="muted small">全部取消即关闭在线支付；只有已配置完成的渠道才会对用户可用</span></div>
       <div class="span-2"><label>对外访问地址</label><input name="public_url" value="${esc(pay.public_url || '')}" placeholder="https://frp.example.com"><span class="muted small">支付回调地址，必须是公网可访问的 https</span></div>
-      <div><label>积分兑换比例</label><input name="points_per_yuan" type="number" value="${Number(pay.points_per_yuan || 1)}" min="1" max="10000"><span class="muted small">1 元 = N 积分</span></div>
       <div><label>退订手续费（%）</label><input name="refund_fee_percent" type="number" value="${Number(pay.refund_fee_percent ?? 10)}" min="0" max="100"><span class="muted small">按剩余比例退款后再扣</span></div>
       <div class="span-2 pay-config-row">
         <div class="pay-config-item"><div><b>支付宝</b>${badge(pay.alipay_configured)}</div><button type="button" class="secondary" onclick="openPayConfig('alipay')">配置支付宝</button></div>
