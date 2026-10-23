@@ -1455,7 +1455,7 @@ def public_user(user: sqlite3.Row) -> dict[str, Any]:
         "invite_key_used": row_val(user, "invite_key_used"),
         "email": row_val(user, "email", "") or "",
         "max_ports": user["max_ports"],
-        "points": int(row_val(user, "points", 0) or 0),
+        "points": q2(row_val(user, "points", 0)),
         "traffic_limit_bytes": int(row_val(user, "traffic_limit_bytes", 0) or 0),
         "active": bool(user["active"]),
         "expires_at": user["expires_at"],
@@ -4561,24 +4561,33 @@ def new_order_no() -> str:
     return time.strftime("%Y%m%d%H%M%S") + f"{secrets.randbelow(1000000):06d}"
 
 
-def points_change(conn: sqlite3.Connection, user_id: int, delta: int, kind: str, ref: str = "", note: str = "") -> int:
+def q2(value: Any) -> float:
+    """积分保留两位小数（四舍五入）。"""
+    try:
+        return round(float(value or 0) + 1e-9, 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def points_change(conn: sqlite3.Connection, user_id: int, delta: float, kind: str, ref: str = "", note: str = "") -> float:
     row = conn.execute("SELECT points, username FROM users WHERE id=?", (user_id,)).fetchone()
     if not row:
         raise ValueError("用户不存在")
-    balance = int(row["points"] or 0) + int(delta)
+    delta = q2(delta)
+    balance = q2(q2(row["points"]) + delta)
     if balance < 0:
         raise ValueError("积分不足")
     conn.execute("UPDATE users SET points=? WHERE id=?", (balance, user_id))
     conn.execute(
         "INSERT INTO point_logs(user_id, username, delta, balance_after, kind, ref, note, created_at) VALUES(?,?,?,?,?,?,?,?)",
-        (user_id, row["username"], int(delta), balance, str(kind)[:32], str(ref)[:64], str(note)[:200], now()))
+        (user_id, row["username"], delta, balance, str(kind)[:32], str(ref)[:64], str(note)[:200], now()))
     return balance
 
 
-def points_balance(user_id: int) -> int:
+def points_balance(user_id: int) -> float:
     with db() as conn:
         row = conn.execute("SELECT points FROM users WHERE id=?", (user_id,)).fetchone()
-    return int(row["points"] or 0) if row else 0
+    return q2(row["points"]) if row else 0.0
 
 
 def create_recharge_keys(points: int, count: int, note: str, expires_days: int, created_by: int) -> tuple[bool, str, list[str]]:
@@ -4703,8 +4712,8 @@ def compute_plan_refund(conn: sqlite3.Connection, plan_row: sqlite3.Row) -> dict
         ratios.append(max(0.0, 1 - int(plan_row["used_bytes"] or 0) / int(plan_row["quota_bytes"])))
     ratio = min(ratios) if ratios else 1.0
     fee = refund_fee_percent(conn)
-    gross = int(round(price * ratio))
-    net = int(gross * (100 - fee) / 100 + 0.5)
+    gross = q2(price * ratio)
+    net = q2(gross * (100 - fee) / 100)
     return {"eligible": True, "points": net, "ratio": round(ratio, 4), "fee_percent": fee, "gross": gross}
 
 
@@ -4718,13 +4727,14 @@ def cancel_user_plan(user: sqlite3.Row, user_plan_id: int) -> tuple[bool, str, d
         info = compute_plan_refund(conn, p)
         conn.execute("UPDATE user_plans SET status='cancelled', expires_at=? WHERE id=?", (now(), p["id"]))
         release_plan_resources(conn, p, keep_ports=False)
-        if int(info["points"]) > 0:
-            points_change(conn, int(user["id"]), int(info["points"]), "plan_refund", p["plan_name"], "套餐退订退款")
+        if q2(info["points"]) > 0:
+            points_change(conn, int(user["id"]), q2(info["points"]), "plan_refund", p["plan_name"], "套餐退订退款")
         recalc_user_entitlements(conn, int(user["id"]))
+    amount = f"{q2(info['points']):.2f}"
     if info.get("full_refund"):
-        msg = f"退订成功，10 分钟内未产生流量，全额退回 {info['points']} 积分"
+        msg = f"退订成功，10 分钟内未产生流量，全额退回 {amount} 积分"
     else:
-        msg = f"退订成功，退回 {info['points']} 积分（剩余比例 {int(info['ratio']*100)}%，手续费 {info['fee_percent']}%）"
+        msg = f"退订成功，退回 {amount} 积分（剩余比例 {int(info['ratio']*100)}%，手续费 {info['fee_percent']}%）"
     return True, msg, info
 
 
@@ -4965,8 +4975,8 @@ def refund_plans_on_node(conn: sqlite3.Connection, node_id: int, reason: str = "
     items = []
     for p in rows:
         price = int(p["price_points"] or 0)
-        target = int(price * plan_progress(p))
-        remaining = max(0, price - target)
+        target = q2(price * plan_progress(p))
+        remaining = q2(max(0.0, price - target))
         items.append((p, price, remaining, int(p["guarantee_points"] or 0)))
     total_remaining = sum(x[2] for x in items)
     owners = {int(x[0]["provider_id"] or 0) for x in items if int(x[0]["provider_id"] or 0) > 0}
@@ -5060,7 +5070,7 @@ def accrue_provider_income_once() -> int:
             owner = int(up["node_owner"] or 0)
             if price <= 0 or owner <= 0:
                 continue
-            target = int(price * plan_progress(up))
+            target = q2(price * plan_progress(up))
             done = int(up["provider_paid_points"] or 0) + int(up["guarantee_points"] or 0)
             delta = target - done
             if delta <= 0:
@@ -5143,9 +5153,9 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
                     return False, f"隧道名称「{nm}」已被使用，请更换", None
 
         cost = int(row_val(plan, "price_points", 0) or 0)
-        balance = int(row_val(conn.execute("SELECT points FROM users WHERE id=?", (user["id"],)).fetchone(), "points", 0) or 0)
+        balance = q2(row_val(conn.execute("SELECT points FROM users WHERE id=?", (user["id"],)).fetchone(), "points", 0))
         if cost > balance:
-            return False, f"积分不足，还需 {cost - balance} 积分", None
+            return False, f"积分不足，还需 {q2(cost - balance):.2f} 积分", None
         order_no = new_order_no()
         conn.execute(
             "INSERT INTO orders(order_no, user_id, username, plan_id, plan_name, kind, points, amount_cents, duration_days, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, node_id, provider, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -5173,7 +5183,7 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
         provision_msg = msg
     with db() as conn:
         row = conn.execute("SELECT * FROM orders WHERE order_no=?", (order_no,)).fetchone()
-        balance = int(row_val(conn.execute("SELECT points FROM users WHERE id=?", (user["id"],)).fetchone(), "points", 0) or 0)
+        balance = q2(row_val(conn.execute("SELECT points FROM users WHERE id=?", (user["id"],)).fetchone(), "points", 0))
     payload = order_public(row)
     payload["balance"] = balance
     payload["tunnels"] = created_tunnels
@@ -6973,15 +6983,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             mode = str(data.get("mode", "balance")).strip().lower()
             try:
-                points = int(data.get("points", 0) or 0)
+                points = q2(data.get("points", 0) or 0)
             except (TypeError, ValueError):
-                points = 0
+                points = 0.0
             try:
                 with db() as conn:
                     provider_income_consume(conn, int(user["id"]), points)
                     if mode == "balance":
                         points_change(conn, int(user["id"]), points, "provider_withdraw", "balance", "收益转入余额")
-                        self.send_json({"ok": True, "message": f"{points} 积分已转入余额"})
+                        self.send_json({"ok": True, "message": f"{q2(points):.2f} 积分已转入余额"})
                         return
                     if mode != "external":
                         raise ValueError("未知提现方式")

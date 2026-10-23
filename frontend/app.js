@@ -305,6 +305,11 @@ function fmtBytes(n){
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
+function fmtPts(v){
+  const n = Number(v || 0);
+  return Number.isFinite(n) ? n.toFixed(2) : '0.00';
+}
+
 function userDeployScriptAddressHtml(user, opts={}){
   const url = userDeployScriptUrl(user);
   const cmd = userDeployScriptCommand(user);
@@ -1268,13 +1273,13 @@ async function loadPlans(){
       <td>${i + 1}</td>
       <td>${esc(o.order_no)}</td>
       <td>${esc(o.plan_name)}</td>
-      <td>${o.kind === 'points' ? '+' + o.points + ' 积分' : '-' + o.points + ' 积分'}</td>
+      <td>${o.kind === 'points' ? '+' + fmtPts(o.points) + ' 积分' : '-' + fmtPts(o.points) + ' 积分'}</td>
       <td><span class="status-badge ${o.status === 'paid' ? 'ok' : (o.status === 'pending' ? '' : 'bad')}"><i></i>${statusText[o.status] || esc(o.status)}</span></td>
       <td>${fmtTs(o.created_at)}</td>
       <td class="actions node-actions">${o.status === 'pending' ? `<button type="button" class="node-action" onclick="resumePay('${esc(o.order_no)}')">继续支付</button>` : '<span class="muted small">—</span>'}</td>
     </tr>`).join('') || '<tr><td colspan="7" class="muted">暂无订单</td></tr>';
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">PLANS</span><h1>购买套餐</h1><p>使用积分购买套餐，购买后自动开通端口与有效期。</p></div><div class="ov-head-badge"><span>我的积分</span><b>${data.balance}</b></div></div>
+    <div class="ov-page-head"><div><span class="section-kicker">PLANS</span><h1>购买套餐</h1><p>使用积分购买套餐，购买后自动开通端口与有效期。</p></div><div class="ov-head-badge"><span>我的积分</span><b>${fmtPts(data.balance)}</b></div></div>
     <section class="card"><div class="section-title"><div><h2>${stIcon('license')}可选套餐</h2><p>共 ${(data.plans || []).length} 个套餐</p></div><button type="button" class="secondary" onclick="loadPoints()">充值积分</button></div><div class="plan-grid">${cards}</div></section>
     <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}我的订单</h2><p>最近 50 条</p></div></div><table><thead><tr><th>序号</th><th>订单号</th><th>套餐</th><th>积分</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></section>
   `, 'dashboard-plans', '购买套餐');
@@ -1321,7 +1326,7 @@ async function confirmBuyPlan(planId){
 }
 
 async function cancelPlan(id, name, refund){
-  if(!await appConfirm(`确认退订「${name}」？\n预计退回 ${refund} 积分。`, {title:'退订套餐', okText:'确认退订', danger:true})) return;
+  if(!await appConfirm(`确认退订「${name}」？\n预计退回 ${fmtPts(refund)} 积分。`, {title:'退订套餐', okText:'确认退订', danger:true})) return;
   try{
     const r = await api('/api/user/plans/cancel', {method:'POST', body:{id}});
     await appAlert(r.message || '退订成功', {title:'退订成功'});
@@ -1467,7 +1472,7 @@ async function loadHosts(){
     </section>`;
   const earnSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('bolt')}收益</h2><p>按服务进度结算：${100 - pct}% 到账，${pct}% 留存为保证金</p></div><span class="section-count">已结算 ${pTotal} 积分 · 保证金 ${pGuarantee}</span></div>
       <div class="row" style="gap:10px;align-items:center;margin:6px 0 12px">
-        <span class="muted small">可提现收益</span><b style="font-size:18px">${pIncome} 积分</b>
+        <span class="muted small">可提现收益</span><b style="font-size:18px">${fmtPts(pIncome)} 积分</b>
         <button type="button" class="secondary" onclick="providerWithdraw('balance')" ${pIncome > 0 ? '' : 'disabled'}>转入余额</button>
         <button type="button" onclick="providerWithdraw('external')" ${pIncome > 0 ? '' : 'disabled'}>提现到收款账户</button>
       </div>
@@ -1649,7 +1654,7 @@ async function loadPayoutTickets(){
     income = Number(a.income || 0); payouts = a.payouts || []; acc = b.account || acc;
   }catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
   const hasAcc = !!(acc.account && acc.holder);
-  const rows = payouts.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td><b>${p.points}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td><span class="status-badge ${p.status === 'paid' ? 'ok' : (p.status === 'pending' ? 'warn' : 'bad')}"><i></i>${p.status === 'paid' ? '已打款' : (p.status === 'pending' ? '待处理' : '已拒绝')}</span></td><td>${fmtTs(p.created_at)}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">暂无提现记录</td></tr>';
+  const rows = payouts.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td><b>${fmtPts(p.points)}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td><span class="status-badge ${p.status === 'paid' ? 'ok' : (p.status === 'pending' ? 'warn' : 'bad')}"><i></i>${p.status === 'paid' ? '已打款' : (p.status === 'pending' ? '待处理' : '已拒绝')}</span></td><td>${fmtTs(p.created_at)}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">暂无提现记录</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">PAYOUTS</span><h1>提现工单</h1><p>把托管收益转入余额，或提现到已配置的收款账户。</p></div></div>
     <section class="card"><div class="section-title"><div><h2>${stIcon('key')}申请提现</h2><p>可提现收益 <b>${income}</b> 积分${hasAcc ? '' : ' · 尚未配置收款信息'}</p></div><span class="section-count">${hasAcc ? esc(acc.method + ' ' + acc.account) : '未配置'}</span></div>
@@ -1917,7 +1922,7 @@ async function loadAdminPayouts(){
   let payouts = [];
   try{ payouts = (await api('/api/admin/payouts')).payouts || []; }
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
-  const rows = payouts.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td>${esc(p.username)}</td><td><b>${p.points}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${esc(p.holder)}</td><td>${p.qr_token ? `<img class="qr-thumb" src="/api/upload/${encodeURIComponent(p.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(p.qr_token)}')">` : '-'}</td><td><span class="status-badge ${p.status === 'paid' ? 'ok' : (p.status === 'pending' ? 'warn' : 'bad')}"><i></i>${p.status === 'paid' ? '已打款' : (p.status === 'pending' ? '待处理' : '已拒绝')}</span></td><td>${fmtTs(p.created_at)}</td><td class="actions node-actions">${p.status === 'pending' ? `<button class="node-action" onclick="reviewPayout(${p.id}, 'paid')">标记已打款</button><button class="node-action node-action-danger" onclick="reviewPayout(${p.id}, 'reject')">拒绝</button>` : '<span class="muted small">—</span>'}</td></tr>`).join('') || '<tr><td colspan="11" class="muted">暂无提现申请</td></tr>';
+  const rows = payouts.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td>${esc(p.username)}</td><td><b>${fmtPts(p.points)}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${esc(p.holder)}</td><td>${p.qr_token ? `<img class="qr-thumb" src="/api/upload/${encodeURIComponent(p.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(p.qr_token)}')">` : '-'}</td><td><span class="status-badge ${p.status === 'paid' ? 'ok' : (p.status === 'pending' ? 'warn' : 'bad')}"><i></i>${p.status === 'paid' ? '已打款' : (p.status === 'pending' ? '待处理' : '已拒绝')}</span></td><td>${fmtTs(p.created_at)}</td><td class="actions node-actions">${p.status === 'pending' ? `<button class="node-action" onclick="reviewPayout(${p.id}, 'paid')">标记已打款</button><button class="node-action node-action-danger" onclick="reviewPayout(${p.id}, 'reject')">拒绝</button>` : '<span class="muted small">—</span>'}</td></tr>`).join('') || '<tr><td colspan="11" class="muted">暂无提现申请</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">PAYOUTS</span><h1>提现工单</h1><p>处理供给方的收款提现申请</p></div><button type="button" class="secondary" onclick="loadAdminPayouts()">刷新</button></div>
     <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>用户</th><th>积分</th><th>方式</th><th>账号</th><th>姓名</th><th>收款码</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
@@ -2582,7 +2587,7 @@ async function loadPoints(){
       <div class="billing-left">
         <section class="card billing-balance">
           <div class="billing-balance-head"><span>当前余额</span><span class="status-badge ok"><i></i>可用</span></div>
-          <div class="billing-balance-value">${Number(data.balance)} <small>积分</small></div>
+          <div class="billing-balance-value">${fmtPts(data.balance)} <small>积分</small></div>
           <div class="billing-balance-meta"><span>充值比例 1 元 = ${rate} 积分</span><span>可用于购买套餐</span></div>
         </section>
         <section class="card">
@@ -3051,7 +3056,7 @@ async function loadDashboard(view='overview'){
 ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label"><span>${trafficUsageLabel}</span><b>${trafficUsagePercent}%</b></div><div class="tunnel-usage-track" role="progressbar" aria-label="今日流量使用情况" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${trafficUsagePercent}"><span style="width:${trafficUsagePercent}%"></span></div></div>` : ''}
         </section>
         <section class="workspace-stat ov-stat" style="--ov-accent:#f59e0b;--ov-tint:#fff8ec">
-          <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v9M9.6 10.2h4.2a2.1 2.1 0 0 1 0 4.2H9.6"/></svg></span><div class="ov-stat-copy"><span class="ov-stat-label">积分余额</span><strong class="ov-stat-value">${esc(data.user.points ?? 0)}</strong><span class="ov-stat-sub">可用于购买套餐</span></div></div>
+          <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v9M9.6 10.2h4.2a2.1 2.1 0 0 1 0 4.2H9.6"/></svg></span><div class="ov-stat-copy"><span class="ov-stat-label">积分余额</span><strong class="ov-stat-value">${fmtPts(data.user.points)}</strong><span class="ov-stat-sub">可用于购买套餐</span></div></div>
           <div class="ov-points-action"><button type="button" class="secondary" onclick="loadPoints()">账单充值</button></div>
         </section>
         <section class="workspace-stat ov-stat" style="--ov-accent:#2c6dd2;--ov-tint:#eef4ff">
