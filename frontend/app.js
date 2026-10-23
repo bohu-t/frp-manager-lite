@@ -1538,7 +1538,7 @@ async function loadTickets(){
     const statusBadge = need
       ? `<span class="status-badge warn"><i></i>${needText}</span>`
       : `${ticketStatusBadge(t.status)}`;
-    return `<tr class="${need ? 'need-action' : ''}">
+    return `<tr class="clickable-row${need ? ' need-action' : ''}" onclick="loadTicketDetail(${t.id})">
       <td>${i + 1}</td>
       <td>${esc(t.ticket_no)}</td>
       <td>${TICKET_KIND[t.kind] || t.kind}</td>
@@ -1546,9 +1546,8 @@ async function loadTickets(){
       <td>${t.node_id ? esc(t.node_name || (nodeById[Number(t.node_id)] || {}).name || ('#' + t.node_id)) : '不关联'}</td>
       <td>${statusBadge}</td>
       <td>${fmtTs(t.created_at)}</td>
-      <td class="actions node-actions"><button type="button" class="node-action" onclick="loadTicketDetail(${t.id})">查看</button></td>
     </tr>`;
-  }).join('') || `<tr><td colspan="8" class="muted">${ticketsTab === 'mine' ? '还没有提交过工单' : '还没有收到工单'}</td></tr>`;
+  }).join('') || `<tr><td colspan="7" class="muted">${ticketsTab === 'mine' ? '还没有提交过工单' : '还没有收到工单'}</td></tr>`;
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>故障工单</h1><p>节点或实例出现故障时，提交工单通知机主处理。</p></div>
       <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadTickets()">刷新</button><button type="button" onclick="loadTicketNew()">＋ 新建工单</button></div></div>
@@ -1556,7 +1555,7 @@ async function loadTickets(){
       <button type="button" class="seg-tab${ticketsTab === 'mine' ? ' active' : ''}" onclick="switchTicketsTab('mine')">我提交的${mine.length ? `<span>${mine.length}</span>` : ''}</button>
       <button type="button" class="seg-tab${ticketsTab === 'received' ? ' active' : ''}" onclick="switchTicketsTab('received')">我收到的${received.length ? `<span>${received.length}</span>` : ''}</button>
     </nav>
-    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>编号</th><th>类型</th><th>标题</th><th>节点</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>编号</th><th>类型</th><th>标题</th><th>节点</th><th>状态</th><th>提交时间</th></tr></thead><tbody>${rows}</tbody></table></div></section>
   `, 'dashboard-tickets', '工单');
 }
 
@@ -1784,10 +1783,10 @@ async function loadAdminTickets(){
   let tickets = [];
   try{ tickets = (await api('/api/admin/tickets')).tickets || []; }
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
-  const rows = tickets.map((t, i) => `<tr><td>${i + 1}</td><td>${esc(t.ticket_no)}</td><td>${TICKET_KIND[t.kind] || t.kind}</td><td>${esc(t.title)}</td><td>${esc(t.username)}</td><td>${t.node_id ? esc(t.node_name || ('#' + t.node_id)) : '不关联'}</td><td>${ticketStatusBadge(t.status)}</td><td>${fmtTs(t.created_at)}</td><td class="actions node-actions"><button type="button" class="node-action" onclick="loadTicketDetail(${t.id}, 'admin')">查看</button></td></tr>`).join('') || '<tr><td colspan="9" class="muted">暂无工单</td></tr>';
+  const rows = tickets.map((t, i) => `<tr class="clickable-row" onclick="loadTicketDetail(${t.id}, 'admin')"><td>${i + 1}</td><td>${esc(t.ticket_no)}</td><td>${TICKET_KIND[t.kind] || t.kind}</td><td>${esc(t.title)}</td><td>${esc(t.username)}</td><td>${t.node_id ? esc(t.node_name || ('#' + t.node_id)) : '不关联'}</td><td>${ticketStatusBadge(t.status)}</td><td>${fmtTs(t.created_at)}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">暂无工单</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>故障工单</h1><p>全部用户提交的故障工单</p></div></div>
-    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>编号</th><th>类型</th><th>标题</th><th>提交人</th><th>节点</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>编号</th><th>类型</th><th>标题</th><th>提交人</th><th>节点</th><th>状态</th><th>时间</th></tr></thead><tbody>${rows}</tbody></table></div></section>
   `, 'admin-tickets', '工单');
 }
 

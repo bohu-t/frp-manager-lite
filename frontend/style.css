@@ -2278,3 +2278,7 @@ html[data-theme="dark"] .status-badge.tk-open{background:rgba(245,158,11,.18);co
 html[data-theme="dark"] .status-badge.tk-processing{background:rgba(59,130,246,.2);color:#93c5fd}
 html[data-theme="dark"] .status-badge.tk-closed{background:rgba(148,163,184,.2);color:#cbd5e1}
 html[data-theme="dark"] .status-badge.tk-rejected{background:rgba(239,68,68,.2);color:#fca5a5}
+/* 工单行可点击进入 */
+tr.clickable-row{cursor:pointer}
+tr.clickable-row:hover>td{background:#f5f9ff}
+html[data-theme="dark"] tr.clickable-row:hover>td{background:rgba(59,130,246,.12)}
