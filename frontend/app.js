@@ -3779,7 +3779,6 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>排序</label><input name="sort_order" type="number" value="0"><span class="muted small">数字越小越靠前</span></div>
       <div><label>备注</label><input name="note" placeholder="套餐说明，展示给用户"></div>
       <div style="grid-column:1/-1"><label>公平使用说明</label><textarea name="fair_use_note" rows="2" placeholder="例如：标称不限量，月流量超过 1TB 将限速"></textarea></div>
-      <div><label>状态</label><select name="active"><option value="1">上架</option><option value="0">下架</option></select></div>
       <div class="form-actions" style="grid-column:1/-1"><button>保存套餐</button><button type="button" class="secondary" onclick="resetPlanForm()">清空</button></div>
     </form></section>
     <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>序号</th><th>名称</th><th>积分价格</th><th>端口</th><th>计费</th><th>有效期 / 额度</th><th>速率</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
@@ -4193,7 +4192,6 @@ function editPlan(id){
   f.elements.note.value = p.note;
   f.elements.fair_use_note.value = p.fair_use_note || '';
   f.elements.node_id.value = p.node_id || 0;
-  f.elements.active.value = p.active ? '1' : '0';
   f.scrollIntoView({behavior:'smooth', block:'center'});
 }
 async function adminAdjustPoints(id, username){
