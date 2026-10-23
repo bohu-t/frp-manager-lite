@@ -1811,13 +1811,18 @@ async function loadAdminAnnouncements(){
   let list = [];
   try{ list = (await api('/api/admin/announcements')).announcements || []; }
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
-  const rows = list.map((a, i) => `<tr><td>${i + 1}</td><td><b>${esc(a.title)}</b></td><td>${esc(String(a.content || '').replace(/<[^>]+>/g, '').slice(0, 60))}</td><td><span class="status-badge ${a.active ? 'ok' : 'bad'}"><i></i>${a.active ? '展示中' : '已下架'}</span></td><td>${fmtTs(a.created_at)}</td><td class="actions node-actions">${a.active ? `<button class="node-action node-action-danger" onclick="deleteAnnouncement(${a.id})">下架</button>` : '<span class="muted small">—</span>'}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">暂无公告</td></tr>';
+  const rows = list.map((a, i) => `<tr><td>${i + 1}</td><td><b>${esc(a.title)}</b></td><td>${esc(String(a.content || '').replace(/<[^>]+>/g, '').slice(0, 60))}</td><td><span class="status-badge ${a.kind === 'notice' ? 'tk-processing' : 'tk-closed'}"><i></i>${a.kind === 'notice' ? '通知' : '公告'}</span></td><td><span class="status-badge ${a.active ? 'ok' : 'bad'}"><i></i>${a.active ? '展示中' : '已下架'}</span></td><td>${fmtTs(a.created_at)}</td><td class="actions node-actions">${a.active ? `<button class="node-action node-action-danger" onclick="deleteAnnouncement(${a.id})">下架</button>` : '<span class="muted small">—</span>'}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">暂无公告</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">ANNOUNCEMENTS</span><h1>系统公告</h1><p>发布后会显示在用户的「通知中心 › 系统公告」</p></div></div>
     <section class="card"><div class="section-title"><div><h2>${stIcon('bell')}发布公告</h2></div></div>
-      <form id="annForm" class="grid"><div class="span-2"><label>标题</label><input name="title" maxlength="120" required></div><div class="span-2"><label>内容</label><textarea name="content" rows="4" required placeholder="支持简单格式文本"></textarea></div><div class="form-actions span-2"><button type="submit">发布</button></div></form>
+      <form id="annForm" class="grid">
+        <div class="span-2"><label>发布类型</label><select name="kind"><option value="announcement">系统公告（展示在公告页签）</option><option value="notice">通知（推送到用户通知列表）</option></select></div>
+        <div class="span-2"><label>标题</label><input name="title" maxlength="120" required></div>
+        <div class="span-2"><label>内容</label><textarea name="content" rows="4" required placeholder="支持简单格式文本"></textarea></div>
+        <div class="form-actions span-2"><button type="submit">发布</button></div>
+      </form>
     </section>
-    <section class="card"><div class="section-title"><div><h2>公告列表</h2><p>共 ${list.length} 条</p></div></div><div class="table-wrap"><table><thead><tr><th>序号</th><th>标题</th><th>内容</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+    <section class="card"><div class="section-title"><div><h2>公告列表</h2><p>共 ${list.length} 条</p></div></div><div class="table-wrap"><table><thead><tr><th>序号</th><th>标题</th><th>内容</th><th>类型</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
   `, 'admin-announcements', '公告');
   const form = document.querySelector('#annForm');
   form.onsubmit = async (e) => {
@@ -1852,9 +1857,10 @@ async function loadAdminOps(){
       <section class="card maint-panel">
         <div class="section-title"><div><h2>${stIcon('bell')}系统公告</h2><p>发布后显示在用户通知中心</p></div><span class="section-count">${anns.length} 条</span></div>
         <form id="annForm" class="maint-form">
-          <input name="title" maxlength="120" placeholder="公告标题" required>
-          <textarea name="content" rows="3" placeholder="公告内容" required></textarea>
-          <div class="maint-form-actions"><button type="submit">发布公告</button></div>
+          <select name="kind"><option value="announcement">系统公告</option><option value="notice">通知</option></select>
+          <input name="title" maxlength="120" placeholder="标题" required>
+          <textarea name="content" rows="3" placeholder="内容" required></textarea>
+          <div class="maint-form-actions"><button type="submit">发布</button></div>
         </form>
         <div class="maint-table"><table><thead><tr><th>#</th><th>公告</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${annRows}</tbody></table></div>
       </section>

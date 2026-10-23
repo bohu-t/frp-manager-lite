@@ -2828,6 +2828,7 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL DEFAULT '',
                 content TEXT NOT NULL DEFAULT '',
+                kind TEXT NOT NULL DEFAULT 'announcement',
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at INTEGER NOT NULL
             );
@@ -3060,6 +3061,9 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status, created_at);
             """
         )
+        ann_cols = {r["name"] for r in conn.execute("PRAGMA table_info(announcements)").fetchall()}
+        if "kind" not in ann_cols:
+            conn.execute("ALTER TABLE announcements ADD COLUMN kind TEXT NOT NULL DEFAULT 'announcement'")
         default_node_id = ensure_default_node(conn)
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
         if "expires_at" not in cols:
@@ -6480,7 +6484,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with db() as conn:
                 rows = conn.execute("SELECT * FROM announcements ORDER BY id DESC LIMIT 100").fetchall()
-            self.send_json({"ok": True, "announcements": [dict(r) for r in rows]})
+            self.send_json({"ok": True, "announcements": [{**dict(r), "kind": row_val(r, "kind", "announcement")} for r in rows]})
             return
         if path == "/api/notifications":
             with db() as conn:
@@ -7099,12 +7103,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
             title = str(data.get("title", "")).strip()[:120]
             content = sanitize_ticket_html(str(data.get("content", "")))[:4000]
+            kind = "notice" if str(data.get("kind", "")).strip() == "notice" else "announcement"
             if not title or not content:
-                self.send_json({"ok": False, "error": "请填写公告标题和内容"}, 400)
+                self.send_json({"ok": False, "error": "请填写标题和内容"}, 400)
                 return
             with db() as conn:
-                conn.execute("INSERT INTO announcements(title, content, active, created_at) VALUES(?,?,1,?)", (title, content, now()))
-            self.send_json({"ok": True, "message": "公告已发布"})
+                conn.execute("INSERT INTO announcements(title, content, kind, active, created_at) VALUES(?,?,?,1,?)",
+                             (title, content, kind, now()))
+                if kind == "notice":
+                    plain = re.sub(r"<[^>]+>", "", content).strip()
+                    for r in conn.execute("SELECT id FROM users WHERE active=1 AND role!='admin'").fetchall():
+                        notify_user(conn, int(r["id"]), "system_notice", title, plain[:500], "")
+            msg = "通知已发送" if kind == "notice" else "公告已发布"
+            self.send_json({"ok": True, "message": msg, "kind": kind})
             return
 
         if path == "/api/admin/announcements/delete":
