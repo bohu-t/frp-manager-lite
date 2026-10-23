@@ -2282,3 +2282,17 @@ html[data-theme="dark"] .status-badge.tk-rejected{background:rgba(239,68,68,.2);
 tr.clickable-row{cursor:pointer}
 tr.clickable-row:hover>td{background:#f5f9ff}
 html[data-theme="dark"] tr.clickable-row:hover>td{background:rgba(59,130,246,.12)}
+/* 通知详情卡片 */
+.notif-list{display:flex;flex-direction:column;gap:10px;padding:4px 2px}
+.notif-item{display:flex;flex-direction:column;gap:8px;padding:14px 16px;border:1px solid var(--border);border-radius:12px;background:var(--card);text-align:left}
+.notif-item.unread{background:#f7fbff;border-color:#cfe3ff}
+.notif-item-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.notif-item-head b{font-size:14px;color:var(--text-strong);line-height:1.4}
+.notif-item-head small{flex:none;font-size:11px;color:var(--muted)}
+.notif-item-body{margin:0;font-size:13px;line-height:1.7;color:var(--text)}
+.notif-item-foot{display:flex;gap:8px;justify-content:flex-end}
+.notif-btn{height:30px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:12px;cursor:pointer}
+.notif-btn:hover{border-color:#93c5fd;color:#1677FF}
+.notif-btn.primary{background:#1677FF;border-color:#1677FF;color:#fff}
+.notif-btn.primary:hover{background:#0f62d6;color:#fff}
+html[data-theme="dark"] .notif-item.unread{background:rgba(22,119,255,.1);border-color:rgba(96,165,250,.35)}

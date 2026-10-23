@@ -3668,6 +3668,66 @@ def clear_session(cookie_header: str | None) -> None:
             conn.execute("DELETE FROM sessions WHERE token=?", (morsel.value,))
 
 
+NOTIFY_TEMPLATES: dict[str, dict[str, str]] = {
+    "ticket_new_owner": {
+        "title": "新工单：{title}",
+        "content": "用户 {username} 提交了故障工单（{ticket_no}），关联实例：{node}。请尽快处理。",
+    },
+    "ticket_new_admin": {
+        "title": "新工单：{title}",
+        "content": "用户 {username} 提交了平台工单（{ticket_no}），关联实例：{node}。请尽快处理。",
+    },
+    "ticket_reply_owner": {
+        "title": "工单有新回复：{title}",
+        "content": "工单 {ticket_no} 收到 {username} 的回复，请及时查看并跟进。",
+    },
+    "ticket_reply_user": {
+        "title": "工单有新回复：{title}",
+        "content": "你提交的工单 {ticket_no} 收到新回复，请查看处理进度。",
+    },
+    "ticket_closed": {
+        "title": "工单已关闭：{title}",
+        "content": "工单 {ticket_no} 已处理完成并关闭。处理结果：{resolution}",
+    },
+    "payout_new": {
+        "title": "提现申请：¥{amount}",
+        "content": "用户 {username} 提交提现申请，单号 {payout_no}，方式 {method}。请审核打款。",
+    },
+    "payout_paid": {
+        "title": "提现已打款：¥{amount}",
+        "content": "提现单 {payout_no} 已打款，请留意到账。",
+    },
+    "payout_rejected": {
+        "title": "提现被驳回：¥{amount}",
+        "content": "提现单 {payout_no} 未通过审核，金额已退回可提现收益。原因：{reason}",
+    },
+}
+
+
+def render_notification(kind: str, **params: Any) -> tuple[str, str]:
+    tpl = NOTIFY_TEMPLATES.get(kind)
+    if not tpl:
+        return str(params.get("title", "")), str(params.get("content", ""))
+    safe = {k: ("" if v is None else str(v)) for k, v in params.items()}
+    def fmt(text: str) -> str:
+        try:
+            return text.format(**safe)
+        except (KeyError, IndexError):
+            return text
+    return fmt(tpl["title"]), fmt(tpl["content"])
+
+
+def notify(conn: sqlite3.Connection, user_id: int, kind: str, link: str = "", **params: Any) -> None:
+    """按固定模板发送通知。"""
+    title, content = render_notification(kind, **params)
+    notify_user(conn, user_id, kind, title, content, link)
+
+
+def notify_admins_tpl(conn: sqlite3.Connection, kind: str, link: str = "", **params: Any) -> None:
+    title, content = render_notification(kind, **params)
+    notify_admins(conn, kind, title, content, link)
+
+
 def notify_user(conn: sqlite3.Connection, user_id: int, kind: str, title: str, content: str = "", link: str = "") -> None:
     if not user_id:
         return
@@ -6424,7 +6484,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/notifications":
             with db() as conn:
-                rows = conn.execute("SELECT * FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 30", (int(user["id"]),)).fetchall()
+                rows = conn.execute("SELECT * FROM notifications WHERE user_id=? AND read_at=0 ORDER BY id DESC LIMIT 30", (int(user["id"]),)).fetchall()
                 unread = conn.execute("SELECT COUNT(*) FROM notifications WHERE user_id=? AND read_at=0", (int(user["id"]),)).fetchone()[0]
                 seen = int(row_val(conn.execute("SELECT announcement_seen_at FROM users WHERE id=?", (int(user["id"]),)).fetchone(), "announcement_seen_at", 0) or 0)
                 unseen_ann = conn.execute("SELECT COUNT(*) FROM announcements WHERE active=1 AND created_at>?", (seen,)).fetchone()[0]
@@ -7171,7 +7231,7 @@ class Handler(BaseHTTPRequestHandler):
                         "INSERT INTO tickets(ticket_no, user_id, username, kind, status, node_id, owner_id, title, content, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                         (new_ticket_no(), int(user["id"]), user["username"], "withdraw", "open", 0, 0,
                          f"提现 {points} 积分", f"提现单号 {pno}，方式 {acc['method']}，账号 {acc['account']}，姓名 {acc['holder']}", now(), now()))
-                    notify_admins(conn, "payout", f"提现申请：{points} 积分", f"{user['username']} 提交了提现申请", "payouts")
+                    notify_admins_tpl(conn, "payout_new", "payouts", amount=f"{q2(points):.2f}", username=user["username"], payout_no=pno, method=acc["method"])
                 self.send_json({"ok": True, "message": "提现申请已提交，等待管理员处理"})
             except ValueError as e:
                 self.send_json({"ok": False, "error": str(e)}, 400)
@@ -7196,8 +7256,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with db() as conn:
                 owner_id = 0
+                node_name = ""
                 if node_id:
-                    node = conn.execute("SELECT id, owner_id FROM nodes WHERE id=?", (node_id,)).fetchone()
+                    node = conn.execute("SELECT id, name, owner_id FROM nodes WHERE id=?", (node_id,)).fetchone()
                     if not node:
                         self.send_json({"ok": False, "error": "节点不存在"}, 400)
                         return
@@ -7206,15 +7267,17 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_json({"ok": False, "error": "只能对已购买的实例提交工单"}, 400)
                         return
                     owner_id = int(node["owner_id"] or 0)
+                    node_name = str(node["name"] or "")
                 tno = new_ticket_no()
                 att = clean_attachment_tokens(conn, int(user["id"]), data.get("attachments"))
                 conn.execute(
                     "INSERT INTO tickets(ticket_no, user_id, username, kind, status, node_id, owner_id, title, content, attachments, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                     (tno, int(user["id"]), user["username"], "issue", "open", node_id, owner_id, title, content, att, now(), now()))
                 if owner_id:
-                    notify_user(conn, owner_id, "ticket", f"新工单：{title}", f"{user['username']} 提交了工单", f"ticket:{int(conn.execute('SELECT last_insert_rowid()').fetchone()[0])}")
+                    notify(conn, owner_id, "ticket_new_owner", f"ticket:{int(conn.execute('SELECT last_insert_rowid()').fetchone()[0])}",
+                           title=title, username=user["username"], ticket_no=tno, node=node_name or "不关联")
                 else:
-                    notify_admins(conn, "ticket", f"新工单：{title}", f"{user['username']} 提交了平台工单", "tickets")
+                    notify_admins_tpl(conn, "ticket_new_admin", "tickets", title=title, username=user["username"], ticket_no=tno, node=node_name or "不关联")
             self.send_json({"ok": True, "message": "工单已提交"})
             return
 
@@ -7250,11 +7313,14 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute("UPDATE tickets SET status=CASE WHEN status='open' THEN 'processing' ELSE status END, updated_at=? WHERE id=?", (now(), tid))
                 if role == "user":
                     if int(row["owner_id"] or 0):
-                        notify_user(conn, int(row["owner_id"]), "ticket", f"工单回复：{row['title']}", f"{user['username']} 回复了工单", f"ticket:{tid}")
+                        notify(conn, int(row["owner_id"]), "ticket_reply_owner", f"ticket:{tid}",
+                               title=row["title"], ticket_no=row["ticket_no"], username=user["username"])
                     else:
-                        notify_admins(conn, "ticket", f"工单回复：{row['title']}", f"{user['username']} 回复了工单", f"ticket:{tid}")
+                        notify_admins_tpl(conn, "ticket_reply_owner", f"ticket:{tid}",
+                                          title=row["title"], ticket_no=row["ticket_no"], username=user["username"])
                 else:
-                    notify_user(conn, int(row["user_id"]), "ticket", f"工单回复：{row['title']}", f"{user['username']} 回复了你的工单", f"ticket:{tid}")
+                    notify(conn, int(row["user_id"]), "ticket_reply_user", f"ticket:{tid}",
+                           title=row["title"], ticket_no=row["ticket_no"], username=user["username"])
             self.send_json({"ok": True, "message": "已回复"})
             return
 

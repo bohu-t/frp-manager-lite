@@ -904,7 +904,14 @@ async function loadAnnouncements(){
 function notifModalHtml(){
   const list = window.__notifs || [];
   const anns = window.__announcements || [];
-  const notifHtml = list.length ? list.map(n => `<button type="button" class="notif-item${Number(n.read_at) ? '' : ' unread'}" onclick="openNotif(${n.id}, '${esc(n.link || '')}')"><b>${esc(n.title)}</b><span>${esc(n.content || '')}</span><small>${fmtTs(n.created_at)}</small></button>`).join('') : '<div class="notif-empty">暂无通知</div>';
+  const notifHtml = list.length ? list.map(n => `<article class="notif-item unread" id="notifItem${n.id}">
+      <div class="notif-item-head"><b>${esc(n.title)}</b><small>${fmtTs(n.created_at)}</small></div>
+      <p class="notif-item-body">${esc(n.content || '')}</p>
+      <div class="notif-item-foot">
+        ${n.link ? `<button type="button" class="notif-btn primary" onclick="openNotif(${n.id}, '${esc(n.link || '')}')">查看详情</button>` : ''}
+        <button type="button" class="notif-btn" onclick="markNotifRead(${n.id})">知道了</button>
+      </div>
+    </article>`).join('') : '<div class="notif-empty">暂无未读通知</div>';
   const annHtml = anns.length ? `<div class="ann-timeline">${anns.map((a, i) => `<article class="ann-node ${i % 2 ? 'left' : 'right'}">
       <span class="ann-node-dot"></span>
       <div class="ann-card">
@@ -981,6 +988,15 @@ async function switchNotifTab(tab){
 
 async function markAllNotifsRead(){
   try{ await api('/api/notifications/read', {method:'POST', body:{all:true}}); await loadNotifications(); await switchNotifTab(notifTab); }catch(e){}
+}
+
+async function markNotifRead(id){
+  try{ await api('/api/notifications/read', {method:'POST', body:{id:Number(id)}}); }catch(e){}
+  const el = document.getElementById('notifItem' + id);
+  if(el) el.remove();
+  const wrap = document.querySelector('.notif-list');
+  if(wrap && !wrap.querySelector('.notif-item')) wrap.innerHTML = '<div class="notif-empty">暂无未读通知</div>';
+  loadNotifications();
 }
 
 async function openNotif(id, link){
