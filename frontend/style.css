@@ -2203,3 +2203,13 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 .nn-tunnel-row .node-action{grid-column:3;grid-row:1;align-self:end}
 .nn-field>input[type=number]{max-width:120px}
 .nn-tunnel-row .nn-field:first-child>input{max-width:180px}
+/* 隧道行：固定宽度紧凑排列，不再随容器拉伸 */
+.nn-tunnel-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 10px}
+.nn-tunnel-row .nn-field{flex:0 0 auto;width:auto;grid-column:auto;grid-row:auto}
+.nn-tunnel-row .nn-field>input,.nn-tunnel-row .nn-field>select{width:100%}
+.nn-tunnel-row .nn-field:first-child{width:180px}
+.nn-tunnel-row .nn-field:nth-child(2){width:88px}
+.nn-tunnel-row .nn-field:nth-child(3){width:120px}
+.nn-tunnel-row .nn-field:nth-child(4){width:100px}
+.nn-tunnel-row .nn-field:first-child>input{max-width:none}
+.nn-tunnel-row .node-action{flex:0 0 auto;grid-column:auto;grid-row:auto}
