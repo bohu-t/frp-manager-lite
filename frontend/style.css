@@ -2266,3 +2266,5 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 .ledger-unit.cash{background:rgba(22,163,74,.12);color:#16a34a}
 .ledger-dir.in{background:rgba(22,163,74,.1);color:#16a34a}
 .ledger-dir.out{background:rgba(220,38,38,.1);color:#dc2626}
+.ledger-toolbar select{width:auto;flex:0 0 auto;min-width:118px;max-width:168px;box-sizing:border-box}
+.ledger-toolbar{margin-bottom:14px}
