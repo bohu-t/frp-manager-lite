@@ -4787,11 +4787,13 @@ def cancel_user_plan(user: sqlite3.Row, user_plan_id: int) -> tuple[bool, str, d
     return True, msg, info
 
 
-PLAN_GRACE_SECONDS = int(os.getenv("FML_PLAN_GRACE_HOURS", "72") or 72) * 3600
+PLAN_GRACE_SECONDS = int(os.getenv("FML_PLAN_GRACE_HOURS", "0") or 0) * 3600
 
 
 def release_plan_resources(conn: sqlite3.Connection, plan_row: sqlite3.Row, keep_ports: bool = True) -> None:
-    """停用隧道。到期/用尽保留端口 3 天供续期；主动退订则立即回收端口。"""
+    """停用隧道。宽限期为 0 时，到期/用尽也立即回收端口。"""
+    if keep_ports and PLAN_GRACE_SECONDS <= 0:
+        keep_ports = False
     ports = conn.execute("SELECT node_id, port FROM user_plan_ports WHERE user_plan_id=?", (plan_row["id"],)).fetchall()
     for pr in ports:
         node_id, port = int(pr["node_id"]), int(pr["port"])
@@ -4991,7 +4993,7 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
          duration_days, node_id, now(), expires_at, now()))
     conn.execute("UPDATE users SET node_id=? WHERE id=? AND (node_id IS NULL OR node_id=0)", (node_id, user["id"]))
     plan_id_new = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
-    # 续期优先接管保留中的端口（三天宽限期内），恢复原隧道
+    # 续期优先接管保留中的端口（宽限期内），恢复原隧道
     claimed = claim_retained_ports(conn, int(user["id"]), plan_id_new, max_ports, node_id) if max_ports else []
     need = max(0, max_ports - len(claimed))
     free_ports = available_ports_for_assignment(conn, node_id, need) if need else []
