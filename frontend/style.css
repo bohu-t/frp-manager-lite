@@ -2335,3 +2335,22 @@ html[data-theme="dark"] .fin-range-btn.active{background:#1e3a5f;color:#93c5fd}
 .host-rule-list li{font-size:13px;line-height:1.75;color:var(--text)}
 .host-rule-list li b{color:var(--text-strong);font-weight:700}
 .host-rule-list li span{color:var(--muted)}
+/* 托管申请向导 */
+.host-wizard{max-width:760px}
+.hw-steps{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
+.hw-step{display:flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;background:#f1f5f9;color:var(--muted);font-size:12px}
+.hw-step span{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#e2e8f0;color:#64748b;font-size:11px;font-weight:700}
+.hw-step.active{background:#eef5ff;color:#1677FF}
+.hw-step.active span{background:#1677FF;color:#fff}
+.hw-step.done{color:#16a34a}
+.hw-step.done span{background:#16a34a;color:#fff}
+.hw-rules .host-rule-list{margin:12px 0 18px}
+.hw-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
+.hw-actions.span-2{grid-column:1/-1}
+.hw-script .copy-line{display:flex;gap:8px;align-items:flex-start;margin:12px 0}
+.hw-script .deploy-token{flex:1;min-width:0;white-space:pre-wrap;word-break:break-all;font-size:12px;line-height:1.6;padding:10px 12px;border-radius:10px;background:#0f172a;color:#bfdbfe}
+.hw-status{padding:10px 12px;border-radius:10px;background:#f8fafc;color:var(--muted);font-size:13px}
+.hw-status.ok{background:#dcfce7;color:#15803d}
+html[data-theme="dark"] .hw-step{background:rgba(90,140,220,.12)}
+html[data-theme="dark"] .hw-step.active{background:rgba(22,119,255,.2);color:#93c5fd}
+html[data-theme="dark"] .hw-status{background:rgba(90,140,220,.1)}

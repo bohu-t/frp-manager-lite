@@ -1429,37 +1429,178 @@ function hostRowsHtml(hosts, admin){
     </tr>`).join('') || `<tr><td colspan="${admin ? 11 : 10}" class="muted">暂无托管记录</td></tr>`;
 }
 
+let hostWizard = { step: 1, host: null, timer: null };
+
 function hostFormModal(){
+  hostWizard = { step: 1, host: null, timer: null };
+  renderHostWizard();
+}
+
+function closeHostForm(){
+  if(hostWizard.timer){ clearInterval(hostWizard.timer); hostWizard.timer = null; }
+  const el = document.querySelector('#hostFormModal');
+  if(el) el.remove();
+}
+
+function hostWizardStepper(step){
+  const steps = [['1','托管准则'],['2','母鸡信息'],['3','设置套餐'],['4','接入平台']];
+  return `<div class="hw-steps">${steps.map(([no, label], i) => {
+    const n = i + 1;
+    const state = n < step ? ' done' : (n === step ? ' active' : '');
+    return `<div class="hw-step${state}"><span>${n < step ? '✓' : no}</span><b>${label}</b></div>`;
+  }).join('')}</div>`;
+}
+
+function renderHostWizard(){
+  const step = hostWizard.step;
+  const host = hostWizard.host || {};
+  let body = '';
+  if(step === 1){
+    body = `<div class="hw-rules">
+      <p class="muted small">提交母鸡前请先阅读并同意以下准则。</p>
+      <ol class="host-rule-list">${HOST_RULES.map(([t, d]) => `<li><b>${esc(t)}：</b><span>${esc(d)}</span></li>`).join('')}</ol>
+      <div class="hw-actions"><button type="button" class="secondary" onclick="closeHostForm()">取消</button><button type="button" onclick="hostWizardNext(2)">同意并继续</button></div>
+    </div>`;
+  } else if(step === 2){
+    body = `<form id="hwHostForm" class="grid">
+      <div><label>母鸡名称</label><input name="name" required placeholder="例如 wh-01"></div>
+      <div><label>地区</label><input name="region" placeholder="例如 武汉" required></div>
+      <div><label>公网 IP / 域名</label><input name="server_addr" required placeholder="frp.example.com"></div>
+      <div><label>frps 端口</label><input name="server_port" type="number" value="7000" min="1" max="65535" required></div>
+      <div><label>端口起始</label><input name="port_start" type="number" value="20000" min="1" max="65535" required></div>
+      <div><label>端口结束</label><input name="port_end" type="number" value="20199" min="1" max="65535" required></div>
+      <div><label>带宽 Mbps</label><input name="bandwidth_mbps" type="number" value="100" min="1" required></div>
+      <div><label>月流量 GB</label><input name="monthly_traffic_gb" type="number" value="500" min="0.1" step="0.1" required></div>
+      <div><label>服务器到期时间</label><input name="expires_at" type="date" required min="${new Date(Date.now() + 86400000).toISOString().slice(0,10)}"><span class="muted small">用于限制套餐时长，到期自动停售</span></div>
+      <div class="span-2"><label>备注</label><input name="note" placeholder="线路 / 机房 / 联系方式" required></div>
+      <div class="hw-actions span-2"><button type="button" class="secondary" onclick="hostWizardNext(1)">上一步</button><button type="submit">下一步：设置套餐</button></div>
+    </form>`;
+  } else if(step === 3){
+    body = `<form id="hwPlanForm" class="grid">
+      <div class="span-2"><p class="muted small">母鸡「${esc(host.node_name || '')}」已创建，先配置一个套餐，审核通过后自动上架。</p></div>
+      <div><label>套餐名称</label><input name="name" required placeholder="例如 入门版"></div>
+      <div><label>价格（¥）</label><input name="price_points" type="number" min="0" value="10" required></div>
+      <div><label>计费方式</label><select name="billing_mode"><option value="time">时间模式</option><option value="traffic">流量模式</option></select></div>
+      <div><label>有效期（天）</label><input name="duration_days" type="number" min="1" max="30" value="30"></div>
+      <div><label>流量额度 GB</label><input name="traffic_limit_gb" type="number" min="0" step="0.1" value="0"><span class="muted small">流量模式必填</span></div>
+      <div><label>端口数</label><input name="max_ports" type="number" min="1" max="100" value="5" required></div>
+      <div class="hw-actions span-2"><button type="button" class="secondary" onclick="hostWizardNext(2)">上一步</button><button type="submit">下一步：生成接入脚本</button></div>
+    </form>`;
+  } else {
+    body = `<div class="hw-script">
+      <p class="muted small">在母鸡机器上执行下面命令，接入成功后会自动提交管理员审核。</p>
+      <div class="copy-line"><code class="token deploy-token" id="hwScriptCmd">${esc(host.script || '')}</code><button type="button" class="secondary" onclick="copyHostWizardScript()">复制命令</button></div>
+      <div class="hw-status" id="hwStatus">${host.status === 'pending' ? '已提交审核，等待管理员核查' : '等待母鸡接入…'}</div>
+      <div class="hw-actions"><button type="button" class="secondary" onclick="checkHostWizardStatus()">检测接入状态</button><button type="button" onclick="closeHostForm(); loadHosts()">完成</button></div>
+    </div>`;
+  }
+  const old = document.querySelector('#hostFormModal');
+  if(old) old.remove();
   document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="hostFormModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeHostForm()">
-    <section class="modal-page card">
-      <div class="section-title modal-title"><div><h2>添加母鸡</h2><p>提交后由管理员审核，通过后自动创建实例。</p></div><button type="button" class="secondary modal-close" onclick="closeHostForm()">关闭 ×</button></div>
-      <form id="hostForm" class="grid">
-        <div><label>母鸡名称</label><input name="name" required placeholder="例如 wh-01"></div>
-        <div><label>地区</label><input name="region" placeholder="例如 武汉" required></div>
-        <div><label>公网 IP / 域名</label><input name="server_addr" required placeholder="frp.example.com"></div>
-        <div><label>frps 端口</label><input name="server_port" type="number" value="7000" min="1" max="65535" required></div>
-        <div><label>端口起始</label><input name="port_start" type="number" value="20000" min="1" max="65535" required></div>
-        <div><label>端口结束</label><input name="port_end" type="number" value="20199" min="1" max="65535" required></div>
-        <div><label>带宽 Mbps</label><input name="bandwidth_mbps" type="number" value="100" min="1" required></div>
-        <div><label>月流量 GB</label><input name="monthly_traffic_gb" type="number" value="500" min="0.1" step="0.1" required></div>
-        <div><label>服务器到期时间</label><input name="expires_at" type="date" required min="${new Date(Date.now() + 86400000).toISOString().slice(0,10)}"><span class="muted small">用于限制套餐时长，到期自动停售</span></div>
-        <div class="span-2"><label>备注</label><input name="note" placeholder="线路 / 机房 / 联系方式" required></div>
-        <div class="form-actions span-2"><button>提交审核</button></div>
-      </form>
+    <section class="modal-page card host-wizard">
+      <div class="section-title modal-title"><div><h2>添加母鸡</h2><p>四步完成：阅读准则、填写信息、设置套餐、接入平台</p></div><button type="button" class="secondary modal-close" onclick="closeHostForm()">关闭 ×</button></div>
+      ${hostWizardStepper(step)}
+      ${body}
     </section>
   </div>`);
-  const form = document.querySelector('#hostForm');
-  form.onsubmit = async (e) => {
-    e.preventDefault();
-    try{
-      const r = await api('/api/user/hosts', {method:'POST', body:Object.fromEntries(new FormData(e.target))});
-      closeHostForm();
-      await appAlert(r.message || '已提交', {title:'提交成功'});
-      loadHosts();
-    }catch(err){ await appAlert(err.message, {title:'提交失败'}); }
-  };
+
+  if(step === 2){
+    const form = document.querySelector('#hwHostForm');
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector('button[type="submit"]');
+      btn.disabled = true; btn.textContent = '提交中…';
+      try{
+        const r = await api('/api/user/hosts', {method:'POST', body:Object.fromEntries(new FormData(form))});
+        hostWizard.host = {
+          host_id: r.host_id, node_id: r.node_id, node_name: r.node_name,
+          deploy_token: r.deploy_token, auth_token: r.auth_token,
+          region: r.region, server_addr: r.server_addr, server_port: r.server_port,
+          port_start: r.port_start, port_end: r.port_end, bandwidth_mbps: r.bandwidth_mbps,
+          note: new FormData(form).get('note') || ''
+        };
+        hostWizard.step = 3;
+        renderHostWizard();
+      }catch(err){
+        btn.disabled = false; btn.textContent = '下一步：设置套餐';
+        await appAlert(err.message, {title:'提交失败'});
+      }
+    };
+  }
+  if(step === 3){
+    const form = document.querySelector('#hwPlanForm');
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector('button[type="submit"]');
+      btn.disabled = true; btn.textContent = '保存中…';
+      try{
+        const fd = Object.fromEntries(new FormData(form));
+        await api('/api/user/provider/plans/save', {method:'POST', body:{...fd, node_id: hostWizard.host.node_id}});
+        hostWizard.host.script = buildHostWizardScript(hostWizard.host);
+        hostWizard.step = 4;
+        renderHostWizard();
+        checkHostWizardStatus(true);
+        if(hostWizard.timer) clearInterval(hostWizard.timer);
+        hostWizard.timer = setInterval(() => checkHostWizardStatus(true), 10000);
+      }catch(err){
+        btn.disabled = false; btn.textContent = '下一步：生成接入脚本';
+        await appAlert(err.message, {title:'保存失败'});
+      }
+    };
+  }
 }
-function closeHostForm(){ const el = document.querySelector('#hostFormModal'); if(el) el.remove(); }
+
+function hostWizardNext(step){
+  if(step === 1){ closeHostForm(); return; }
+  hostWizard.step = step;
+  renderHostWizard();
+}
+
+function buildHostWizardScript(h){
+  const env = [
+    `PANEL_URL=${shellQuote(location.origin)}`,
+    `SETUP_KEY=${shellQuote(h.deploy_token || '')}`,
+    `NODE_NAME=${shellQuote(h.node_name || '')}`,
+    `REGION=${shellQuote(h.region || '')}`,
+    `SERVER_IP=${shellQuote(h.server_addr || '')}`,
+    `FRPS_BIND_PORT=${shellQuote(String(h.server_port || 7000))}`,
+    `FRPS_TOKEN=${shellQuote(h.auth_token || '')}`,
+    `PORT_START=${shellQuote(String(h.port_start || 20000))}`,
+    `PORT_END=${shellQuote(String(h.port_end || 20199))}`,
+    `BANDWIDTH_MBPS=${shellQuote(String(h.bandwidth_mbps || 0))}`,
+    `NOTE=${shellQuote(h.note || '')}`,
+    'FRP_CHANNEL=stable'
+  ];
+  return `${env.join(' ')} bash <(curl -fsSL ${NODE_INSTALL_SCRIPT_URL})`;
+}
+
+function copyHostWizardScript(){
+  const el = document.querySelector('#hwScriptCmd');
+  if(!el) return;
+  copyText(el.textContent.trim());
+}
+
+async function checkHostWizardStatus(silent){
+  if(!hostWizard.host) return;
+  try{
+    const r = await api('/api/user/hosts');
+    const list = r.hosts || [];
+    const row = list.find(h => Number(h.id) === Number(hostWizard.host.host_id));
+    const el = document.querySelector('#hwStatus');
+    if(!row || !el) return;
+    if(row.status === 'pending'){
+      el.textContent = '已接入平台，已提交管理员审核';
+      el.className = 'hw-status ok';
+      if(hostWizard.timer){ clearInterval(hostWizard.timer); hostWizard.timer = null; }
+    } else if(row.status === 'approved'){
+      el.textContent = '审核通过，节点与套餐已上架';
+      el.className = 'hw-status ok';
+      if(hostWizard.timer){ clearInterval(hostWizard.timer); hostWizard.timer = null; }
+    } else {
+      el.textContent = '等待母鸡接入…';
+    }
+  }catch(e){ if(!silent) show(e.message, true); }
+}
 
 async function loadHosts(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
@@ -1511,12 +1652,6 @@ async function loadHosts(){
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">HOSTING</span><h1>托管申请</h1><p>提交母鸡、上架套餐、查看收益与申请记录。</p></div>
       <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadHosts()">刷新</button><button type="button" onclick="hostFormModal()">＋ 添加母鸡</button></div></div>
-    <section class="card host-rules-card">
-      <div class="section-title"><div><div class="section-kicker">RULES</div><h2>${stIcon('license')}托管规则与准则</h2><p>提交母鸡前请先阅读，审核通过即视为同意以下条款</p></div></div>
-      <ol class="host-rule-list">
-        ${HOST_RULES.map(([t, d]) => `<li><b>${esc(t)}：</b><span>${esc(d)}</span></li>`).join('')}
-      </ol>
-    </section>
     <nav class="seg-tabs">
       <button type="button" class="seg-tab${tab === 'nodes' ? ' active' : ''}" onclick="switchHostsTab('nodes')">我的节点${pNodes.length ? `<span>${pNodes.length}</span>` : ''}</button>
       <button type="button" class="seg-tab${tab === 'plans' ? ' active' : ''}" onclick="switchHostsTab('plans')">我的套餐${pPlans.length ? `<span>${pPlans.length}</span>` : ''}</button>

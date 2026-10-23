@@ -3061,6 +3061,9 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status, created_at);
             """
         )
+        host_cols = {r["name"] for r in conn.execute("PRAGMA table_info(hosts)").fetchall()}
+        if "deploy_token" not in host_cols:
+            conn.execute("ALTER TABLE hosts ADD COLUMN deploy_token TEXT NOT NULL DEFAULT ''")
         ann_cols = {r["name"] for r in conn.execute("PRAGMA table_info(announcements)").fetchall()}
         if "kind" not in ann_cols:
             conn.execute("ALTER TABLE announcements ADD COLUMN kind TEXT NOT NULL DEFAULT 'announcement'")
@@ -3700,6 +3703,14 @@ NOTIFY_TEMPLATES: dict[str, dict[str, str]] = {
     "payout_paid": {
         "title": "提现已打款：¥{amount}",
         "content": "提现单 {payout_no} 已打款，请留意到账。",
+    },
+    "host_approved": {
+        "title": "托管审核通过：{name}",
+        "content": "你的母鸡「{name}」已通过审核，节点与套餐已上架，用户可开始购买。",
+    },
+    "host_submitted": {
+        "title": "托管待审核：{name}",
+        "content": "用户 {username} 的母鸡「{name}」已接入平台，请核查信息后决定是否上架。",
     },
     "payout_rejected": {
         "title": "提现被驳回：¥{amount}",
@@ -5664,7 +5675,7 @@ def provider_plan_save(user: sqlite3.Row, data: dict[str, Any]) -> tuple[bool, s
         return False, "带宽上限不合法"
     traffic_bytes = int(traffic_gb * 1024 ** 3)
     with db() as conn:
-        node = conn.execute("SELECT id, owner_id, expires_at FROM nodes WHERE id=?", (node_id,)).fetchone()
+        node = conn.execute("SELECT id, owner_id, expires_at, active FROM nodes WHERE id=?", (node_id,)).fetchone()
         if not node or int(node["owner_id"] or 0) != int(user["id"]):
             return False, "只能在自己的节点上架套餐"
         node_exp = int(node["expires_at"] or 0)
@@ -5674,6 +5685,9 @@ def provider_plan_save(user: sqlite3.Row, data: dict[str, Any]) -> tuple[bool, s
             remain_days = (node_exp - now()) // 86400
             if days > remain_days:
                 return False, f"套餐时长超过母鸡剩余可用天数（{remain_days} 天）"
+        node_active = int(node["active"] or 0)
+        want_active = 1 if data.get("active", True) else 0
+        active_value = want_active if node_active else 0
         if pid:
             row = conn.execute(
                 "SELECT p.id FROM plans p JOIN nodes n ON n.id=p.node_id WHERE p.id=? AND n.owner_id=? AND p.deleted=0",
@@ -5684,15 +5698,15 @@ def provider_plan_save(user: sqlite3.Row, data: dict[str, Any]) -> tuple[bool, s
                 """UPDATE plans SET name=?, billing_mode=?, price_points=?, max_ports=?, traffic_limit_bytes=?,
                    bandwidth_limit_kbps=?, duration_days=?, node_id=?, active=? WHERE id=?""",
                 (name, mode, price, max_ports, traffic_bytes, bandwidth * 1000 // 8, days, node_id,
-                 1 if data.get("active", True) else 0, pid))
+                 active_value, pid))
             return True, "套餐已更新"
         conn.execute(
             """INSERT INTO plans(seq_no, deleted, name, billing_mode, price_cents, price_points, max_ports,
                traffic_limit_bytes, bandwidth_limit_kbps, duration_days, node_id, note, fair_use_note, active, sort_order, created_at)
                VALUES(0,0,?,?,0,?,?,?,?,?,?,?,?,?,0,?)""",
             (name, mode, price, max_ports, traffic_bytes, bandwidth * 1000 // 8, days, node_id,
-             f"供给方套餐（{user['username']}）", "", 1 if data.get("active", True) else 0, now()))
-        return True, "套餐已上架"
+             f"供给方套餐（{user['username']}）", "", active_value, now()))
+        return True, ("套餐已保存，待节点审核通过后自动上架" if not node_active else "套餐已上架")
 
 
 def provider_nodes_payload(conn: sqlite3.Connection, user_id: int) -> list[dict[str, Any]]:
@@ -5732,24 +5746,24 @@ def list_hosts(conn: sqlite3.Connection, user_id: int | None = None) -> list[dic
     return [host_public(r) for r in rows]
 
 
-def create_host_application(user: sqlite3.Row, data: dict[str, Any]) -> tuple[bool, str]:
+def create_host_application(user: sqlite3.Row, data: dict[str, Any]) -> tuple[bool, str, dict[str, Any]]:
     name = str(data.get("name", "")).strip()[:40]
     region = str(data.get("region", "")).strip()[:40]
     server_addr = str(data.get("server_addr", "")).strip()[:200]
     note = str(data.get("note", "")).strip()[:300]
     expires_at = parse_date_epoch(str(data.get("expires_at", "")))
     if not name or not name.replace("_", "").replace("-", "").isalnum():
-        return False, "母鸡名称只能包含字母、数字、下划线、短横线"
+        return False, "母鸡名称只能包含字母、数字、下划线、短横线", {}
     if not region:
-        return False, "请填写地区"
+        return False, "请填写地区", {}
     if not server_addr:
-        return False, "请填写公网 IP 或域名"
+        return False, "请填写公网 IP 或域名", {}
     if not note:
-        return False, "请填写备注（线路 / 机房 / 联系方式）"
+        return False, "请填写备注（线路 / 机房 / 联系方式）", {}
     if not expires_at:
-        return False, "请填写服务器到期时间（格式 2026-12-31）"
+        return False, "请填写服务器到期时间（格式 2026-12-31）", {}
     if expires_at <= now() + 86400:
-        return False, "服务器到期时间必须晚于明天"
+        return False, "服务器到期时间必须晚于明天", {}
     try:
         server_port = int(data.get("server_port", 0) or 0)
         port_start = int(data.get("port_start", 0) or 0)
@@ -5757,26 +5771,46 @@ def create_host_application(user: sqlite3.Row, data: dict[str, Any]) -> tuple[bo
         bandwidth = int(data.get("bandwidth_mbps", 0) or 0)
         monthly = float(data.get("monthly_traffic_gb", 0) or 0)
     except (TypeError, ValueError):
-        return False, "端口 / 带宽 / 流量格式不正确"
+        return False, "端口 / 带宽 / 流量格式不正确", {}
     if not (1 <= server_port <= 65535):
-        return False, "frps 端口不合法"
+        return False, "frps 端口不合法", {}
     if not (1 <= port_start <= port_end <= 65535):
-        return False, "端口范围不合法"
+        return False, "端口范围不合法", {}
     if port_end - port_start > 20000:
-        return False, "端口池不要超过 20000 个"
+        return False, "端口池不要超过 20000 个", {}
     if bandwidth <= 0:
-        return False, "请填写带宽（Mbps，必须大于 0）"
+        return False, "请填写带宽（Mbps，必须大于 0）", {}
     if monthly <= 0:
-        return False, "请填写月流量（GB，必须大于 0）"
+        return False, "请填写月流量（GB，必须大于 0）", {}
     with db() as conn:
-        pending = conn.execute("SELECT COUNT(*) FROM hosts WHERE user_id=? AND status='pending'", (user["id"],)).fetchone()[0]
+        pending = conn.execute("SELECT COUNT(*) FROM hosts WHERE user_id=? AND status IN ('pending','pending_node')", (user["id"],)).fetchone()[0]
         if pending >= 5:
-            return False, "待审核的托管申请过多，请等待处理"
+            return False, "待审核的托管申请过多，请等待处理", {}
+        node_name = name
+        suffix = 1
+        while conn.execute("SELECT 1 FROM nodes WHERE name=?", (node_name,)).fetchone():
+            suffix += 1
+            node_name = f"{name}-{suffix}"
+        node_token = secrets.token_urlsafe(24)
+        cur = conn.execute(
+            "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, monthly_traffic_bytes, active, note, created_at, owner_id, expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (region, node_name, server_addr, server_port, node_token, port_start, port_end, 0, "", "", "",
+             bandwidth, int(monthly * 1024 ** 3), 0, f"托管：{user['username']} / {note}".strip(), now(), int(user["id"]), expires_at))
+        node_id = int(cur.lastrowid)
+        conn.executemany("INSERT OR IGNORE INTO ports(node_id, port, created_at) VALUES(?,?,?)",
+                         [(node_id, p, now()) for p in range(port_start, port_end + 1)])
+        deploy_token = secrets.token_urlsafe(24)
         conn.execute(
-            "INSERT INTO hosts(user_id, username, name, region, server_addr, server_port, port_start, port_end, bandwidth_mbps, monthly_traffic_gb, cpu, memory, disk, note, status, created_at, updated_at, expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO hosts(user_id, username, name, region, server_addr, server_port, port_start, port_end, bandwidth_mbps, monthly_traffic_gb, cpu, memory, disk, note, status, node_id, deploy_token, created_at, updated_at, expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (user["id"], user["username"], name, region, server_addr, server_port, port_start, port_end,
-             bandwidth, monthly, "", "", "", note, "pending", now(), now(), expires_at))
-    return True, "已提交托管申请，等待管理员审核"
+             bandwidth, monthly, "", "", "", note, "pending_node", node_id, deploy_token, now(), now(), expires_at))
+        host_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+    return True, "母鸡信息已保存，请继续配置套餐并执行接入脚本", {
+        "host_id": host_id, "node_id": node_id, "node_name": node_name,
+        "deploy_token": deploy_token, "auth_token": node_token,
+        "region": region, "server_addr": server_addr, "server_port": server_port,
+        "port_start": port_start, "port_end": port_end, "bandwidth_mbps": bandwidth,
+    }
 
 
 def review_host_application(admin: sqlite3.Row, host_id: int, action: str, reason: str = "") -> tuple[bool, str]:
@@ -5800,6 +5834,21 @@ def review_host_application(admin: sqlite3.Row, host_id: int, action: str, reaso
             return True, "已加入黑名单"
         if host["status"] == "approved" and host["node_id"]:
             return False, "该申请已通过"
+        existing_node = int(host["node_id"] or 0)
+        if existing_node:
+            conn.execute(
+                "UPDATE nodes SET region=?, server_addr=?, server_port=?, port_start=?, port_end=?, bandwidth_mbps=?, monthly_traffic_bytes=?, active=1, expires_at=? WHERE id=?",
+                (host["region"], host["server_addr"], int(host["server_port"]), int(host["port_start"]),
+                 int(host["port_end"]), int(host["bandwidth_mbps"] or 0),
+                 int(float(host["monthly_traffic_gb"] or 0) * 1024 ** 3), int(host["expires_at"] or 0), existing_node))
+            conn.executemany("INSERT OR IGNORE INTO ports(node_id, port, created_at) VALUES(?,?,?)",
+                             [(existing_node, p, now()) for p in range(int(host["port_start"]), int(host["port_end"]) + 1)])
+            conn.execute("UPDATE plans SET active=1 WHERE node_id=?", (existing_node,))
+            conn.execute("UPDATE hosts SET status='approved', reviewed_by=?, reviewed_at=?, updated_at=? WHERE id=?",
+                         (admin["id"], now(), now(), host_id))
+            notify(conn, int(host["user_id"]), "host_approved", "hosts",
+                   name=str(host["name"]))
+            return True, "已通过审核，节点与套餐已上架"
         # approve -> create node
         base_name = str(host["name"])
         node_name = base_name
@@ -5969,14 +6018,28 @@ class Handler(BaseHTTPRequestHandler):
             return
         setup_key = str(data.get("setup_key", ""))
         expected_setup_key = effective_setup_key()
-        if not expected_setup_key or not hmac.compare_digest(setup_key, expected_setup_key):
-            self.send_json({"ok": False, "error": "setup_key 无效，请在面板「运行总览 · 运维入口」设置"}, 403)
-            return
+        host_apply = None
+        if not (expected_setup_key and hmac.compare_digest(setup_key, expected_setup_key)):
+            with db() as conn:
+                host_apply = conn.execute("SELECT * FROM hosts WHERE deploy_token=? AND status IN ('pending_node','pending')", (setup_key,)).fetchone()
+            if not host_apply:
+                self.send_json({"ok": False, "error": "接入密钥无效，请在托管页面重新生成脚本"}, 403)
+                return
         try:
             region = str(data.get("region", "")).strip() or "默认地区"
             name = str(data.get("name", "")).strip()
             server_addr = str(data.get("server_addr", "")).strip()
             server_port = int(data.get("server_port", 7000))
+            if host_apply is not None:
+                node_id = int(host_apply["node_id"] or 0)
+                if node_id:
+                    with db() as conn:
+                        conn.execute("UPDATE nodes SET server_addr=?, server_port=?, active=0 WHERE id=?",
+                                     (server_addr or host_apply["server_addr"], server_port, node_id))
+                        conn.execute("UPDATE hosts SET status='pending', updated_at=? WHERE id=?", (now(), int(host_apply["id"])))
+                        notify_admins_tpl(conn, "host_submitted", "hosts", name=str(host_apply["name"]), username=str(host_apply["username"]))
+                self.send_json({"ok": True, "message": "母鸡已接入平台，已提交管理员审核", "node_id": int(host_apply["node_id"] or 0)})
+                return
             auth_token = str(data.get("auth_token", "")).strip()
             port_start = int(data.get("port_start", 20000))
             port_end = int(data.get("port_end", 20199))
@@ -7130,10 +7193,13 @@ class Handler(BaseHTTPRequestHandler):
             if not ok_rate:
                 self.send_json({"ok": False, "error": f"提交过于频繁，请 {retry_after} 秒后再试"}, 429)
                 return
-            ok, msg = create_host_application(user, data)
+            ok, msg, extra = create_host_application(user, data)
             if ok:
                 audit("host_apply", user, None, None, "", str(data.get("name", "")))
-            self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg}, 200 if ok else 400)
+            payload = {"ok": ok, "message": msg if ok else None, "error": None if ok else msg}
+            if ok:
+                payload.update(extra)
+            self.send_json(payload, 200 if ok else 400)
             return
 
         if path == "/api/user/provider/plans/save":
