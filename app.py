@@ -7320,7 +7320,7 @@ class Handler(BaseHTTPRequestHandler):
             method = str(data.get("method", "alipay")).strip().lower()
             account = str(data.get("account", "")).strip()[:120]
             holder = str(data.get("holder", "")).strip()[:60]
-            if method not in ("alipay", "wechat", "bank"):
+            if method not in ("alipay", "wechat"):
                 self.send_json({"ok": False, "error": "收款方式不支持"}, 400)
                 return
             if not account or not holder:

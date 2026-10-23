@@ -3492,10 +3492,10 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         </section>
       </div>
       <section class="card" style="margin-top:16px">
-        <div class="section-title"><div><div class="section-kicker">PAYOUT</div><h2>${stIcon('key')}收款信息</h2><p>用于提现收益到你的支付宝 / 微信 / 银行卡</p></div></div>
+        <div class="section-title"><div><div class="section-kicker">PAYOUT</div><h2>${stIcon('key')}收款信息</h2><p>用于提现收益到你的支付宝 / 微信</p></div></div>
         <form id="payoutAccountForm" class="grid">
-          <div><label>收款方式</label><select name="method"><option value="alipay"${payoutAcc.method === 'alipay' ? ' selected' : ''}>支付宝</option><option value="wechat"${payoutAcc.method === 'wechat' ? ' selected' : ''}>微信</option><option value="bank"${payoutAcc.method === 'bank' ? ' selected' : ''}>银行卡</option></select></div>
-          <div><label>收款账号</label><input name="account" value="${esc(payoutAcc.account || '')}" required placeholder="支付宝账号 / 微信号 / 银行卡号"></div>
+          <div><label>收款方式</label><select name="method"><option value="alipay"${payoutAcc.method === 'alipay' ? ' selected' : ''}>支付宝</option><option value="wechat"${payoutAcc.method === 'wechat' ? ' selected' : ''}>微信</option></select></div>
+          <div><label>收款账号</label><input name="account" value="${esc(payoutAcc.account || '')}" required placeholder="支付宝账号 / 微信号"></div>
           <div><label>姓名</label><input name="holder" value="${esc(payoutAcc.holder || '')}" required placeholder="收款人姓名"></div>
           <div class="span-2"><label>收款码（可选）</label><input type="file" id="qrFile" accept="image/png,image/jpeg,image/webp"><input type="hidden" name="qr_token" value="${esc(payoutAcc.qr_token || '')}"><div id="qrPreview" class="qr-preview">${payoutAcc.qr_token ? `<img src="/api/upload/${encodeURIComponent(payoutAcc.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(payoutAcc.qr_token)}')">` : ''}</div></div>
           <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存收款信息</button></div>
