@@ -4797,7 +4797,8 @@ def auto_renew_plans_once() -> int:
                 if cost > 0:
                     points_change(conn, int(r["user_id"]), -cost, "plan_auto_renew", f"up:{r['id']}", f"自动续期 {r['plan_name']}")
                 base = max(now(), int(r["expires_at"] or 0))
-                conn.execute("UPDATE user_plans SET expires_at=?, status='active' WHERE id=?", (base + days * 86400, r["id"]))
+                conn.execute("UPDATE user_plans SET expires_at=?, duration_days=duration_days+?, price_points=price_points+?, status='active' WHERE id=?",
+                             (base + days * 86400, days, max(0, cost), r["id"]))
                 renewed += 1
             except ValueError:
                 conn.execute("UPDATE user_plans SET auto_renew=0 WHERE id=?", (r["id"],))
@@ -4878,13 +4879,14 @@ def provision_order(conn: sqlite3.Connection, order: sqlite3.Row) -> tuple[bool,
         expires_at = 0 if duration_days <= 0 else now() + duration_days * 86400
     if existing:
         # 同一节点同一套餐重复购买：时间叠加、流量叠加，端口不增加
+        add_points = int(order["points"] or 0)
         if billing_mode == "traffic":
-            conn.execute("UPDATE user_plans SET quota_bytes=quota_bytes+?, status='active', expires_at=0 WHERE id=?",
-                         (quota_bytes, existing["id"]))
+            conn.execute("UPDATE user_plans SET quota_bytes=quota_bytes+?, price_points=price_points+?, status='active', expires_at=0 WHERE id=?",
+                         (quota_bytes, add_points, existing["id"]))
         else:
             base = max(now(), int(existing["expires_at"] or 0))
-            conn.execute("UPDATE user_plans SET expires_at=?, status='active' WHERE id=?",
-                         (base + duration_days * 86400, existing["id"]))
+            conn.execute("UPDATE user_plans SET expires_at=?, duration_days=duration_days+?, price_points=price_points+?, status='active' WHERE id=?",
+                         (base + duration_days * 86400, duration_days, add_points, existing["id"]))
         conn.execute("UPDATE user_plan_ports SET release_at=0 WHERE user_plan_id=?", (existing["id"],))
         conn.execute("UPDATE ports SET user_id=? WHERE node_id=? AND port IN (SELECT port FROM user_plan_ports WHERE user_plan_id=?)",
                      (user["id"], node_id, existing["id"]))
@@ -6264,6 +6266,7 @@ class Handler(BaseHTTPRequestHandler):
                 user_dashboard = frps_user_dashboard(user["username"], user) if node else None
                 refresh_user_plan_usage(conn, int(user["id"]))
                 my_plans = []
+                plan_price_map = {int(x["id"]): int(x["price_points"] or 0) for x in conn.execute("SELECT id, price_points FROM plans").fetchall()}
                 for r in conn.execute("SELECT * FROM user_plans WHERE user_id=? ORDER BY id DESC", (user["id"],)):
                     exp = int(r["expires_at"] or 0)
                     status = r["status"] or "active"
@@ -6279,6 +6282,7 @@ class Handler(BaseHTTPRequestHandler):
                         "expires_at": exp, "expires_text": fmt_time(exp),
                         "status": status, "expired": status != "active", "created_at": r["created_at"],
                         "price_points": int(r["price_points"] or 0),
+                        "renew_price_points": plan_price_map.get(int(r["plan_id"] or 0), int(r["price_points"] or 0)),
                         "refund_points": (compute_plan_refund(conn, r)["points"] if status == "active" else 0),
                         "grace_until": int(conn.execute(
                             "SELECT COALESCE(MAX(release_at),0) FROM user_plan_ports WHERE user_plan_id=?", (r["id"],)).fetchone()[0] or 0),

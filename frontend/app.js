@@ -2466,7 +2466,7 @@ async function loadMyPlans(){
         <div><span>frps 版本</span><b>${esc(n.frps_version || '-')}</b></div>
       </div>
       <div class="my-node-foot">
-        <div class="my-node-foot-row"><span>续费价格</span><b class="my-node-price-val">${Number((planById[Number(p.plan_id)] || {}).price_points ?? p.price_points ?? 0)} 积分</b></div>
+        <div class="my-node-foot-row"><span>续费价格</span><b class="my-node-price-val">${Number((planById[Number(p.plan_id)] || {}).price_points ?? p.renew_price_points ?? p.price_points ?? 0)} 积分</b></div>
         <div class="my-node-foot-row"><span>自动延期</span><span class="my-node-auto">${p.auto_renew ? '已开启' : '未开启'}</span></div>
         <div class="my-node-foot-row"><span>到期时间</span><b>${esc(p.billing_mode === 'traffic' ? '按流量计费' : (p.expires_at ? p.expires_text : '不限期'))}</b></div>
       </div>
@@ -3124,10 +3124,10 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         <div class="instance-action-meta">
           <div><span>套餐</span><b>${esc(plan.plan_name || '-')}</b></div>
           <div><span>${plan.billing_mode === 'traffic' ? '流量' : '到期时间'}</span><b>${esc(planValue)}</b></div>
-          <div><span>续费价格</span><b>${Number(plan.price_points || 0)} 积分</b></div>
+          <div><span>续费价格</span><b>${Number(plan.renew_price_points ?? plan.price_points ?? 0)} 积分</b></div>
         </div>
         <button type="button" class="instance-action-primary" onclick="showTunnelForm()">新建隧道</button>
-        <button type="button" class="secondary" onclick="renewInstance(${Number(plan.id)}, ${Number(plan.plan_id || 0)}, ${Number(selNode ? selNode.id : plan.node_id || 0)}, ${Number(plan.price_points || 0)}, '${esc(plan.plan_name || '')}')">延期</button>
+        <button type="button" class="secondary" onclick="renewInstance(${Number(plan.id)}, ${Number(plan.plan_id || 0)}, ${Number(selNode ? selNode.id : plan.node_id || 0)}, ${Number(plan.renew_price_points ?? plan.price_points ?? 0)}, '${esc(plan.plan_name || '')}')">延期</button>
         <label class="instance-switch"><span>自动延期</span><input type="checkbox"${plan.auto_renew ? ' checked' : ''} onchange="toggleAutoRenew(${Number(plan.id)}, this.checked)"></label>
         <button type="button" class="node-action node-action-danger instance-cancel" onclick="cancelPlan(${Number(plan.id)}, '${esc(plan.plan_name || '')}', ${Number(plan.refund_points || 0)})">退订</button>
       </section>` : '';
