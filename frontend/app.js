@@ -2746,6 +2746,8 @@ function initPayoutAccountForm(){
   };
   form.onsubmit = async (e) => {
     e.preventDefault();
+    const token = String((form.elements.qr_token || {}).value || '').trim();
+    if(!token){ show('请先上传收款码', true); return; }
     try{
       const r = await api('/api/user/payout-account/save', {method:'POST', body:Object.fromEntries(new FormData(form))});
       show(r.message || '已保存');
@@ -3497,7 +3499,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
           <div><label>收款方式</label><select name="method"><option value="alipay"${payoutAcc.method === 'alipay' ? ' selected' : ''}>支付宝</option><option value="wechat"${payoutAcc.method === 'wechat' ? ' selected' : ''}>微信</option></select></div>
           <div><label>收款账号</label><input name="account" value="${esc(payoutAcc.account || '')}" required placeholder="支付宝账号 / 微信号"></div>
           <div><label>姓名</label><input name="holder" value="${esc(payoutAcc.holder || '')}" required placeholder="收款人姓名"></div>
-          <div class="span-2"><label>收款码（可选）</label><input type="file" id="qrFile" accept="image/png,image/jpeg,image/webp"><input type="hidden" name="qr_token" value="${esc(payoutAcc.qr_token || '')}"><div id="qrPreview" class="qr-preview">${payoutAcc.qr_token ? `<img src="/api/upload/${encodeURIComponent(payoutAcc.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(payoutAcc.qr_token)}')">` : ''}</div></div>
+          <div class="span-2"><label>收款码（必填）</label><input type="file" id="qrFile" accept="image/png,image/jpeg,image/webp"><input type="hidden" name="qr_token" value="${esc(payoutAcc.qr_token || '')}"><div id="qrPreview" class="qr-preview">${payoutAcc.qr_token ? `<img src="/api/upload/${encodeURIComponent(payoutAcc.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(payoutAcc.qr_token)}')">` : ''}</div></div>
           <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存收款信息</button></div>
         </form>
       </section>`, 'dashboard-profile', '个人中心');

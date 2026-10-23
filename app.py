@@ -7333,6 +7333,11 @@ class Handler(BaseHTTPRequestHandler):
                     if not own:
                         self.send_json({"ok": False, "error": "收款码无效，请重新上传"}, 400)
                         return
+                else:
+                    existing = conn.execute("SELECT qr_token FROM payout_accounts WHERE user_id=?", (int(user["id"]),)).fetchone()
+                    if not (existing and str(existing["qr_token"] or "").strip()):
+                        self.send_json({"ok": False, "error": "请上传收款码"}, 400)
+                        return
                 conn.execute(
                     "INSERT INTO payout_accounts(user_id, method, account, holder, qr_token, updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET method=excluded.method, account=excluded.account, holder=excluded.holder, qr_token=CASE WHEN excluded.qr_token<>'' THEN excluded.qr_token ELSE payout_accounts.qr_token END, updated_at=excluded.updated_at",
                     (int(user["id"]), method, account, holder, qr_token, now()))
