@@ -6276,7 +6276,7 @@ class Handler(BaseHTTPRequestHandler):
                 user_dashboard = frps_user_dashboard(user["username"], user) if node else None
                 refresh_user_plan_usage(conn, int(user["id"]))
                 my_plans = []
-                plan_price_map = {int(x["id"]): int(x["price_points"] or 0) for x in conn.execute("SELECT id, price_points FROM plans").fetchall()}
+                plan_price_map = {int(x["id"]): int(x["price_points"] or 0) for x in conn.execute("SELECT id, price_points FROM plans WHERE deleted=0").fetchall()}
                 for r in conn.execute("SELECT * FROM user_plans WHERE user_id=? ORDER BY id DESC", (user["id"],)):
                     exp = int(r["expires_at"] or 0)
                     status = r["status"] or "active"
@@ -6292,9 +6292,7 @@ class Handler(BaseHTTPRequestHandler):
                         "expires_at": exp, "expires_text": fmt_time(exp),
                         "status": status, "expired": status != "active", "created_at": r["created_at"],
                         "price_points": int(r["price_points"] or 0),
-                        "renew_price_points": plan_price_map.get(int(r["plan_id"] or 0)) or int((conn.execute(
-                            "SELECT points FROM orders WHERE user_id=? AND plan_id=? ORDER BY id DESC LIMIT 1",
-                            (user["id"], int(r["plan_id"] or 0))).fetchone() or [0])[0] or 0),
+                        "renew_price_points": plan_price_map.get(int(r["plan_id"] or 0)),
                         "refund_points": (compute_plan_refund(conn, r)["points"] if status == "active" else 0),
                         "grace_until": int(conn.execute(
                             "SELECT COALESCE(MAX(release_at),0) FROM user_plan_ports WHERE user_plan_id=?", (r["id"],)).fetchone()[0] or 0),
