@@ -5005,7 +5005,6 @@ def mark_order_paid(order_no: str, transaction_id: str = "", provider: str = "")
             cash = q2(int(row_val(row, "amount_cents", 0) or 0) / 100.0)
             points_change(conn, row["user_id"], pts, "recharge", order_no, "在线充值")
             ledger_add(conn, "cash", "in", "recharge_cash", cash, row["user_id"], row["username"], 0, order_no, "", "在线充值")
-            ledger_add(conn, "points", "in", "recharge_points", pts, row["user_id"], row["username"], 0, order_no, "", "充值到账")
         else:
             ok, msg = provision_order(conn, row)
             if not ok:
@@ -6519,18 +6518,20 @@ class Handler(BaseHTTPRequestHandler):
                 args.append(end_ts)
             clause = (" WHERE " + " AND ".join(where)) if where else ""
             with db() as conn:
+                rate = max(1, int(setting_get(conn, "points_per_yuan", "1") or 1))
                 rows = conn.execute(
                     "SELECT * FROM ledger" + clause + " ORDER BY ts DESC, id DESC LIMIT ?", (*args, limit)).fetchall()
                 totals = conn.execute(
-                    "SELECT unit, direction, COALESCE(SUM(amount),0) FROM ledger" + clause + " GROUP BY unit, direction",
-                    args).fetchall()
-            summary = {"points_in": 0.0, "points_out": 0.0, "cash_in": 0.0, "cash_out": 0.0}
-            for u, d, total in totals:
-                summary[f"{u}_{d}"] = q2(total)
+                    "SELECT direction, COALESCE(SUM(CASE WHEN unit='cash' THEN amount ELSE amount * 1.0 / ? END),0)"
+                    " FROM ledger" + clause + " GROUP BY direction", (rate, *args)).fetchall()
+            summary = {"in": 0.0, "out": 0.0}
+            for d, total in totals:
+                summary[str(d)] = q2(total)
             self.send_json({"ok": True, "rows": [{
                 "id": int(r["id"]), "ts": int(r["ts"]), "unit": r["unit"], "direction": r["direction"],
                 "category": r["category"], "category_text": LEDGER_CATEGORIES.get(r["category"], r["category"]),
-                "amount": q2(r["amount"]), "user_id": int(r["user_id"] or 0), "username": r["username"],
+                "amount": q2(r["amount"] if r["unit"] == "cash" else r["amount"] / rate),
+                "user_id": int(r["user_id"] or 0), "username": r["username"],
                 "node_id": int(r["node_id"] or 0), "order_no": r["order_no"], "ref": r["ref"], "note": r["note"],
             } for r in rows], "summary": summary, "categories": LEDGER_CATEGORIES})
             return
@@ -7108,7 +7109,6 @@ class Handler(BaseHTTPRequestHandler):
                     provider_income_consume(conn, int(user["id"]), points)
                     if mode == "balance":
                         points_change(conn, int(user["id"]), points, "provider_withdraw", "balance", "收益转入余额")
-                        ledger_add(conn, "points", "in", "withdraw_points", points, int(user["id"]), user["username"], 0, "", "balance", "收益转入余额")
                         self.send_json({"ok": True, "message": f"{q2(points):.2f} 积分已转入余额"})
                         return
                     if mode != "external":
