@@ -2268,3 +2268,13 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 .ledger-dir.out{background:rgba(220,38,38,.1);color:#dc2626}
 .ledger-toolbar select{width:auto;flex:0 0 auto;min-width:118px;max-width:168px;box-sizing:border-box}
 .ledger-toolbar{margin-bottom:14px}
+/* 工单状态配色 */
+.status-badge.tk-open{background:#fef3c7;color:#b45309}
+.status-badge.tk-processing{background:#dbeafe;color:#1d4ed8}
+.status-badge.tk-closed{background:#e2e8f0;color:#475569}
+.status-badge.tk-rejected{background:#fee2e2;color:#b91c1c}
+.status-badge.tk-open i,.status-badge.tk-processing i,.status-badge.tk-closed i,.status-badge.tk-rejected i{display:inline-block;width:6px;height:6px;margin-right:5px;border-radius:50%;background:currentColor}
+html[data-theme="dark"] .status-badge.tk-open{background:rgba(245,158,11,.18);color:#fbbf24}
+html[data-theme="dark"] .status-badge.tk-processing{background:rgba(59,130,246,.2);color:#93c5fd}
+html[data-theme="dark"] .status-badge.tk-closed{background:rgba(148,163,184,.2);color:#cbd5e1}
+html[data-theme="dark"] .status-badge.tk-rejected{background:rgba(239,68,68,.2);color:#fca5a5}

@@ -1512,6 +1512,8 @@ function switchHostsTab(tab){
 
 let ticketsTab = 'mine';
 const TICKET_STATUS = { open: '待处理', processing: '处理中', closed: '已关闭', rejected: '已拒绝' };
+const TICKET_STATUS_CLASS = { open: 'tk-open', processing: 'tk-processing', closed: 'tk-closed', rejected: 'tk-rejected' };
+const ticketStatusBadge = (status) => `<span class="status-badge ${TICKET_STATUS_CLASS[status] || ''}"><i></i>${TICKET_STATUS[status] || esc(status)}</span>`;
 const TICKET_KIND = { issue: '问题工单', withdraw: '提现工单' };
 
 async function loadTickets(){
@@ -1535,7 +1537,7 @@ async function loadTickets(){
     const needText = ticketsTab === 'received' ? '待处理' : '待你确认';
     const statusBadge = need
       ? `<span class="status-badge warn"><i></i>${needText}</span>`
-      : `<span class="status-badge ${t.status === 'closed' ? '' : (t.status === 'open' ? 'warn' : 'ok')}"><i></i>${TICKET_STATUS[t.status] || t.status}</span>`;
+      : `${ticketStatusBadge(t.status)}`;
     return `<tr class="${need ? 'need-action' : ''}">
       <td>${i + 1}</td>
       <td>${esc(t.ticket_no)}</td>
@@ -1702,7 +1704,7 @@ async function loadTicketDetail(id, scope){
       <button type="button" class="secondary" onclick="${isAdminView ? "loadAdminTickets()" : "loadTickets()"}">‹ 返回列表</button></div>
     <div class="ticket-layout">
       <section class="card ticket-main">
-        <div class="section-title"><div><h2>${stIcon('log')}沟通记录</h2><p>用户与机主在本页沟通，图片可点开查看原图</p></div><span class="status-badge ${isClosed ? '' : (t.status === 'open' ? 'warn' : 'ok')}"><i></i>${TICKET_STATUS[t.status] || t.status}</span></div>
+        <div class="section-title"><div><h2>${stIcon('log')}沟通记录</h2><p>用户与机主在本页沟通，图片可点开查看原图</p></div>${ticketStatusBadge(t.status)}</div>
         <div class="ticket-thread">${thread}</div>
         ${isClosed ? `<p class="muted small">该工单已关闭${t.resolution ? ' · 处理结果：' + ticketBodyHtml(t.resolution) : ''}</p>` : `
         <div class="ticket-reply">
@@ -1782,7 +1784,7 @@ async function loadAdminTickets(){
   let tickets = [];
   try{ tickets = (await api('/api/admin/tickets')).tickets || []; }
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
-  const rows = tickets.map((t, i) => `<tr><td>${i + 1}</td><td>${esc(t.ticket_no)}</td><td>${TICKET_KIND[t.kind] || t.kind}</td><td>${esc(t.title)}</td><td>${esc(t.username)}</td><td>${t.node_id ? esc(t.node_name || ('#' + t.node_id)) : '不关联'}</td><td><span class="status-badge ${t.status === 'closed' ? '' : (t.status === 'open' ? 'warn' : 'ok')}"><i></i>${TICKET_STATUS[t.status] || t.status}</span></td><td>${fmtTs(t.created_at)}</td><td class="actions node-actions"><button type="button" class="node-action" onclick="loadTicketDetail(${t.id}, 'admin')">查看</button></td></tr>`).join('') || '<tr><td colspan="9" class="muted">暂无工单</td></tr>';
+  const rows = tickets.map((t, i) => `<tr><td>${i + 1}</td><td>${esc(t.ticket_no)}</td><td>${TICKET_KIND[t.kind] || t.kind}</td><td>${esc(t.title)}</td><td>${esc(t.username)}</td><td>${t.node_id ? esc(t.node_name || ('#' + t.node_id)) : '不关联'}</td><td>${ticketStatusBadge(t.status)}</td><td>${fmtTs(t.created_at)}</td><td class="actions node-actions"><button type="button" class="node-action" onclick="loadTicketDetail(${t.id}, 'admin')">查看</button></td></tr>`).join('') || '<tr><td colspan="9" class="muted">暂无工单</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1>故障工单</h1><p>全部用户提交的故障工单</p></div></div>
     <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>编号</th><th>类型</th><th>标题</th><th>提交人</th><th>节点</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
