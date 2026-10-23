@@ -2239,3 +2239,4 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 /* 筛选条与标题留固定间距 */
 .nn-block-region .nn-head-copy{flex:0 0 auto;margin-right:70px}
 @media (max-width:1080px){.nn-block-region .nn-head-copy{margin-right:0}}
+.nn-block-region .nn-head-copy{margin-right:200px}
