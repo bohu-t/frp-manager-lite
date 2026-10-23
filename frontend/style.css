@@ -2219,3 +2219,13 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 .nn-tunnel-row .nn-field:nth-child(3){width:130px}
 .nn-tunnel-row .nn-field:nth-child(4){width:100px}
 .nn-tunnel-row .nn-field:nth-child(5){width:100px}
+/* 地区筛选工具条：单行紧凑 */
+.nn-block-region .nn-block-head{flex-wrap:nowrap;gap:10px}
+.nn-toolbar{flex-wrap:nowrap;flex:0 0 auto;gap:8px}
+.nn-search{flex:0 0 auto;padding:0 10px}
+.nn-search input{width:104px}
+.nn-price-range{padding:0 8px;gap:4px}
+.nn-price-range input{width:42px;font-size:12px}
+.nn-price-range span,.nn-price-range i{font-size:11px}
+.nn-sort{flex:0 0 auto;min-width:88px;width:auto;padding:0 8px}
+@media (max-width:1080px){.nn-block-region .nn-block-head{flex-wrap:wrap}.nn-toolbar{flex-wrap:wrap}}
