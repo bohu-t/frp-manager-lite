@@ -2213,3 +2213,9 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 .nn-tunnel-row .nn-field:nth-child(4){width:100px}
 .nn-tunnel-row .nn-field:first-child>input{max-width:none}
 .nn-tunnel-row .node-action{flex:0 0 auto;grid-column:auto;grid-row:auto}
+/* 隧道行新增本地地址后重新分配宽度 */
+.nn-tunnel-row .nn-field:first-child{width:160px}
+.nn-tunnel-row .nn-field:nth-child(2){width:80px}
+.nn-tunnel-row .nn-field:nth-child(3){width:130px}
+.nn-tunnel-row .nn-field:nth-child(4){width:100px}
+.nn-tunnel-row .nn-field:nth-child(5){width:100px}

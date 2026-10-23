@@ -2215,6 +2215,7 @@ function renderNewNode(){
     return `<div class="nn-tunnel-row">
       <label class="nn-field"><span>隧道名称</span><input value="${esc(t.name || '')}" maxlength="40" oninput="nnTunnelSet(${i},'name',this.value)"></label>
       <label class="nn-field"><span>协议</span><select onchange="nnTunnelSet(${i},'proxy_type',this.value)"><option value="tcp"${t.proxy_type === 'tcp' ? ' selected' : ''}>TCP</option><option value="udp"${t.proxy_type === 'udp' ? ' selected' : ''}>UDP</option></select></label>
+      <label class="nn-field"><span>本地地址</span><input value="${esc(t.local_ip || '127.0.0.1')}" maxlength="60" placeholder="127.0.0.1" oninput="nnTunnelSet(${i},'local_ip',this.value)"></label>
       <label class="nn-field"><span>本地端口</span><input type="number" min="1" max="65535" value="${Number(t.local_port || 0)}" oninput="nnTunnelSet(${i},'local_port',this.value)"></label>
       <label class="nn-field"><span>公网端口</span><select onchange="nnTunnelSet(${i},'remote_port',this.value)">${opts || '<option value="0">暂无可用端口</option>'}</select></label>
       <button type="button" class="node-action node-action-danger" onclick="nnTunnelRemove(${i})">删除</button>
@@ -2345,7 +2346,7 @@ async function nnPickPlan(id){
   nnState.planId = Number(id);
   const plan = ((window.__nnData || {}).plans || []).find(p => Number(p.id) === Number(id)) || {};
   const maxPorts = Math.max(1, Math.min(20, Number(plan.max_ports || 1)));
-  nnState.tunnels = [{ name: '', proxy_type: 'tcp', local_port: 8080, remote_port: 0 }];
+  nnState.tunnels = [{ name: '', proxy_type: 'tcp', local_ip: '127.0.0.1', local_port: 8080, remote_port: 0 }];
   nnState.ports = [];
   renderNewNode();
   try{
@@ -2387,7 +2388,7 @@ async function nnPay(){
         <div><span>地区</span><b>${esc(nnState.region)}</b></div>
         <div><span>实例</span><b>${esc(node.name || '')}</b></div>
         <div><span>套餐</span><b>${esc(plan.name || '')}</b></div>
-        <div><span>隧道</span><b>${(nnState.tunnels || []).filter(t => t.name).map(t => esc(t.name) + ' ' + t.proxy_type.toUpperCase() + ' ' + (t.remote_port || '-')).join('、') || '暂未配置'}</b></div>
+        <div><span>隧道</span><b>${(nnState.tunnels || []).filter(t => t.name).map(t => esc(t.name) + ' ' + t.proxy_type.toUpperCase() + ' ' + esc(t.local_ip || '127.0.0.1') + ':' + Number(t.local_port || 0) + ' → ' + (t.remote_port || '-')).join('、') || '暂未配置'}</b></div>
         <div><span>应付</span><b class="nn-pay-amount">¥${Number(plan.price_points || 0)}</b></div>
       </div>
       <p class="muted small" id="nnPayHint">10 分钟内且端口未产生流量，可全额退订。</p>
@@ -2407,7 +2408,7 @@ async function nnPay(){
       if((nnState.tunnels || []).length && named.length !== (nnState.tunnels || []).length){ fail('有隧道未填写名称'); return; }
       const dupNames = named.map(t => String(t.name).trim()).filter((n, i, arr) => arr.indexOf(n) !== i);
       if(dupNames.length){ fail(`隧道名称「${dupNames[0]}」重复，请更换`); return; }
-      const tunnels = named.map(t => ({name:String(t.name).trim(), proxy_type:t.proxy_type, local_port:Number(t.local_port), remote_port:Number(t.remote_port || 0)}));
+      const tunnels = named.map(t => ({name:String(t.name).trim(), proxy_type:t.proxy_type, local_ip:String(t.local_ip || '127.0.0.1').trim() || '127.0.0.1', local_port:Number(t.local_port), remote_port:Number(t.remote_port || 0)}));
       const r = await api('/api/user/orders', {method:'POST', body:{plan_id:nnState.planId, node_id:nnState.nodeId, tunnels}});
       nnPayClose();
       nnState = { region:'', nodeId:0, planId:0, ports:[], tunnels:[] };
