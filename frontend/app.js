@@ -4268,8 +4268,34 @@ function copyNodeDeployScript(){
   copyText(cmd);
 }
 
+async function refreshPortStats(){
+  try{
+    const r = await api('/api/admin/ports/stats');
+    const total = Number(r.total || 0);
+    const used = Number(r.used || 0);
+    const free = Number(r.free || 0);
+    const pct = total > 0 ? ((used / total) * 100).toFixed(1) : '0.0';
+    const setText = (id, text) => { const el = document.getElementById(id); if(el) el.textContent = text; };
+    setText('ovPortUsage', pct + '%');
+    setText('ovPortSub', `已用 ${used} · 空闲 ${free} · 共 ${total}`);
+    setText('ovPortPct', pct + '%');
+    const bar = document.getElementById('ovPortBar');
+    if(bar) bar.style.width = pct + '%';
+    const track = document.getElementById('ovPortTrack');
+    if(track) track.setAttribute('aria-valuenow', pct);
+  }catch(e){}
+}
+
+let portStatsTimer = null;
+
+function startPortStatsTimer(){
+  if(portStatsTimer) clearInterval(portStatsTimer);
+  portStatsTimer = setInterval(refreshPortStats, 10000);
+}
+
 function clearAdminDashboardTimer(){
   if(adminDashboardTimer){ clearTimeout(adminDashboardTimer); adminDashboardTimer = null; }
+  if(portStatsTimer){ clearInterval(portStatsTimer); portStatsTimer = null; }
 }
 
 function fmtBytes(bytes){
@@ -4829,8 +4855,8 @@ async function loadAdminDashboard(auto=false){
         <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24">${UIICONS.node}</svg></span><div class="ov-stat-copy"><span class="ov-stat-label">节点在线</span><strong class="ov-stat-value">${data.active_node_count}/${data.node_count}</strong><span class="ov-stat-sub">每 ${refreshSeconds} 秒检查认证端口</span></div></div>
       </section>
       <section class="workspace-stat ov-stat" style="--ov-accent:#f59e0b;--ov-tint:#fff8ec">
-        <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24">${UIICONS.port}</svg></span><div class="ov-stat-copy"><span class="ov-stat-label">端口使用率</span><strong class="ov-stat-value">${portUsage}%</strong><span class="ov-stat-sub">已用 ${usedPorts} · 空闲 ${freePorts} · 共 ${totalPorts}</span></div></div>
-        <div class="tunnel-usage"><div class="tunnel-usage-label"><span>端口池</span><b>${portUsage}%</b></div><div class="tunnel-usage-track" role="progressbar" aria-label="端口使用率" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${portUsage}"><span style="width:${portUsage}%"></span></div></div>
+        <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24">${UIICONS.port}</svg></span><div class="ov-stat-copy"><span class="ov-stat-label">端口使用率</span><strong class="ov-stat-value" id="ovPortUsage">${portUsage}%</strong><span class="ov-stat-sub" id="ovPortSub">已用 ${usedPorts} · 空闲 ${freePorts} · 共 ${totalPorts}</span></div></div>
+        <div class="tunnel-usage"><div class="tunnel-usage-label"><span>端口池</span><b id="ovPortPct">${portUsage}%</b></div><div class="tunnel-usage-track" id="ovPortTrack" role="progressbar" aria-label="端口使用率" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${portUsage}"><span id="ovPortBar" style="width:${portUsage}%"></span></div></div>
       </section>
       <section class="workspace-stat ov-stat" style="--ov-accent:#2c6dd2;--ov-tint:#eef4ff">
         <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24">${UIICONS.users}</svg></span><div class="ov-stat-copy"><span class="ov-stat-label">用户</span><strong class="ov-stat-value">${userStats.active}/${userStats.total}</strong><span class="ov-stat-sub">活跃用户 / 总用户</span></div></div>
@@ -4880,6 +4906,7 @@ async function loadAdminDashboard(auto=false){
   renderHostCharts();
   fillNodeLatencies();
   adminDashboardTimer = setTimeout(() => loadAdminDashboard(true), refreshSeconds * 1000);
+  startPortStatsTimer();
 }
 
 loadMe();

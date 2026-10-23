@@ -6497,6 +6497,24 @@ class Handler(BaseHTTPRequestHandler):
                 rows = conn.execute("SELECT * FROM payouts ORDER BY id DESC LIMIT 200").fetchall()
             self.send_json({"ok": True, "payouts": [payout_public(r) for r in rows]})
             return
+        if path == "/api/admin/ports/stats":
+            if not self.require_admin():
+                return
+            with db() as conn:
+                repair_port_assignments(conn)
+                row = conn.execute(
+                    """SELECT COUNT(*) AS total,
+                              COUNT(CASE WHEN p.user_id IS NOT NULL
+                                           OR EXISTS (SELECT 1 FROM tunnels t
+                                                      WHERE t.node_id=p.node_id AND t.remote_port=p.port
+                                                        AND t.proxy_type IN ('tcp','udp'))
+                                         THEN 1 END) AS used
+                       FROM ports p"""
+                ).fetchone()
+            total = int(row["total"] or 0)
+            used = int(row["used"] or 0)
+            self.send_json({"ok": True, "total": total, "used": used, "free": max(0, total - used)})
+            return
         if path == "/api/admin/ledger":
             if not self.require_admin():
                 return
