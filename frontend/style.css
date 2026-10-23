@@ -2241,3 +2241,6 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 @media (max-width:1080px){.nn-block-region .nn-head-copy{margin-right:0}}
 .nn-block-region .nn-head-copy{margin-right:200px}
 .nn-block-region .nn-head-copy{margin-right:400px}
+/* 筛选条真正靠右对齐 */
+.nn-block-region .nn-head-copy{margin-right:0}
+.nn-toolbar{margin-left:auto;margin-right:0}
