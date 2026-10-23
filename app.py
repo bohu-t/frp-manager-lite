@@ -4810,6 +4810,23 @@ def release_plan_resources(conn: sqlite3.Connection, plan_row: sqlite3.Row, keep
         conn.execute("DELETE FROM user_plan_ports WHERE user_plan_id=?", (plan_row["id"],))
 
 
+def repair_port_assignments(conn: sqlite3.Connection) -> int:
+    """清理僵尸端口归属：既不属于有效套餐，也没有对应隧道。"""
+    cur = conn.execute(
+        """UPDATE ports SET user_id=NULL
+           WHERE user_id IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM user_plan_ports upp JOIN user_plans up ON up.id=upp.user_plan_id
+                 WHERE upp.node_id=ports.node_id AND upp.port=ports.port
+                   AND upp.release_at=0 AND up.status='active' AND (up.expires_at=0 OR up.expires_at>?)
+             )
+             AND NOT EXISTS (
+                 SELECT 1 FROM tunnels t
+                 WHERE t.node_id=ports.node_id AND t.remote_port=ports.port AND t.proxy_type IN ('tcp','udp')
+             )""", (now(),))
+    return cur.rowcount
+
+
 def reclaim_expired_plan_ports(conn: sqlite3.Connection) -> int:
     """回收保留期已过的套餐端口。"""
     rows = conn.execute("SELECT id, user_id, node_id, port FROM user_plan_ports WHERE release_at>0 AND release_at<=?", (now(),)).fetchall()
@@ -6330,7 +6347,9 @@ class Handler(BaseHTTPRequestHandler):
                 """, (user["id"],))]
                 tunnel_rows = attach_tunnel_mapping_status(tunnel_rows)
                 port_count = len(ports)
-                used_ports = [t["remote_port"] for t in tunnel_rows if t["remote_port"]]
+                owned_port_set = {int(x) for x in ports}
+                used_ports = sorted({int(t["remote_port"]) for t in tunnel_rows
+                                     if t["remote_port"] and int(t["remote_port"]) in owned_port_set})
                 # Cap: only send first 200 for rendering, too many would freeze the browser
                 ports_display = ports[:200] if port_count > 200 else ports
                 port_stats = {"total": port_count, "used": len(used_ports), "free": port_count - len(used_ports)}
@@ -6742,8 +6761,15 @@ class Handler(BaseHTTPRequestHandler):
                 nodes = list_public_nodes(conn, active_only=False)
                 node_count = len(nodes)
                 active_node_count = sum(1 for n in nodes if n.get("active"))
+                repair_port_assignments(conn)
                 port_row = conn.execute(
-                    "SELECT COUNT(*) AS total, COUNT(CASE WHEN user_id IS NOT NULL THEN 1 END) AS used FROM ports"
+                    """SELECT COUNT(*) AS total,
+                              COUNT(CASE WHEN p.user_id IS NOT NULL
+                                           OR EXISTS (SELECT 1 FROM tunnels t
+                                                      WHERE t.node_id=p.node_id AND t.remote_port=p.port
+                                                        AND t.proxy_type IN ('tcp','udp'))
+                                         THEN 1 END) AS used
+                       FROM ports p"""
                 ).fetchone()
                 port_stats = {
                     "total": int(port_row["total"]),
