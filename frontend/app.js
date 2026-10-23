@@ -4463,6 +4463,44 @@ function hostChartPanelHtml(history, key, color, gradId, label, valueLabel, note
   </div>`;
 }
 
+function financeChartSvg(daily){
+  const map = {};
+  (daily || []).forEach(d => { map[String(d.day || '')] = d; });
+  const days = [];
+  const base = new Date();
+  for(let i = 6; i >= 0; i--){
+    const dt = new Date(base.getFullYear(), base.getMonth(), base.getDate() - i);
+    const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+    const row = map[key] || {};
+    days.push({ label: key.slice(5), income: Number(row.income || 0), expense: Number(row.expense || 0) });
+  }
+  const W = 560, H = 210, P = { l: 48, r: 14, t: 16, b: 28 };
+  const maxVal = Math.max(1, ...days.map(d => Math.max(d.income, d.expense)));
+  const stepX = (W - P.l - P.r) / Math.max(1, days.length - 1);
+  const yOf = v => P.t + (H - P.t - P.b) * (1 - v / maxVal);
+  const line = key => days.map((d, i) => `${i ? 'L' : 'M'}${(P.l + i * stepX).toFixed(1)},${yOf(d[key]).toFixed(1)}`).join(' ');
+  const area = key => `${line(key)} L${(P.l + (days.length - 1) * stepX).toFixed(1)},${(H - P.b).toFixed(1)} L${P.l},${(H - P.b).toFixed(1)} Z`;
+  const grid = [0, 0.5, 1].map(ratio => {
+    const v = maxVal * ratio, y = yOf(v).toFixed(1);
+    return `<line x1="${P.l}" y1="${y}" x2="${W - P.r}" y2="${y}" stroke="rgba(148,163,184,.35)" stroke-width="1" stroke-dasharray="4 4"/><text x="${P.l - 8}" y="${Number(y) + 4}" text-anchor="end" font-size="10" fill="currentColor" opacity=".55">¥${v >= 100 ? Math.round(v) : v.toFixed(1)}</text>`;
+  }).join('');
+  const dots = key => days.map((d, i) => `<circle cx="${(P.l + i * stepX).toFixed(1)}" cy="${yOf(d[key]).toFixed(1)}" r="3" fill="${key === 'income' ? '#16a34a' : '#dc2626'}"/>`).join('');
+  const labels = days.map((d, i) => `<text x="${(P.l + i * stepX).toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="currentColor" opacity=".6">${d.label}</text>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="近 7 天收支折线图">
+    <defs>
+      <linearGradient id="finIncGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#16a34a" stop-opacity=".22"/><stop offset="100%" stop-color="#16a34a" stop-opacity="0"/></linearGradient>
+      <linearGradient id="finExpGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#dc2626" stop-opacity=".18"/><stop offset="100%" stop-color="#dc2626" stop-opacity="0"/></linearGradient>
+    </defs>
+    ${grid}
+    <path d="${area('income')}" fill="url(#finIncGrad)"/>
+    <path d="${area('expense')}" fill="url(#finExpGrad)"/>
+    <path d="${line('income')}" fill="none" stroke="#16a34a" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="${line('expense')}" fill="none" stroke="#dc2626" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${dots('income')}${dots('expense')}
+    ${labels}
+  </svg>`;
+}
+
 function renderHostCharts(){
   const slots = document.querySelectorAll('.host-chart-slot');
   if(!slots.length) return;
@@ -4900,10 +4938,10 @@ async function loadAdminDashboard(auto=false){
           <div><span>总支出</span><b class="ledger-out">-¥${money(finExpense)}</b></div>
           <div><span>净额</span><b class="${finNet >= 0 ? 'ledger-in' : 'ledger-out'}">${finNet >= 0 ? '+' : '-'}¥${money(Math.abs(finNet))}</b></div>
         </div>
-        <div class="fin-table-wrap"><table class="fin-table">
-          <thead><tr><th>日期</th><th>收入</th><th>支出</th><th>净额</th></tr></thead>
-          <tbody>${finRows || '<tr><td colspan="4" class="muted">近 7 天暂无流水</td></tr>'}</tbody>
-        </table></div>
+        <div class="fin-chart">
+          ${financeChartSvg(ledgerDaily)}
+          <div class="fin-legend"><span class="inc"><i></i>收入</span><span class="exp"><i></i>支出</span></div>
+        </div>
         ${finCats ? `<div class="fin-cats">${finCats}</div>` : ''}
       </section>
 

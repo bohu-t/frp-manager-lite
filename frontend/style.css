@@ -2314,3 +2314,11 @@ html[data-theme="dark"] .notif-item.unread{background:rgba(22,119,255,.1);border
 html[data-theme="dark"] .fin-summary>div{background:rgba(90,140,220,.08)}
 html[data-theme="dark"] .fin-table td{border-bottom-color:rgba(90,140,220,.15)}
 html[data-theme="dark"] .fin-cat{background:rgba(90,140,220,.12)}
+/* 收支折线图 */
+.fin-chart{margin-top:4px}
+.fin-chart svg{display:block;width:100%;height:210px;color:var(--muted)}
+.fin-legend{display:flex;gap:14px;justify-content:flex-end;margin-top:6px;font-size:11px;color:var(--muted)}
+.fin-legend span{display:inline-flex;align-items:center;gap:5px}
+.fin-legend i{width:14px;height:3px;border-radius:2px;display:inline-block}
+.fin-legend .inc i{background:#16a34a}
+.fin-legend .exp i{background:#dc2626}
