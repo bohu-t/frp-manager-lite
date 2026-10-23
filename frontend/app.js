@@ -604,11 +604,20 @@ function closeConfigModal(){ const m = document.getElementById('configModal'); i
 
 /* ---- Online frpc config editor ---- */
 let frpcDraftTimer = null;
-function frpcDraftKey(){ return 'fml_frpc_draft_' + (currentUser?.id || currentUser?.username || 'anon'); }
+function frpcDraftKey(){
+  const scope = window.__cfgScope || {};
+  const suffix = scope.plan_id ? ('_p' + scope.plan_id) : '';
+  return 'fml_frpc_draft_' + (currentUser?.id || currentUser?.username || 'anon') + suffix;
+}
 function frpcEditorEl(){ return document.getElementById('frpcEditor'); }
 function frpcEditorStatus(msg){ const el = document.getElementById('editorStatus'); if(el) el.textContent = msg || ''; }
 async function fetchGeneratedFrpc(){
-  const res = await fetch('/config/frpc.toml', {credentials:'same-origin'});
+  const scope = window.__cfgScope || {};
+  const qs = new URLSearchParams();
+  if(scope.node_id) qs.set('node_id', String(scope.node_id));
+  if(scope.plan_id) qs.set('plan_id', String(scope.plan_id));
+  const url = '/config/frpc.toml' + (qs.toString() ? '?' + qs.toString() : '');
+  const res = await fetch(url, {credentials:'same-origin'});
   if(!res.ok){
     let msg = '生成失败 (' + res.status + ')';
     try{ const j = await res.json(); if(j && j.error) msg = j.error; }catch(e){}
@@ -822,9 +831,7 @@ function appSidebarHtml(kind='dashboard'){
   return `<aside class="app-sidebar">
     <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>${brandName}</strong><span>${brandSub}</span></div></div>
     <div class="sidebar-section-label">工作空间</div>${layoutItems.map(x => x === '__tickets__' ? ticketsBlock : (x === '__finance__' ? financeBlock : linkHtml(x, false))).join('')}
-    ${isAdmin ? '' : `<div class="sidebar-section-label sidebar-tools-label">快速工具</div>
-      <button class="side-link${kind === 'dashboard-config' ? ' active' : ''}" data-nav="dashboard-config">${sideIcon('download')}<span class="side-link-label">配置下载</span><span class="side-link-arrow">›</span></button>
-      <button class="side-link${kind === 'dashboard-editor' ? ' active' : ''}" data-nav="dashboard-editor">${sideIcon('edit')}<span class="side-link-label">在线配置</span><span class="side-link-arrow">›</span></button>`}
+    ${''}
     <div class="sidebar-spacer"></div>
     <div class="sidebar-service-status"><span class="sidebar-service-dot"></span><span class="sidebar-service-copy">${sidebarServiceCopyHtml()}</span></div>
     <div class="sidebar-user-wrap">
@@ -2724,6 +2731,11 @@ async function loadMyPlans(){
   `, 'dashboard-myplans', '我的实例');
 }
 
+function openInstanceConfig(nodeId, planId){
+  window.__cfgScope = { node_id: Number(nodeId || 0), plan_id: Number(planId || 0) };
+  loadDashboard('editor');
+}
+
 function openInstanceTunnels(nodeId, nodeName, planId, planName){
   window.__selectedNode = { id: Number(nodeId || 0), name: nodeName || '', planId: Number(planId || 0), planName: planName || '' };
   loadDashboard('tunnels');
@@ -3369,6 +3381,10 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
           <div><span>续费价格</span><b>${plan.renew_price_points === null || plan.renew_price_points === undefined ? '已下架' : Number(plan.renew_price_points) + ' 积分'}</b></div>
         </div>
         <button type="button" class="instance-action-primary" onclick="showTunnelForm()">新建隧道</button>
+        <div class="instance-config-actions">
+          <a class="secondary instance-cfg-link" href="/config/frpc.toml?node_id=${Number(selNode ? selNode.id : plan.node_id || 0)}&plan_id=${Number(plan.id)}">下载配置</a>
+          <button type="button" class="secondary" onclick="openInstanceConfig(${Number(selNode ? selNode.id : plan.node_id || 0)}, ${Number(plan.id)})">在线配置</button>
+        </div>
         <button type="button" class="secondary" onclick="renewInstance(${Number(plan.id)}, ${Number(plan.plan_id || 0)}, ${Number(selNode ? selNode.id : plan.node_id || 0)}, ${Number(plan.renew_price_points ?? 0)}, '${esc(plan.plan_name || '')}')">延期</button>
         <label class="instance-switch"><span>自动延期</span><input type="checkbox"${plan.auto_renew ? ' checked' : ''} onchange="toggleAutoRenew(${Number(plan.id)}, this.checked)"></label>
         <button type="button" class="node-action node-action-danger instance-cancel" onclick="cancelPlan(${Number(plan.id)}, '${esc(plan.plan_name || '')}', ${Number(plan.refund_points || 0)})">退订</button>
