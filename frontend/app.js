@@ -2962,7 +2962,7 @@ async function loadDashboard(view='overview'){
     return `<article class="tc-card${t.enabled ? '' : ' is-off'}">
       <div class="tc-head">
         <span class="tc-type">${esc(String(t.proxy_type || 'tcp').slice(0, 1).toUpperCase())}</span>
-        <span class="tc-title"><strong title="${esc(t.name)}">${esc(t.name)}</strong><small>${esc(t.proxy_type)} 隧道 · #${esc(t.id)}</small></span>
+        <span class="tc-title"><strong title="${esc(t.name)}">${esc(t.name)}</strong><small>${esc(t.proxy_type)} 隧道</small></span>
         <span class="tc-state ${t.enabled ? 'on' : 'off'}">${t.enabled ? '已启用' : '已停用'}</span>
       </div>
       <div class="tc-route">
