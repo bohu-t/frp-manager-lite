@@ -2731,27 +2731,24 @@ async function loadMyPlans(){
   `, 'dashboard-myplans', '我的实例');
 }
 
+function instanceScopeOf(nodeId, planId, nodeName, planName){
+  const sel = window.__selectedNode || {};
+  return {
+    node_id: Number(nodeId || sel.id || 0),
+    plan_id: Number(planId || sel.planId || 0),
+    node_name: nodeName || sel.name || '',
+    plan_name: planName || sel.planName || ''
+  };
+}
+
 function openInstanceConfig(nodeId, planId, nodeName, planName){
-  window.__cfgScope = { node_id: Number(nodeId || 0), plan_id: Number(planId || 0), node_name: nodeName || '', plan_name: planName || '' };
+  window.__cfgScope = instanceScopeOf(nodeId, planId, nodeName, planName);
   loadDashboard('editor');
 }
 
 function openInstanceConfigDownload(nodeId, planId, nodeName, planName){
-  window.__cfgScope = { node_id: Number(nodeId || 0), plan_id: Number(planId || 0), node_name: nodeName || '', plan_name: planName || '' };
+  window.__cfgScope = instanceScopeOf(nodeId, planId, nodeName, planName);
   loadDashboard('cfgdl');
-}
-
-function instanceTabsHtml(active){
-  const scope = window.__cfgScope || {};
-  const nodeId = Number(scope.node_id || 0), planId = Number(scope.plan_id || 0);
-  const nn = String(scope.node_name || '').replace(/'/g, "\\'");
-  const pn = String(scope.plan_name || '').replace(/'/g, "\\'");
-  const tab = (key, label, handler) => `<button type="button" class="seg-tab${active === key ? ' active' : ''}" onclick="${handler}">${label}</button>`;
-  return `<nav class="seg-tabs instance-tabs">
-    ${tab('tunnels', '隧道', `openInstanceTunnels(${nodeId}, '${nn}', ${planId}, '${pn}')`)}
-    ${tab('cfgdl', '配置下载', `openInstanceConfigDownload(${nodeId}, ${planId}, '${nn}', '${pn}')`)}
-    ${tab('editor', '在线配置', `openInstanceConfig(${nodeId}, ${planId}, '${nn}', '${pn}')`)}
-  </nav>`;
 }
 
 function instanceCrumbHtml(current){
@@ -3419,7 +3416,6 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
       </section>` : '';
     app.innerHTML = appLayoutHtml(`
       ${crumb}
-      ${instanceTabsHtml('tunnels')}
       <div class="instance-layout">
         <div class="instance-main">
           <section class="card tunnel-create-card${editingTunnelId ? '' : ' hidden'}" id="tunnelCreateCard">
@@ -3452,7 +3448,6 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
     const qs = `node_id=${nodeId}&plan_id=${planId}`;
     app.innerHTML = appLayoutHtml(`
       ${instanceCrumbHtml('配置下载')}
-      ${instanceTabsHtml('cfgdl')}
       <div class="config-grid">
         <section class="card config-dl-card">
           <div class="section-title"><div><div class="section-kicker">FRPC</div><h2>${stIcon('file')}frpc.toml</h2></div></div>
@@ -3501,7 +3496,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
   if(view === 'editor'){
     const scoped = Number((window.__cfgScope || {}).plan_id || 0) > 0;
     app.innerHTML = appLayoutHtml(`
-      ${scoped ? instanceCrumbHtml('在线配置') + instanceTabsHtml('editor') : ''}
+      ${scoped ? instanceCrumbHtml('在线配置') : ''}
       <section class="card editor-card">
         <div class="section-title"><div><div class="section-kicker">FRPC.TOML</div><h2>${stIcon('file')}配置内容</h2><span class="editor-status" id="editorStatus">加载中…</span></div><div class="editor-actions"><button type="button" class="secondary" onclick="copyFrpcConfig()">复制全部</button><button type="button" class="secondary" onclick="downloadFrpcDraft()">下载 .toml</button><button type="button" class="secondary" onclick="regenFrpcConfig()">重新生成</button></div></div>
         <textarea id="frpcEditor" class="frpc-editor" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" placeholder="# 正在加载当前 tunnels 生成的配置…"></textarea>
