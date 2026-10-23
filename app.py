@@ -3911,6 +3911,25 @@ def rate_limit_check(key: str, limit: int, window: int = RATE_WINDOW) -> tuple[b
         return True, 0
 
 
+def user_instance_tunnels(conn: sqlite3.Connection, user_id: int, node_id: int, plan_id: int = 0) -> list[sqlite3.Row] | None:
+    """按实例取隧道；plan_id 不属于该用户时返回 None。"""
+    if not plan_id:
+        return conn.execute("SELECT * FROM tunnels WHERE user_id=? AND node_id=? ORDER BY id", (user_id, node_id)).fetchall()
+    own = conn.execute("SELECT id FROM user_plans WHERE id=? AND user_id=? AND node_id=?",
+                       (plan_id, user_id, node_id)).fetchone()
+    if not own:
+        return None
+    plan_ports = [int(r["port"]) for r in conn.execute(
+        "SELECT port FROM user_plan_ports WHERE user_plan_id=?", (plan_id,)).fetchall()]
+    if plan_ports:
+        placeholders = ",".join("?" * len(plan_ports))
+        return conn.execute(
+            f"SELECT * FROM tunnels WHERE user_id=? AND node_id=? AND (plan_id=? OR (plan_id=0 AND remote_port IN ({placeholders}))) ORDER BY id",
+            (user_id, node_id, plan_id, *plan_ports)).fetchall()
+    return conn.execute("SELECT * FROM tunnels WHERE user_id=? AND node_id=? AND plan_id=? ORDER BY id",
+                        (user_id, node_id, plan_id)).fetchall()
+
+
 def tunnel_config(user: sqlite3.Row, node: sqlite3.Row, tunnels: list[sqlite3.Row]) -> str:
     def _ts(v):
         return json.dumps(str(v) if v is not None else "", ensure_ascii=False)
@@ -8695,27 +8714,12 @@ class Handler(BaseHTTPRequestHandler):
         node_id = node_id or int(user["node_id"] or 0)
         with db() as conn:
             node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
-            if plan_id:
-                own = conn.execute("SELECT id FROM user_plans WHERE id=? AND user_id=? AND node_id=?",
-                                   (plan_id, user["id"], node_id)).fetchone()
-                if not own:
-                    self.send_json({"ok": False, "error": "实例不存在或不属于当前账号"}, 403)
-                    return
-                plan_ports = [int(r["port"]) for r in conn.execute(
-                    "SELECT port FROM user_plan_ports WHERE user_plan_id=?", (plan_id,)).fetchall()]
-                if plan_ports:
-                    placeholders = ",".join("?" * len(plan_ports))
-                    tunnels = conn.execute(
-                        f"SELECT * FROM tunnels WHERE user_id=? AND node_id=? AND (plan_id=? OR (plan_id=0 AND remote_port IN ({placeholders}))) ORDER BY id",
-                        (user["id"], node_id, plan_id, *plan_ports)).fetchall()
-                else:
-                    tunnels = conn.execute(
-                        "SELECT * FROM tunnels WHERE user_id=? AND node_id=? AND plan_id=? ORDER BY id",
-                        (user["id"], node_id, plan_id)).fetchall()
-            else:
-                tunnels = conn.execute("SELECT * FROM tunnels WHERE user_id=? AND node_id=? ORDER BY id", (user["id"], node_id)).fetchall()
+            tunnels = user_instance_tunnels(conn, int(user["id"]), node_id, plan_id)
         if not node:
             self.send_json({"ok": False, "error": "实例所在节点不存在"}, 400)
+            return
+        if tunnels is None:
+            self.send_json({"ok": False, "error": "实例不存在或不属于当前账号"}, 403)
             return
         self.send_body(tunnel_config(user, node, tunnels).encode(), 200, "application/toml; charset=utf-8", {"Content-Disposition": 'attachment; filename="frpc.toml"'})
 
@@ -8740,12 +8744,19 @@ class Handler(BaseHTTPRequestHandler):
             node_id = int((q.get("node_id") or ["0"])[0] or 0)
         except ValueError:
             node_id = 0
+        try:
+            plan_id = int((q.get("plan_id") or ["0"])[0] or 0)
+        except ValueError:
+            plan_id = 0
         node_id = node_id or int(user["node_id"] or 0)
         with db() as conn:
             node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
-            tunnels = conn.execute("SELECT * FROM tunnels WHERE user_id=? AND node_id=? ORDER BY id", (user["id"], node_id)).fetchall()
+            tunnels = user_instance_tunnels(conn, int(user["id"]), node_id, plan_id)
         if not node:
             self.send_json({"ok": False, "error": "实例所在节点不存在"}, 400)
+            return
+        if tunnels is None:
+            self.send_json({"ok": False, "error": "实例不存在或不属于当前账号"}, 403)
             return
         cfg = tunnel_config(user, node, tunnels)
         script = frpc_deploy_script(cfg)

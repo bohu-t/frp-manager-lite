@@ -2731,9 +2731,34 @@ async function loadMyPlans(){
   `, 'dashboard-myplans', '我的实例');
 }
 
-function openInstanceConfig(nodeId, planId){
-  window.__cfgScope = { node_id: Number(nodeId || 0), plan_id: Number(planId || 0) };
+function openInstanceConfig(nodeId, planId, nodeName, planName){
+  window.__cfgScope = { node_id: Number(nodeId || 0), plan_id: Number(planId || 0), node_name: nodeName || '', plan_name: planName || '' };
   loadDashboard('editor');
+}
+
+function openInstanceConfigDownload(nodeId, planId, nodeName, planName){
+  window.__cfgScope = { node_id: Number(nodeId || 0), plan_id: Number(planId || 0), node_name: nodeName || '', plan_name: planName || '' };
+  loadDashboard('cfgdl');
+}
+
+function instanceTabsHtml(active){
+  const scope = window.__cfgScope || {};
+  const nodeId = Number(scope.node_id || 0), planId = Number(scope.plan_id || 0);
+  const nn = String(scope.node_name || '').replace(/'/g, "\\'");
+  const pn = String(scope.plan_name || '').replace(/'/g, "\\'");
+  const tab = (key, label, handler) => `<button type="button" class="seg-tab${active === key ? ' active' : ''}" onclick="${handler}">${label}</button>`;
+  return `<nav class="seg-tabs instance-tabs">
+    ${tab('tunnels', '隧道', `openInstanceTunnels(${nodeId}, '${nn}', ${planId}, '${pn}')`)}
+    ${tab('cfgdl', '配置下载', `openInstanceConfigDownload(${nodeId}, ${planId}, '${nn}', '${pn}')`)}
+    ${tab('editor', '在线配置', `openInstanceConfig(${nodeId}, ${planId}, '${nn}', '${pn}')`)}
+  </nav>`;
+}
+
+function instanceCrumbHtml(current){
+  const scope = window.__cfgScope || {};
+  const name = esc(scope.node_name || '实例');
+  const plan = scope.plan_name ? ` · ${esc(scope.plan_name)}` : '';
+  return `<div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="loadMyPlans()">我的实例</a> <span class="crumb-inline">›</span> <a href="javascript:void(0)" class="crumb-link" onclick="openInstanceTunnels(${Number(scope.node_id || 0)}, '${String(scope.node_name || '').replace(/'/g, "\\'")}', ${Number(scope.plan_id || 0)}, '${String(scope.plan_name || '').replace(/'/g, "\\'")}')">${name}${plan}</a> <span class="crumb-inline">›</span> ${current}</h1></div></div>`;
 }
 
 function openInstanceTunnels(nodeId, nodeName, planId, planName){
@@ -3364,6 +3389,9 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
   }
   if(view === 'tunnels'){
     const selNode = window.__selectedNode;
+    if(selNode && selNode.id){
+      window.__cfgScope = { node_id: Number(selNode.id), plan_id: Number(selNode.planId || 0), node_name: selNode.name || '', plan_name: selNode.planName || '' };
+    }
     const crumb = selNode ? `<div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="loadMyPlans()">我的实例</a> <span class="crumb-inline">›</span> ${esc(selNode.name)}</h1>${selNode.planName ? `<p class="muted small" style="margin:4px 0 0">套餐：${esc(selNode.planName)}</p>` : ''}</div></div>` : '';
     const myPlans = (data.my_plans || []).filter(p => !selNode || Number(p.node_id) === Number(selNode.id));
     const plan = (selNode && selNode.planId ? myPlans.find(p => Number(p.id) === Number(selNode.planId)) : null) || myPlans.find(p => p.status === 'active' && !p.expired) || myPlans[0] || null;
@@ -3391,6 +3419,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
       </section>` : '';
     app.innerHTML = appLayoutHtml(`
       ${crumb}
+      ${instanceTabsHtml('tunnels')}
       <div class="instance-layout">
         <div class="instance-main">
           <section class="card tunnel-create-card${editingTunnelId ? '' : ' hidden'}" id="tunnelCreateCard">
@@ -3415,6 +3444,27 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
       </div>`, 'dashboard-tunnels', '我的隧道');
     bindUserTunnelForm();
     if(selNode && selNode.id) loadInstancePorts(Number(selNode.id));
+    return;
+  }
+  if(view === 'cfgdl'){
+    const scope = window.__cfgScope || {};
+    const nodeId = Number(scope.node_id || 0), planId = Number(scope.plan_id || 0);
+    const qs = `node_id=${nodeId}&plan_id=${planId}`;
+    app.innerHTML = appLayoutHtml(`
+      ${instanceCrumbHtml('配置下载')}
+      ${instanceTabsHtml('cfgdl')}
+      <div class="config-grid">
+        <section class="card config-dl-card">
+          <div class="section-title"><div><div class="section-kicker">FRPC</div><h2>${stIcon('file')}frpc.toml</h2></div></div>
+          <p class="muted small">只包含当前实例「${esc(scope.plan_name || '')}」下的隧道，不会混入其他实例。</p>
+          <a class="config-option" href="/config/frpc.toml?${qs}"><span class="config-option-icon">${QICON_DOWNLOAD}</span><span class="config-option-copy"><b>下载 frpc 配置</b><small>frpc.toml · 覆盖即生效</small></span></a>
+        </section>
+        <section class="card config-dl-card">
+          <div class="section-title"><div><div class="section-kicker">DEPLOY</div><h2>${stIcon('script')}部署脚本</h2></div></div>
+          <p class="muted small">脚本内置当前实例的配置，执行后自动安装并启动 frpc。</p>
+          <a class="config-option" href="/config/deploy-frpc.sh?${qs}"><span class="config-option-icon">${QICON_TUNNEL}</span><span class="config-option-copy"><b>下载 deploy-frpc.sh</b><small>一键安装并启动 frpc</small></span></a>
+        </section>
+      </div>`, 'dashboard-cfgdl', '配置下载');
     return;
   }
   if(view === 'config'){
@@ -3449,7 +3499,9 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
     return;
   }
   if(view === 'editor'){
+    const scoped = Number((window.__cfgScope || {}).plan_id || 0) > 0;
     app.innerHTML = appLayoutHtml(`
+      ${scoped ? instanceCrumbHtml('在线配置') + instanceTabsHtml('editor') : ''}
       <section class="card editor-card">
         <div class="section-title"><div><div class="section-kicker">FRPC.TOML</div><h2>${stIcon('file')}配置内容</h2><span class="editor-status" id="editorStatus">加载中…</span></div><div class="editor-actions"><button type="button" class="secondary" onclick="copyFrpcConfig()">复制全部</button><button type="button" class="secondary" onclick="downloadFrpcDraft()">下载 .toml</button><button type="button" class="secondary" onclick="regenFrpcConfig()">重新生成</button></div></div>
         <textarea id="frpcEditor" class="frpc-editor" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" placeholder="# 正在加载当前 tunnels 生成的配置…"></textarea>

@@ -2356,3 +2356,5 @@ html[data-theme="dark"] .hw-step.active{background:rgba(22,119,255,.2);color:#93
 html[data-theme="dark"] .hw-status{background:rgba(90,140,220,.1)}
 .instance-config-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
 .instance-cfg-link{display:flex;align-items:center;justify-content:center;text-decoration:none;min-height:38px;border-radius:10px;font-size:13px}
+.instance-tabs{margin:0 0 14px}
+.instance-tabs .seg-tab{font-size:13px}
