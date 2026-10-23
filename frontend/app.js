@@ -3485,10 +3485,6 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
             <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存邮箱</button></div>
           </form>
         </section>
-        <section class="card profile-pwd">
-          <div class="section-title"><div><div class="section-kicker">SECURITY</div><h2>${stIcon('key')}修改登录密码</h2><p>修改当前账号的登录密码，下次登录请使用新密码。</p></div></div>
-          <form id="profilePwdForm" class="grid">${passwordFieldsHtml()}<div class="form-actions" style="grid-column:1/-1"><button type="submit">保存新密码</button></div></form>
-        </section>
       </div>
       <section class="card" style="margin-top:16px">
         <div class="section-title"><div><div class="section-kicker">PAYOUT</div><h2>${stIcon('key')}收款信息</h2><p>用于提现收益到你的支付宝 / 微信</p></div></div>
