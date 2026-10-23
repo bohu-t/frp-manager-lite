@@ -1404,10 +1404,11 @@ let nnFilter = { q: '', min: '', max: '', sort: 'default' };
 
 const HOST_STATUS_CLASS = {pending:'', approved:'ok', rejected:'bad', blacklisted:'bad'};
 const HOST_RULES = [
-  '托管的母鸡仅用于本平台业务，禁止超售、转租或挪作他用。',
-  '母鸡连续离线超过 24 小时，平台将自动下架，并按规则双倍计费。',
-  '收到工单后需在 12 小时内响应，超时计入考核。',
-  '发现违规用途或虚标配置，直接拉黑并停止结算。'
+  ['资源共享', '托管旨在将您的闲置服务器接入平台以分摊成本。我们不建议以高额盈利为唯一目的的大规模托管。'],
+  ['真实合规', '请真实填写节点地理位置、线路描述，并合理分配资源（不建议过度超售），严禁虚假宣传。发现违规用途或虚标配置，直接拉黑并停止结算。'],
+  ['清退保障', '母鸡连续离线超过 24 小时，平台将自动下架（如有特殊情况，需提前联系管理员说明），并扣除部分收益赔偿用户。'],
+  ['工单响应', '托管后可能会有用户针对网络等问题提交相关工单，请务必及时登录平台处理，保证服务质量。'],
+  ['退场规则', '如需提前退场，请提交退场工单，需赔付受影响用户。']
 ];
 
 function hostRowsHtml(hosts, admin){
@@ -1505,12 +1506,17 @@ async function loadHosts(){
     </section>`;
   const hostsSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('cloud')}申请记录</h2><p>共 ${hosts.length} 条，包含待审核与被拒绝的母鸡</p></div></div>
       <div class="table-wrap"><table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>到期时间</th><th>带宽 / 流量</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${hostRowsHtml(hosts, false)}</tbody></table></div>
-      <details class="host-rules-details"><summary>托管规则与准则</summary><ol class="host-rule-list">${HOST_RULES.map(r => `<li>${esc(r)}</li>`).join('')}</ol></details>
     </section>`;
   const sections = { nodes: nodesSection, plans: plansSection, earn: earnSection, hosts: hostsSection };
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">HOSTING</span><h1>托管申请</h1><p>提交母鸡、上架套餐、查看收益与申请记录。</p></div>
       <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadHosts()">刷新</button><button type="button" onclick="hostFormModal()">＋ 添加母鸡</button></div></div>
+    <section class="card host-rules-card">
+      <div class="section-title"><div><div class="section-kicker">RULES</div><h2>${stIcon('license')}托管规则与准则</h2><p>提交母鸡前请先阅读，审核通过即视为同意以下条款</p></div></div>
+      <ol class="host-rule-list">
+        ${HOST_RULES.map(([t, d]) => `<li><b>${esc(t)}：</b><span>${esc(d)}</span></li>`).join('')}
+      </ol>
+    </section>
     <nav class="seg-tabs">
       <button type="button" class="seg-tab${tab === 'nodes' ? ' active' : ''}" onclick="switchHostsTab('nodes')">我的节点${pNodes.length ? `<span>${pNodes.length}</span>` : ''}</button>
       <button type="button" class="seg-tab${tab === 'plans' ? ' active' : ''}" onclick="switchHostsTab('plans')">我的套餐${pPlans.length ? `<span>${pPlans.length}</span>` : ''}</button>
