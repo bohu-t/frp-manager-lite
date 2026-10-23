@@ -2924,6 +2924,22 @@ def init_db() -> None:
                 points INTEGER NOT NULL DEFAULT 0,
                 updated_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS ledger (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER NOT NULL,
+                unit TEXT NOT NULL DEFAULT 'points',
+                direction TEXT NOT NULL DEFAULT 'in',
+                category TEXT NOT NULL DEFAULT '',
+                amount REAL NOT NULL DEFAULT 0,
+                user_id INTEGER NOT NULL DEFAULT 0,
+                username TEXT NOT NULL DEFAULT '',
+                node_id INTEGER NOT NULL DEFAULT 0,
+                order_no TEXT NOT NULL DEFAULT '',
+                ref TEXT NOT NULL DEFAULT '',
+                note TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_ledger_ts ON ledger(ts);
             CREATE TABLE IF NOT EXISTS provider_earnings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 order_no TEXT NOT NULL UNIQUE,
@@ -4590,6 +4606,36 @@ def points_balance(user_id: int) -> float:
     return q2(row["points"]) if row else 0.0
 
 
+LEDGER_CATEGORIES = {
+    "plan_sale": "套餐销售",
+    "recharge_cash": "在线充值",
+    "recharge_points": "充值到账",
+    "key_recharge": "密钥兑换",
+    "refund": "退订退款",
+    "node_refund": "节点故障退款",
+    "provider_settle": "供应商结算",
+    "guarantee": "保证金留存",
+    "withdraw_points": "收益转出",
+    "withdraw_cash": "提现打款",
+    "payout_reject": "提现驳回退回",
+}
+
+
+def ledger_add(conn: sqlite3.Connection, unit: str, direction: str, category: str, amount: float,
+               user_id: int = 0, username: str = "", node_id: int = 0, order_no: str = "",
+               ref: str = "", note: str = "", ts: int | None = None) -> None:
+    """写入统一收支流水。unit=points/cash，direction=in/out（平台视角）。"""
+    amount = q2(amount)
+    if amount <= 0:
+        return
+    stamp = int(ts or now())
+    conn.execute(
+        "INSERT INTO ledger(ts, unit, direction, category, amount, user_id, username, node_id, order_no, ref, note, created_at)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        (stamp, str(unit), str(direction), str(category), amount, int(user_id or 0), str(username or ""),
+         int(node_id or 0), str(order_no or ""), str(ref or ""), str(note or "")[:200], stamp))
+
+
 def create_recharge_keys(points: int, count: int, note: str, expires_days: int, created_by: int) -> tuple[bool, str, list[str]]:
     points = int(points)
     count = int(count)
@@ -4631,6 +4677,7 @@ def redeem_recharge_key(user: sqlite3.Row, raw_key: str) -> tuple[bool, str, int
         if claimed != 1:
             return False, "充值密钥已被使用", 0
         balance = points_change(conn, user["id"], int(row["points"] or 0), "key_recharge", key[-8:], "充值密钥兑换")
+        ledger_add(conn, "points", "in", "key_recharge", int(row["points"] or 0), int(user["id"]), user["username"], 0, "", key[-8:], "充值密钥兑换")
     return True, f"充值成功，获得 {int(row['points'])} 积分", balance
 
 
@@ -4729,6 +4776,8 @@ def cancel_user_plan(user: sqlite3.Row, user_plan_id: int) -> tuple[bool, str, d
         release_plan_resources(conn, p, keep_ports=False)
         if q2(info["points"]) > 0:
             points_change(conn, int(user["id"]), q2(info["points"]), "plan_refund", p["plan_name"], "套餐退订退款")
+            ledger_add(conn, "points", "out", "refund", q2(info["points"]), int(user["id"]), user["username"],
+                       int(p["node_id"] or 0), str(p["order_no"] or ""), str(p["id"]), f"退订 {p['plan_name']}")
         recalc_user_entitlements(conn, int(user["id"]))
     amount = f"{q2(info['points']):.2f}"
     if info.get("full_refund"):
@@ -4952,7 +5001,11 @@ def mark_order_paid(order_no: str, transaction_id: str = "", provider: str = "")
         if row["status"] != "pending":
             return False, "订单状态不可支付"
         if (row_val(row, "kind", "plan") or "plan") == "points":
-            points_change(conn, row["user_id"], int(row_val(row, "points", 0) or 0), "recharge", order_no, "在线充值")
+            pts = q2(row_val(row, "points", 0))
+            cash = q2(int(row_val(row, "amount_cents", 0) or 0) / 100.0)
+            points_change(conn, row["user_id"], pts, "recharge", order_no, "在线充值")
+            ledger_add(conn, "cash", "in", "recharge_cash", cash, row["user_id"], row["username"], 0, order_no, "", "在线充值")
+            ledger_add(conn, "points", "in", "recharge_points", pts, row["user_id"], row["username"], 0, order_no, "", "充值到账")
         else:
             ok, msg = provision_order(conn, row)
             if not ok:
@@ -5006,6 +5059,8 @@ def refund_plans_on_node(conn: sqlite3.Connection, node_id: int, reason: str = "
         refund = remaining + bonus
         if refund > 0:
             points_change(conn, int(p["user_id"]), refund, "plan_refund", f"node:{node_id}", reason)
+            ledger_add(conn, "points", "out", "node_refund", refund, int(p["user_id"]), p["username"],
+                       int(node_id), str(p["order_no"] or ""), str(p["id"]), reason)
             total_refund += refund
         conn.execute("UPDATE user_plans SET status='cancelled', expires_at=?, guarantee_points=0 WHERE id=?", (now(), p["id"]))
         release_plan_resources(conn, p, keep_ports=False)
@@ -5075,9 +5130,14 @@ def accrue_provider_income_once() -> int:
             delta = target - done
             if delta <= 0:
                 continue
-            pay = delta * 90 // 100
-            keep = delta - pay
+            pay = q2(delta * 90 / 100)
+            keep = q2(delta - pay)
             if pay > 0:
+                ledger_add(conn, "points", "out", "provider_settle", pay, owner, "", int(up["node_id"] or 0),
+                           str(up["order_no"] or ""), str(up["id"]), f"结算 {up['plan_name']}")
+            if keep > 0:
+                ledger_add(conn, "points", "in", "guarantee", keep, owner, "", int(up["node_id"] or 0),
+                           str(up["order_no"] or ""), str(up["id"]), "保证金留存")
                 conn.execute(
                     "INSERT INTO provider_income(owner_id, points, updated_at) VALUES(?,?,?) ON CONFLICT(owner_id) DO UPDATE SET points=points+excluded.points, updated_at=excluded.updated_at",
                     (owner, pay, now()))
@@ -5166,6 +5226,8 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
         try:
             if cost:
                 points_change(conn, user["id"], -cost, "plan_purchase", order_no, plan["name"])
+                ledger_add(conn, "points", "in", "plan_sale", cost, user["id"], user["username"],
+                           int(node_id or 0), order_no, str(plan["id"]), plan["name"])
         except ValueError:
             conn.rollback()
             return False, "积分不足", None
@@ -6417,6 +6479,61 @@ class Handler(BaseHTTPRequestHandler):
                 rows = conn.execute("SELECT * FROM payouts ORDER BY id DESC LIMIT 200").fetchall()
             self.send_json({"ok": True, "payouts": [payout_public(r) for r in rows]})
             return
+        if path == "/api/admin/ledger":
+            if not self.require_admin():
+                return
+            qs = urllib.parse.parse_qs(urlparse(self.path).query)
+            def qv(name, default=""):
+                return (qs.get(name) or [default])[0]
+            unit = qv("unit")
+            direction = qv("direction")
+            category = qv("category")
+            try:
+                start_ts = int(qv("from") or 0)
+            except ValueError:
+                start_ts = 0
+            try:
+                end_ts = int(qv("to") or 0)
+            except ValueError:
+                end_ts = 0
+            try:
+                limit = max(1, min(500, int(qv("limit") or 200)))
+            except ValueError:
+                limit = 200
+            where = []
+            args: list[Any] = []
+            if unit in ("points", "cash"):
+                where.append("unit=?")
+                args.append(unit)
+            if direction in ("in", "out"):
+                where.append("direction=?")
+                args.append(direction)
+            if category:
+                where.append("category=?")
+                args.append(category)
+            if start_ts:
+                where.append("ts>=?")
+                args.append(start_ts)
+            if end_ts:
+                where.append("ts<=?")
+                args.append(end_ts)
+            clause = (" WHERE " + " AND ".join(where)) if where else ""
+            with db() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM ledger" + clause + " ORDER BY ts DESC, id DESC LIMIT ?", (*args, limit)).fetchall()
+                totals = conn.execute(
+                    "SELECT unit, direction, COALESCE(SUM(amount),0) FROM ledger" + clause + " GROUP BY unit, direction",
+                    args).fetchall()
+            summary = {"points_in": 0.0, "points_out": 0.0, "cash_in": 0.0, "cash_out": 0.0}
+            for u, d, total in totals:
+                summary[f"{u}_{d}"] = q2(total)
+            self.send_json({"ok": True, "rows": [{
+                "id": int(r["id"]), "ts": int(r["ts"]), "unit": r["unit"], "direction": r["direction"],
+                "category": r["category"], "category_text": LEDGER_CATEGORIES.get(r["category"], r["category"]),
+                "amount": q2(r["amount"]), "user_id": int(r["user_id"] or 0), "username": r["username"],
+                "node_id": int(r["node_id"] or 0), "order_no": r["order_no"], "ref": r["ref"], "note": r["note"],
+            } for r in rows], "summary": summary, "categories": LEDGER_CATEGORIES})
+            return
         if path == "/api/admin/tickets":
             if not self.require_admin():
                 return
@@ -6991,6 +7108,7 @@ class Handler(BaseHTTPRequestHandler):
                     provider_income_consume(conn, int(user["id"]), points)
                     if mode == "balance":
                         points_change(conn, int(user["id"]), points, "provider_withdraw", "balance", "收益转入余额")
+                        ledger_add(conn, "points", "in", "withdraw_points", points, int(user["id"]), user["username"], 0, "", "balance", "收益转入余额")
                         self.send_json({"ok": True, "message": f"{q2(points):.2f} 积分已转入余额"})
                         return
                     if mode != "external":
@@ -7002,6 +7120,7 @@ class Handler(BaseHTTPRequestHandler):
                     conn.execute(
                         "INSERT INTO payouts(payout_no, user_id, username, points, method, account, holder, qr_token, status, note, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                         (pno, int(user["id"]), user["username"], points, acc["method"], acc["account"], acc["holder"], row_val(acc, "qr_token", "") or "", "pending", "", now(), now()))
+                    ledger_add(conn, "points", "out", "withdraw_points", points, int(user["id"]), user["username"], 0, pno, "external", "提现申请")
                     conn.execute(
                         "INSERT INTO tickets(ticket_no, user_id, username, kind, status, node_id, owner_id, title, content, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                         (new_ticket_no(), int(user["id"]), user["username"], "withdraw", "open", 0, 0,
@@ -7130,10 +7249,15 @@ class Handler(BaseHTTPRequestHandler):
                 if not row or row["status"] != "pending":
                     self.send_json({"ok": False, "error": "提现单不存在或已处理"}, 404)
                     return
+                rate = max(1, int(setting_get(conn, "points_per_yuan", "1") or 1))
                 if action == "paid":
                     conn.execute("UPDATE payouts SET status='paid', updated_at=? WHERE id=?", (now(), pid))
+                    ledger_add(conn, "cash", "out", "withdraw_cash", q2(int(row["points"] or 0) / rate),
+                               int(row["user_id"]), row["username"], 0, str(row["payout_no"]), "", f"提现打款 {row['method']}")
                 else:
                     conn.execute("UPDATE payouts SET status='rejected', updated_at=? WHERE id=?", (now(), pid))
+                    ledger_add(conn, "points", "in", "payout_reject", q2(row["points"]), int(row["user_id"]),
+                               row["username"], 0, str(row["payout_no"]), "", "提现驳回退回")
                     conn.execute(
                         "INSERT INTO provider_income(owner_id, points, updated_at) VALUES(?,?,?) ON CONFLICT(owner_id) DO UPDATE SET points=points+excluded.points, updated_at=excluded.updated_at",
                         (int(row["user_id"]), int(row["points"] or 0), now()))
