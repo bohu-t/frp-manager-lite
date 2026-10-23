@@ -4842,6 +4842,14 @@ async function loadAdminDashboard(auto=false){
   const totalPorts = Number(portStats.total || 0);
   const freePorts = Number(portStats.free || Math.max(0, totalPorts - usedPorts));
   const portUsage = totalPorts > 0 ? ((usedPorts / totalPorts) * 100).toFixed(1) : '0.0';
+  const money = (v) => Number(v || 0).toFixed(2);
+  const ledgerDaily = data.ledger_daily || [];
+  const ledgerTotals = data.ledger_totals || {};
+  const finIncome = Number(ledgerTotals.income || 0);
+  const finExpense = Number(ledgerTotals.expense || 0);
+  const finNet = finIncome - finExpense;
+  const finRows = ledgerDaily.map(d => `<tr><td>${esc(String(d.day || '').slice(5))}</td><td class="ledger-in">+¥${money(d.income)}</td><td class="ledger-out">-¥${money(d.expense)}</td><td class="${Number(d.net) >= 0 ? 'ledger-in' : 'ledger-out'}">${Number(d.net) >= 0 ? '+' : '-'}¥${money(Math.abs(Number(d.net) || 0))}</td></tr>`).join('');
+  const finCats = (data.ledger_categories || []).map(c => `<span class="fin-cat ${c.direction}">${esc(c.text)} <b>${c.direction === 'in' ? '+' : '-'}¥${money(c.amount)}</b></span>`).join('');
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
   const r2Status = r2.configured ? '<span class="ok">已配置</span>' : '<span class="bad">未配置</span>';
   const frpcUsers = data.frpc_users || [];
@@ -4885,13 +4893,18 @@ async function loadAdminDashboard(auto=false){
     </div>
 
     <div class="admin-dashboard-grid">
-      <section class="card admin-host-card">
-        <div class="section-title"><div><div class="section-kicker">HOST RESOURCES</div><h2>${stIcon('cpu')}主机资源</h2></div><span class="status-badge ${hostCpu == null ? '' : 'ok'}"><i></i>运行中</span></div>
-        <div class="host-charts">
-          ${hostChartPanelHtml(hostHistory, 'cpu', '#3478f6', 'hostGradCpu', 'CPU 使用率', hostCpuLabel, `${host.cpu_count || 0} 核 · 负载 ${host.load1 ?? '-'} / ${host.load5 ?? '-'} / ${host.load15 ?? '-'}`)}
-          ${hostChartPanelHtml(hostHistory, 'mem', '#9353f9', 'hostGradMem', '内存使用率', hostMemLabel, `${fmtBytes(host.memory_used)} / ${fmtBytes(host.memory_total)} · 可用 ${fmtBytes(host.memory_available)}`)}
+      <section class="card admin-finance-card">
+        <div class="section-title"><div><div class="section-kicker">FINANCE</div><h2>${stIcon('chart')}收支分析</h2></div><span class="status-badge ${finNet >= 0 ? 'ok' : 'bad'}"><i></i>近 7 天 ${finNet >= 0 ? '+' : '-'}¥${money(Math.abs(finNet))}</span></div>
+        <div class="fin-summary">
+          <div><span>总收入</span><b class="ledger-in">+¥${money(finIncome)}</b></div>
+          <div><span>总支出</span><b class="ledger-out">-¥${money(finExpense)}</b></div>
+          <div><span>净额</span><b class="${finNet >= 0 ? 'ledger-in' : 'ledger-out'}">${finNet >= 0 ? '+' : '-'}¥${money(Math.abs(finNet))}</b></div>
         </div>
-        <div class="host-meta-row"><div><span>节点在线</span><b>${data.active_node_count}/${data.node_count}</b></div><div><span>自动检查</span><b>每 ${refreshSeconds} 秒</b></div><div><span>资源采样</span><b>每 ${hostSampleSeconds} 秒 · 保留 ${hostSamplePoints} 点</b></div></div>
+        <div class="fin-table-wrap"><table class="fin-table">
+          <thead><tr><th>日期</th><th>收入</th><th>支出</th><th>净额</th></tr></thead>
+          <tbody>${finRows || '<tr><td colspan="4" class="muted">近 7 天暂无流水</td></tr>'}</tbody>
+        </table></div>
+        ${finCats ? `<div class="fin-cats">${finCats}</div>` : ''}
       </section>
 
       <section class="card quick-actions-card">

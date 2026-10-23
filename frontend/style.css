@@ -2296,3 +2296,21 @@ html[data-theme="dark"] tr.clickable-row:hover>td{background:rgba(59,130,246,.12
 .notif-btn.primary{background:#1677FF;border-color:#1677FF;color:#fff}
 .notif-btn.primary:hover{background:#0f62d6;color:#fff}
 html[data-theme="dark"] .notif-item.unread{background:rgba(22,119,255,.1);border-color:rgba(96,165,250,.35)}
+/* 收支分析卡片 */
+.admin-finance-card{min-width:0}
+.fin-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.fin-summary>div{display:flex;flex-direction:column;gap:3px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#f8fafc}
+.fin-summary span{font-size:11px;color:var(--muted)}
+.fin-summary b{font-size:16px;font-weight:800}
+.fin-table-wrap{max-height:230px;overflow:auto}
+.fin-table{width:100%;border-collapse:collapse;font-size:12px}
+.fin-table th{position:sticky;top:0;background:var(--card);font-size:11px;color:var(--muted);text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)}
+.fin-table td{padding:7px 8px;border-bottom:1px solid #f1f5f9}
+.fin-cats{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.fin-cat{font-size:11px;padding:3px 8px;border-radius:999px;background:#f1f5f9;color:var(--muted)}
+.fin-cat b{margin-left:4px}
+.fin-cat.in b{color:#16a34a}
+.fin-cat.out b{color:#dc2626}
+html[data-theme="dark"] .fin-summary>div{background:rgba(90,140,220,.08)}
+html[data-theme="dark"] .fin-table td{border-bottom-color:rgba(90,140,220,.15)}
+html[data-theme="dark"] .fin-cat{background:rgba(90,140,220,.12)}

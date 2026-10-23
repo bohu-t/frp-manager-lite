@@ -6917,10 +6917,26 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 for n in nodes
             ])
+            ledger_since = now() - 7 * 86400
+            daily_rows = conn.execute(
+                """SELECT date(ts,'unixepoch','localtime') AS d,
+                          COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE 0 END),0) AS inc,
+                          COALESCE(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END),0) AS exp
+                   FROM ledger WHERE ts>=? GROUP BY d ORDER BY d""", (ledger_since,)).fetchall()
+            cat_rows = conn.execute(
+                """SELECT category, direction, COALESCE(SUM(amount),0) AS total FROM ledger WHERE ts>=?
+                   GROUP BY category, direction ORDER BY total DESC LIMIT 8""", (ledger_since,)).fetchall()
+            ledger_daily = [{"day": r["d"], "income": q2(r["inc"]), "expense": q2(r["exp"]), "net": q2(r["inc"] - r["exp"])} for r in daily_rows]
+            ledger_categories = [{"category": r["category"], "text": LEDGER_CATEGORIES.get(r["category"], r["category"]),
+                                  "direction": r["direction"], "amount": q2(r["total"])} for r in cat_rows]
+            ledger_totals = {"income": q2(sum(x["income"] for x in ledger_daily)), "expense": q2(sum(x["expense"] for x in ledger_daily))}
             self.send_json({
                 "ok": True,
                 "version": APP_VERSION,
                 "panel_version": APP_VERSION,
+                "ledger_daily": ledger_daily,
+                "ledger_categories": ledger_categories,
+                "ledger_totals": ledger_totals,
                 "uptime_seconds": int(time.time() - SERVER_START_TS),
                 "latest_version": panel_latest_version(),
                 "update_link": PANEL_UPDATE_LINK,
