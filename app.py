@@ -4876,6 +4876,52 @@ def release_plan_resources(conn: sqlite3.Connection, plan_row: sqlite3.Row, keep
         conn.execute("DELETE FROM user_plan_ports WHERE user_plan_id=?", (plan_row["id"],))
 
 
+def ledger_analysis(conn: sqlite3.Connection, days: int = 7) -> dict[str, Any]:
+    """收支分析：今天按小时，其余按天。金额统一 ¥。"""
+    days = max(1, min(90, int(days or 7)))
+    points: list[dict[str, Any]] = []
+    if days <= 1:
+        start = int(time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1)))
+        rows = conn.execute(
+            """SELECT strftime('%H', ts, 'unixepoch', 'localtime') AS h,
+                      COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE 0 END),0) AS inc,
+                      COALESCE(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END),0) AS exp
+               FROM ledger WHERE ts>=? GROUP BY h""", (start,)).fetchall()
+        bucket = {str(r["h"]).zfill(2): r for r in rows}
+        for hour in range(24):
+            key = f"{hour:02d}"
+            r = bucket.get(key)
+            points.append({"label": key + ":00", "income": q2(r["inc"] if r else 0), "expense": q2(r["exp"] if r else 0)})
+    else:
+        start = now() - days * 86400
+        rows = conn.execute(
+            """SELECT date(ts,'unixepoch','localtime') AS d,
+                      COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE 0 END),0) AS inc,
+                      COALESCE(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END),0) AS exp
+               FROM ledger WHERE ts>=? GROUP BY d""", (start,)).fetchall()
+        bucket = {str(r["d"]): r for r in rows}
+        today = time.localtime()
+        for i in range(days - 1, -1, -1):
+            ts = time.mktime((today.tm_year, today.tm_mon, today.tm_mday - i, 0, 0, 0, 0, 0, -1))
+            key = time.strftime("%Y-%m-%d", time.localtime(ts))
+            r = bucket.get(key)
+            points.append({"label": key[5:], "income": q2(r["inc"] if r else 0), "expense": q2(r["exp"] if r else 0)})
+    cats = conn.execute(
+        """SELECT category, direction, COALESCE(SUM(amount),0) AS total FROM ledger WHERE ts>=?
+           GROUP BY category, direction ORDER BY total DESC LIMIT 8""", (now() - days * 86400,)).fetchall()
+    totals = {
+        "income": q2(sum(p["income"] for p in points)),
+        "expense": q2(sum(p["expense"] for p in points)),
+    }
+    return {
+        "days": days,
+        "points": points,
+        "totals": totals,
+        "categories": [{"category": r["category"], "text": LEDGER_CATEGORIES.get(r["category"], r["category"]),
+                        "direction": r["direction"], "amount": q2(r["total"])} for r in cats],
+    }
+
+
 def repair_port_assignments(conn: sqlite3.Connection) -> int:
     """清理僵尸端口归属：既不属于有效套餐，也没有对应隧道。"""
     cur = conn.execute(
@@ -6563,6 +6609,18 @@ class Handler(BaseHTTPRequestHandler):
                 rows = conn.execute("SELECT * FROM payouts ORDER BY id DESC LIMIT 200").fetchall()
             self.send_json({"ok": True, "payouts": [payout_public(r) for r in rows]})
             return
+        if path == "/api/admin/ledger/analysis":
+            if not self.require_admin():
+                return
+            qs = urllib.parse.parse_qs(urlparse(self.path).query)
+            try:
+                days = int((qs.get("days") or ["7"])[0])
+            except ValueError:
+                days = 7
+            with db() as conn:
+                info = ledger_analysis(conn, days)
+            self.send_json({"ok": True, **info})
+            return
         if path == "/api/admin/ports/stats":
             if not self.require_admin():
                 return
@@ -6917,19 +6975,10 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 for n in nodes
             ])
-            ledger_since = now() - 7 * 86400
-            daily_rows = conn.execute(
-                """SELECT date(ts,'unixepoch','localtime') AS d,
-                          COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE 0 END),0) AS inc,
-                          COALESCE(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END),0) AS exp
-                   FROM ledger WHERE ts>=? GROUP BY d ORDER BY d""", (ledger_since,)).fetchall()
-            cat_rows = conn.execute(
-                """SELECT category, direction, COALESCE(SUM(amount),0) AS total FROM ledger WHERE ts>=?
-                   GROUP BY category, direction ORDER BY total DESC LIMIT 8""", (ledger_since,)).fetchall()
-            ledger_daily = [{"day": r["d"], "income": q2(r["inc"]), "expense": q2(r["exp"]), "net": q2(r["inc"] - r["exp"])} for r in daily_rows]
-            ledger_categories = [{"category": r["category"], "text": LEDGER_CATEGORIES.get(r["category"], r["category"]),
-                                  "direction": r["direction"], "amount": q2(r["total"])} for r in cat_rows]
-            ledger_totals = {"income": q2(sum(x["income"] for x in ledger_daily)), "expense": q2(sum(x["expense"] for x in ledger_daily))}
+            ledger_info = ledger_analysis(conn, 7)
+            ledger_daily = ledger_info["points"]
+            ledger_categories = ledger_info["categories"]
+            ledger_totals = ledger_info["totals"]
             self.send_json({
                 "ok": True,
                 "version": APP_VERSION,

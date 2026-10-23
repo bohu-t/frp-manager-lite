@@ -2322,3 +2322,10 @@ html[data-theme="dark"] .fin-cat{background:rgba(90,140,220,.12)}
 .fin-legend i{width:14px;height:3px;border-radius:2px;display:inline-block}
 .fin-legend .inc i{background:#16a34a}
 .fin-legend .exp i{background:#dc2626}
+/* 收支分析范围切换 */
+.fin-range{display:inline-flex;gap:2px;padding:2px;border-radius:9px;background:#f1f5f9;margin-right:8px}
+.fin-range-btn{border:0;background:transparent;color:var(--muted);font-size:12px;padding:4px 10px;border-radius:7px;cursor:pointer}
+.fin-range-btn:hover{color:#1677FF}
+.fin-range-btn.active{background:#fff;color:#1677FF;font-weight:600;box-shadow:0 1px 3px rgba(15,35,70,.12)}
+html[data-theme="dark"] .fin-range{background:rgba(90,140,220,.14)}
+html[data-theme="dark"] .fin-range-btn.active{background:#1e3a5f;color:#93c5fd}
