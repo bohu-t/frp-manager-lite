@@ -2229,3 +2229,10 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 .nn-price-range span,.nn-price-range i{font-size:11px}
 .nn-sort{flex:0 0 auto;min-width:88px;width:auto;padding:0 8px}
 @media (max-width:1080px){.nn-block-region .nn-block-head{flex-wrap:wrap}.nn-toolbar{flex-wrap:wrap}}
+/* 地区标签缩小 + 筛选条左移 */
+.nn-tabs{gap:6px;margin:2px 0 12px;padding-bottom:10px}
+.nn-tab{padding:4px 10px;font-size:12px;gap:5px}
+.nn-tab b{font-size:11px}
+.nn-block-region .nn-head-copy{flex:0 0 auto}
+.nn-block-region .nn-block-head{justify-content:flex-start}
+@media (max-width:1080px){.nn-block-region .nn-head-copy{flex:1 1 auto}}
