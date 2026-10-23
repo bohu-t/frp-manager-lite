@@ -2193,17 +2193,7 @@ function renderNewNode(){
       <span class="nn-plan-foot">${hasQuota && !isTraffic ? '含流量额度' : (isTraffic ? '用完即止' : '不限流量')}</span>
     </button>`;
   }).join('') || emptyHint('该实例暂无可购买套餐');
-  const step3 = !nnState.nodeId ? emptyHint('请先选择实例，随后会显示该实例可购买的套餐') : `<div class="nn-plan-cards">${planCards}
-    <div class="nn-tip-card">
-      <span class="nn-tip-icon">💡</span>
-      <b>购买须知</b>
-      <ul>
-        <li>资源托管：实例由不同托管方提供，购买时长代表预付周期，不代表绝对可用时长。</li>
-        <li>退款保障：实例持续异常或提前下架时，可随时退订，按剩余价值退回账户余额。</li>
-        <li>购买后 10 分钟内且端口未产生流量，可全额退订；超过按剩余比例退款并扣除手续费。</li>
-      </ul>
-    </div>
-  </div>`;
+  const step3 = !nnState.nodeId ? emptyHint('请先选择实例，随后会显示该实例可购买的套餐') : `<div class="nn-plan-cards">${planCards}</div>`;
 
   const chosenPlan = plans.find(p => Number(p.id) === Number(nnState.planId));
   const chosenNode = nodes.find(n => Number(n.id) === Number(nnState.nodeId));
@@ -2272,9 +2262,12 @@ function renderNewNode(){
         <div class="nn-sum-price"><small>应付金额</small><b>¥${chosenPlan ? Number(chosenPlan.price_points) : 0}</b></div>
         <button type="button" class="nn-sum-pay${ready ? ' ready' : ''}" ${ready ? '' : 'disabled'} onclick="nnPay()">${ready ? '立即创建' : '请完成左侧步骤'}</button>
         <div class="nn-sum-note">
-          <p><b>购买须知</b></p>
-          <p>实例由不同托管方提供，购买时长代表预付周期，不代表绝对可用时长。</p>
-          <p>实例持续异常或提前下架时可退订，按剩余价值退回账户余额。</p>
+          <p class="nn-sum-note-title">💡 购买须知</p>
+          <ul>
+            <li>资源托管：实例由不同托管方提供，购买时长代表预付周期，不代表绝对可用时长。</li>
+            <li>退款保障：实例持续异常或提前下架时，可随时退订，按剩余价值退回账户余额。</li>
+            <li>购买后 10 分钟内且端口未产生流量，可全额退订；超过按剩余比例退款并扣除手续费。</li>
+          </ul>
         </div>
       </section>
     </aside>`;

@@ -2247,3 +2247,7 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 /* 价格区间输入框加宽，保证占位文字完整可见 */
 .nn-price-range{padding:0 6px;gap:3px}
 .nn-price-range input{width:56px;font-size:11px;padding:0 2px}
+/* 购买须知移入订单摘要 */
+.nn-sum-note-title{margin:0 0 8px;font-size:12px;font-weight:700;color:#d97706}
+.nn-sum-note ul{margin:0;padding-left:14px;display:grid;gap:5px}
+.nn-sum-note li{font-size:11px;line-height:1.55;color:var(--muted)}
