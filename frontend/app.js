@@ -1620,8 +1620,8 @@ function wecomBindCardHtml(wc){
   return `<section class="card host-bind-card">
       <div class="host-bind-icon">👥</div>
       <div class="host-bind-copy">
-        <b>托管需先加入企业微信群</b>
-        <span>加入后在群里发送绑定码完成验证，再回来提交母鸡。绑定码 1 小时内有效，可随时刷新。</span>
+        <b>托管需先完成企业微信绑定</b>
+        <span>① 扫描管理员提供的二维码加入企业；② 打开机器人应用会话，发送下面的绑定码；③ 绑定成功后自动拉入托管群，即可提交申请。绑定码 1 小时内有效。</span>
         <code class="host-bind-code">${esc(wc.code || '点击下方按钮获取')}</code>
       </div>
       <div class="host-bind-actions">
@@ -2784,9 +2784,28 @@ function openInstanceConfigDownload(nodeId, planId, nodeName, planName){
 
 function instanceCrumbHtml(current){
   const scope = window.__cfgScope || {};
-  const name = esc(scope.node_name || '实例');
-  const plan = scope.plan_name ? ` · ${esc(scope.plan_name)}` : '';
-  return `<div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="loadMyPlans()">我的实例</a> <span class="crumb-inline">›</span> <a href="javascript:void(0)" class="crumb-link" onclick="openInstanceTunnels(${Number(scope.node_id || 0)}, '${String(scope.node_name || '').replace(/'/g, "\\'")}', ${Number(scope.plan_id || 0)}, '${String(scope.plan_name || '').replace(/'/g, "\\'")}')">${name}${plan}</a> <span class="crumb-inline">›</span> ${current}</h1></div></div>`;
+  const nodeId = Number(scope.node_id || 0), planId = Number(scope.plan_id || 0);
+  const nodeName = String(scope.node_name || '实例');
+  const planName = String(scope.plan_name || '');
+  const escName = nodeName.replace(/'/g, "\\'");
+  const escPlan = planName.replace(/'/g, "\\'");
+  const goNode = `openInstanceTunnels(${nodeId}, '${escName}', ${planId}, '${escPlan}')`;
+  const label = planName ? `${esc(nodeName)} · ${esc(planName)}` : esc(nodeName);
+  return `<nav class="inst-crumb" aria-label="实例导航">
+    <button type="button" class="inst-crumb-item back" onclick="loadMyPlans()" title="返回我的实例">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>我的实例</span>
+    </button>
+    <span class="inst-crumb-sep" aria-hidden="true">›</span>
+    <button type="button" class="inst-crumb-item node" onclick="${goNode}" title="返回实例隧道">
+      ${stIcon('node')}
+      <span>${label}</span>
+    </button>
+    <span class="inst-crumb-sep" aria-hidden="true">›</span>
+    <span class="inst-crumb-item current">
+      <span>${esc(current)}</span>
+    </span>
+  </nav>`;
 }
 
 function openInstanceTunnels(nodeId, nodeName, planId, planName){
