@@ -2389,3 +2389,7 @@ html[data-theme="dark"] .inst-crumb-current{color:#93c5fd;border-bottom-color:#6
 .inst-crumb-link{font-size:13px;max-width:200px}
 .inst-crumb-chev{width:13px;height:13px}
 .inst-crumb-current{font-size:13px;padding-bottom:2px;border-bottom-width:2px}
+.page-head-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.page-head-row .inst-crumb{margin-bottom:0}
+.page-head-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.page-head-row .inst-crumb{margin-bottom:0}
