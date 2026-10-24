@@ -2784,9 +2784,24 @@ function openInstanceConfigDownload(nodeId, planId, nodeName, planName){
 
 function instanceCrumbHtml(current){
   const scope = window.__cfgScope || {};
-  const name = esc(scope.node_name || '实例');
-  const plan = scope.plan_name ? ` · ${esc(scope.plan_name)}` : '';
-  return `<div class="ov-page-head"><div><span class="section-kicker">MY NODES</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="loadMyPlans()">我的实例</a> <span class="crumb-inline">›</span> <a href="javascript:void(0)" class="crumb-link" onclick="openInstanceTunnels(${Number(scope.node_id || 0)}, '${String(scope.node_name || '').replace(/'/g, "\\'")}', ${Number(scope.plan_id || 0)}, '${String(scope.plan_name || '').replace(/'/g, "\\'")}')">${name}${plan}</a> <span class="crumb-inline">›</span> ${current}</h1></div></div>`;
+  const nodeId = Number(scope.node_id || 0), planId = Number(scope.plan_id || 0);
+  const nodeName = String(scope.node_name || '实例');
+  const planName = String(scope.plan_name || '');
+  const escName = nodeName.replace(/'/g, "\\'");
+  const escPlan = planName.replace(/'/g, "\\'");
+  const goNode = `openInstanceTunnels(${nodeId}, '${escName}', ${planId}, '${escPlan}')`;
+  const label = planName ? `${esc(nodeName)} · ${esc(planName)}` : esc(nodeName);
+  const chev = '<svg class="inst-crumb-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  return `<nav class="inst-crumb" aria-label="实例导航">
+    <span class="inst-crumb-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><circle cx="17.5" cy="6" r="2.6"/><circle cx="6.5" cy="12" r="2.6"/><circle cx="17.5" cy="18" r="2.6"/><path d="M8.8 10.7l6.4-3.4M8.8 13.3l6.4 3.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+    </span>
+    <button type="button" class="inst-crumb-link" onclick="loadMyPlans()">我的实例</button>
+    ${chev}
+    <button type="button" class="inst-crumb-link" onclick="${goNode}">${label}</button>
+    ${chev}
+    <span class="inst-crumb-current">${esc(current)}</span>
+  </nav>`;
 }
 
 function openInstanceTunnels(nodeId, nodeName, planId, planName){

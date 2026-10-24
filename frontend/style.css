@@ -2371,3 +2371,14 @@ html[data-theme="dark"] .status-badge.tk-closed{background:rgba(34,197,94,.18);c
 .host-bind-code{display:inline-block;align-self:flex-start;margin-top:6px;padding:4px 10px;border-radius:8px;background:#0f172a;color:#7dd3fc;font-family:var(--font-mono,monospace);font-size:14px;letter-spacing:1px}
 .host-bind-actions{flex:none}
 html[data-theme="dark"] .host-bind-code{background:#1e293b;color:#7dd3fc}
+/* 实例面包屑（参考图：浅蓝条 + 图标块 + 当前页下划线） */
+.inst-crumb{display:inline-flex;align-items:center;gap:14px;padding:9px 22px 9px 9px;margin:0 0 16px;border-radius:16px;background:#eef4ff;border:1px solid #e3ecfd}
+.inst-crumb-icon{display:grid;place-items:center;width:38px;height:38px;border-radius:11px;background:linear-gradient(140deg,#4f8dff,#2563eb);color:#fff;flex:none;box-shadow:0 4px 10px rgba(37,99,235,.28)}
+.inst-crumb-icon svg{width:21px;height:21px;fill:currentColor}
+.inst-crumb-link{border:0;background:transparent;padding:0;font-size:15px;font-weight:700;color:#0f172a;cursor:pointer;font-family:inherit;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inst-crumb-link:hover{color:#2563eb}
+.inst-crumb-chev{width:15px;height:15px;color:#94a3b8;flex:none}
+.inst-crumb-current{font-size:15px;font-weight:700;color:#2563eb;padding-bottom:3px;border-bottom:3px solid #2563eb;white-space:nowrap}
+html[data-theme="dark"] .inst-crumb{background:rgba(37,99,235,.14);border-color:rgba(96,165,250,.28)}
+html[data-theme="dark"] .inst-crumb-link{color:#e2e8f0}
+html[data-theme="dark"] .inst-crumb-current{color:#93c5fd;border-bottom-color:#60a5fa}
