@@ -2382,3 +2382,10 @@ html[data-theme="dark"] .host-bind-code{background:#1e293b;color:#7dd3fc}
 html[data-theme="dark"] .inst-crumb{background:rgba(37,99,235,.14);border-color:rgba(96,165,250,.28)}
 html[data-theme="dark"] .inst-crumb-link{color:#e2e8f0}
 html[data-theme="dark"] .inst-crumb-current{color:#93c5fd;border-bottom-color:#60a5fa}
+/* 面包屑缩小 */
+.inst-crumb{gap:10px;padding:6px 16px 6px 6px;border-radius:12px;margin-bottom:12px}
+.inst-crumb-icon{width:30px;height:30px;border-radius:9px;box-shadow:0 3px 8px rgba(37,99,235,.22)}
+.inst-crumb-icon svg{width:17px;height:17px}
+.inst-crumb-link{font-size:13px;max-width:200px}
+.inst-crumb-chev{width:13px;height:13px}
+.inst-crumb-current{font-size:13px;padding-bottom:2px;border-bottom-width:2px}
