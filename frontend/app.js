@@ -3461,8 +3461,9 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2.5 5.8 13.1h5.2l-1.2 8.4 7.6-10.8h-5.2z" fill="currentColor"/></svg>
           </span>
           <div class="ia-head-copy"><h2>操作</h2><p>管理您的套餐和服务</p></div>
-          <button type="button" class="ia-more" onclick="renewInstance(${Number(plan.id)}, ${Number(plan.plan_id || 0)}, ${nodeIdForCfg}, ${Number(plan.renew_price_points ?? 0)}, '${esc(plan.plan_name || '')}')" title="延期续费" aria-label="延期续费">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>
+          <button type="button" class="ia-renew" onclick="renewInstance(${Number(plan.id)}, ${Number(plan.plan_id || 0)}, ${nodeIdForCfg}, ${Number(plan.renew_price_points ?? 0)}, '${esc(plan.plan_name || '')}')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7M20 4.5V10h-5.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>延期</span>
           </button>
         </div>
 
