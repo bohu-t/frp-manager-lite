@@ -2358,3 +2358,6 @@ html[data-theme="dark"] .hw-status{background:rgba(90,140,220,.1)}
 .instance-cfg-link{display:flex;align-items:center;justify-content:center;text-decoration:none;min-height:38px;border-radius:10px;font-size:13px}
 .instance-tabs{margin:0 0 14px}
 .instance-tabs .seg-tab{font-size:13px}
+/* 已关闭工单：绿色 */
+.status-badge.tk-closed{background:#dcfce7;color:#15803d}
+html[data-theme="dark"] .status-badge.tk-closed{background:rgba(34,197,94,.18);color:#4ade80}
