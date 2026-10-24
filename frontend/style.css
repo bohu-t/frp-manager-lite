@@ -2371,16 +2371,3 @@ html[data-theme="dark"] .status-badge.tk-closed{background:rgba(34,197,94,.18);c
 .host-bind-code{display:inline-block;align-self:flex-start;margin-top:6px;padding:4px 10px;border-radius:8px;background:#0f172a;color:#7dd3fc;font-family:var(--font-mono,monospace);font-size:14px;letter-spacing:1px}
 .host-bind-actions{flex:none}
 html[data-theme="dark"] .host-bind-code{background:#1e293b;color:#7dd3fc}
-/* 实例层级面包屑 */
-.inst-crumb{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
-.inst-crumb-item{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 14px;border:1px solid var(--border);border-radius:11px;background:var(--card);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s ease;max-width:320px}
-.inst-crumb-item svg{width:15px;height:15px;flex:none}
-.inst-crumb-item span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.inst-crumb-item.back svg{margin:0 -3px}
-.inst-crumb-item.back:hover{border-color:#93c5fd;color:#1677FF;background:#f5f9ff}
-.inst-crumb-item.node .st-icon{color:#1677FF}
-.inst-crumb-item.node:hover{border-color:#93c5fd;background:#f5f9ff}
-.inst-crumb-item.current{background:linear-gradient(135deg,#1677FF,#3B82F6);border-color:transparent;color:#fff;cursor:default}
-.inst-crumb-sep{color:var(--muted);font-size:15px;flex:none}
-html[data-theme="dark"] .inst-crumb-item.back:hover,
-html[data-theme="dark"] .inst-crumb-item.node:hover{background:rgba(22,119,255,.12);border-color:rgba(96,165,250,.4)}
