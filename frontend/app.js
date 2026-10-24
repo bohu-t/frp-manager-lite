@@ -3452,21 +3452,73 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
       : (selNode ? (data.tunnels || []).filter(t => Number(t.node_id) === Number(selNode.id)) : (data.tunnels || []));
     const instanceTunnelRows = visibleTunnels.map(tunnelRowHtml).join('') || '<div class="empty-state"><strong>还没有隧道</strong><p class="muted small">点击右侧「新建隧道」创建第一条映射。</p></div>';
     const planValue = plan ? (plan.billing_mode === 'traffic' ? `${plan.used_gb} / ${plan.quota_gb} GB` : (plan.expires_at ? plan.expires_text : '不限期')) : '-';
-    const actionCard = plan ? `<section class="card instance-actions">
-        <div class="section-title"><div><div class="section-kicker">ACTIONS</div><h2>${stIcon('bolt')}操作</h2></div></div>
-        <div class="instance-action-meta">
-          <div><span>套餐</span><b>${esc(plan.plan_name || '-')}</b></div>
-          <div><span>${plan.billing_mode === 'traffic' ? '流量' : '到期时间'}</span><b>${esc(planValue)}</b></div>
-          <div><span>续费价格</span><b>${plan.renew_price_points === null || plan.renew_price_points === undefined ? '已下架' : Number(plan.renew_price_points) + ' 积分'}</b></div>
+    const nodeIdForCfg = Number(selNode ? selNode.id : plan.node_id || 0);
+    const renewPrice = (plan.renew_price_points === null || plan.renew_price_points === undefined) ? '已下架' : (Number(plan.renew_price_points) + ' 积分');
+    const expiryText = plan.billing_mode === 'traffic' ? '按流量计费' : (plan.expires_at ? plan.expires_text : '不限期');
+    const actionCard = plan ? `<section class="card ia-card">
+        <div class="ia-head">
+          <span class="ia-head-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2.5 5.8 13.1h5.2l-1.2 8.4 7.6-10.8h-5.2z" fill="currentColor"/></svg>
+          </span>
+          <div class="ia-head-copy"><h2>操作</h2><p>管理您的套餐和服务</p></div>
+          <button type="button" class="ia-more" onclick="renewInstance(${Number(plan.id)}, ${Number(plan.plan_id || 0)}, ${nodeIdForCfg}, ${Number(plan.renew_price_points ?? 0)}, '${esc(plan.plan_name || '')}')" title="延期续费" aria-label="延期续费">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>
+          </button>
         </div>
-        <button type="button" class="instance-action-primary" onclick="showTunnelForm()">新建隧道</button>
-        <div class="instance-config-actions">
-          <a class="secondary instance-cfg-link" href="/config/frpc.toml?node_id=${Number(selNode ? selNode.id : plan.node_id || 0)}&plan_id=${Number(plan.id)}">下载配置</a>
-          <button type="button" class="secondary" onclick="openInstanceConfig(${Number(selNode ? selNode.id : plan.node_id || 0)}, ${Number(plan.id)})">在线配置</button>
+
+        <div class="ia-plan">
+          <div class="ia-plan-top">
+            <span class="ia-crown" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 8.2l4.2 3.1L12 4.6l4.8 6.7L21 8.2l-1.7 9.3H4.7z" fill="currentColor"/><rect x="4.7" y="19" width="14.6" height="1.8" rx=".9" fill="currentColor"/></svg></span>
+            <b class="ia-plan-name">${esc(plan.plan_name || '-')}</b>
+            <span class="ia-plan-state"><i></i>${plan.billing_mode === 'traffic' ? '按量计费' : '进行中'}</span>
+            <span class="ia-plan-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 8.2l4.2 3.1L12 4.6l4.8 6.7L21 8.2l-1.7 9.3H4.7z" fill="currentColor"/></svg></span>
+          </div>
+          <div class="ia-plan-grid">
+            <div class="ia-plan-cell">
+              <span class="ia-cell-label"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 7.4V12l3.2 2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>${plan.billing_mode === 'traffic' ? '流量用量' : '到期时间'}</span>
+              <b class="ia-cell-value">${esc(planValue)}</b>
+            </div>
+            <div class="ia-plan-cell">
+              <span class="ia-cell-label"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6.4" rx="7" ry="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M5 6.4v5.2c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6.4M5 11.6v5.2c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6v-5.2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>续费价格</span>
+              <b class="ia-cell-value">${esc(renewPrice)}</b>
+            </div>
+          </div>
         </div>
-        <button type="button" class="secondary" onclick="renewInstance(${Number(plan.id)}, ${Number(plan.plan_id || 0)}, ${Number(selNode ? selNode.id : plan.node_id || 0)}, ${Number(plan.renew_price_points ?? 0)}, '${esc(plan.plan_name || '')}')">延期</button>
-        <label class="instance-switch"><span>自动延期</span><input type="checkbox"${plan.auto_renew ? ' checked' : ''} onchange="toggleAutoRenew(${Number(plan.id)}, this.checked)"></label>
-        <button type="button" class="node-action node-action-danger instance-cancel" onclick="cancelPlan(${Number(plan.id)}, '${esc(plan.plan_name || '')}', ${Number(plan.refund_points || 0)})">退订</button>
+
+        <button type="button" class="ia-primary" onclick="showTunnelForm()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7M20 4.5V10h-5.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>新建隧道</span>
+          <svg class="ia-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+
+        <div class="ia-duo">
+          <a class="ia-secondary" href="/config/frpc.toml?node_id=${nodeIdForCfg}&plan_id=${Number(plan.id)}">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10m0 0 4-4m-4 4-4-4M5 18.5h14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>下载配置</span>
+          </a>
+          <button type="button" class="ia-secondary" onclick="openInstanceConfig(${nodeIdForCfg}, ${Number(plan.id)})">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.2 14.6a1.6 1.6 0 0 0 .3 1.8l.1.1a1.9 1.9 0 1 1-2.7 2.7l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5v.2a1.9 1.9 0 1 1-3.8 0v-.1a1.6 1.6 0 0 0-1.1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a1.9 1.9 0 1 1-2.7-2.7l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3.3a1.9 1.9 0 1 1 0-3.8h.1a1.6 1.6 0 0 0 1.5-1.1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a1.9 1.9 0 1 1 2.7-2.7l.1.1a1.6 1.6 0 0 0 1.8.3H9.2a1.6 1.6 0 0 0 1-1.5V3.3a1.9 1.9 0 1 1 3.8 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a1.9 1.9 0 1 1 2.7 2.7l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1h.2a1.9 1.9 0 1 1 0 3.8h-.1a1.6 1.6 0 0 0-1.5 1z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+            <span>在线配置</span>
+          </button>
+        </div>
+
+        <div class="ia-divider"></div>
+
+        <div class="ia-switch-row">
+          <span class="ia-switch-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 7.4V12l3.2 2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            <span>自动延期</span>
+          </span>
+          <label class="ia-switch">
+            <input type="checkbox"${plan.auto_renew ? ' checked' : ''} onchange="toggleAutoRenew(${Number(plan.id)}, this.checked)">
+            <span class="ia-switch-track"><span class="ia-switch-thumb"></span></span>
+          </label>
+        </div>
+
+        <button type="button" class="ia-danger" onclick="cancelPlan(${Number(plan.id)}, '${esc(plan.plan_name || '')}', ${Number(plan.refund_points || 0)})">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M6.2 17.8 17.8 6.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <span>退订</span>
+        </button>
       </section>` : '';
     app.innerHTML = appLayoutHtml(`
       ${crumb}

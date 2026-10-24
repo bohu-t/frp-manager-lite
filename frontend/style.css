@@ -2393,3 +2393,68 @@ html[data-theme="dark"] .inst-crumb-current{color:#93c5fd;border-bottom-color:#6
 .page-head-row .inst-crumb{margin-bottom:0}
 .page-head-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;flex-wrap:wrap}
 .page-head-row .inst-crumb{margin-bottom:0}
+/* 实例操作卡（参考图） */
+.ia-card{padding:20px;border-radius:20px;background:var(--card)}
+.ia-head{display:flex;align-items:center;gap:14px;margin-bottom:16px}
+.ia-head-icon{display:grid;place-items:center;width:52px;height:52px;border-radius:15px;background:linear-gradient(145deg,#5b9bff,#2563eb);color:#fff;flex:none;box-shadow:0 8px 18px rgba(37,99,235,.3)}
+.ia-head-icon svg{width:26px;height:26px}
+.ia-head-copy{flex:1;min-width:0}
+.ia-head-copy h2{margin:0;font-size:24px;font-weight:800;color:var(--text-strong);letter-spacing:-.3px}
+.ia-head-copy p{margin:3px 0 0;font-size:13px;color:var(--muted)}
+.ia-more{display:grid;place-items:center;width:38px;height:38px;border:0;border-radius:50%;background:#f1f5f9;color:#94a3b8;cursor:pointer;flex:none;transition:all .15s}
+.ia-more:hover{background:#e2e8f0;color:#475569}
+.ia-more svg{width:20px;height:20px;fill:currentColor}
+
+.ia-plan{border-radius:16px;background:linear-gradient(150deg,#eef5ff,#dbe8fd);padding:16px 16px 4px;position:relative;overflow:hidden;margin-bottom:16px}
+.ia-plan-top{display:flex;align-items:center;gap:10px;position:relative;z-index:1;flex-wrap:wrap}
+.ia-crown{color:#2563eb;display:grid;place-items:center;flex:none}
+.ia-crown svg{width:26px;height:26px}
+.ia-plan-name{font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-.3px}
+.ia-plan-state{display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:999px;background:#d9f7e6;color:#0f9d68;font-size:13px;font-weight:600}
+.ia-plan-state i{width:6px;height:6px;border-radius:50%;background:currentColor}
+.ia-plan-mark{position:absolute;right:-6px;top:-4px;color:#3b82f6;opacity:.14;pointer-events:none}
+.ia-plan-mark svg{width:74px;height:74px}
+.ia-plan-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;margin-top:14px;position:relative;z-index:1}
+.ia-plan-cell{display:flex;flex-direction:column;gap:5px;padding:8px 0 14px}
+.ia-plan-cell+.ia-plan-cell{padding-left:16px;border-left:1px solid rgba(37,99,235,.16)}
+.ia-cell-label{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:#64748b;font-weight:600}
+.ia-cell-label svg{width:16px;height:16px;color:#2563eb}
+.ia-cell-value{font-size:15.5px;font-weight:700;color:#0f172a;word-break:break-all}
+
+.ia-primary{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;height:52px;border:0;border-radius:14px;background:linear-gradient(135deg,#3b82f6,#1d4ed8);color:#fff;font-size:16.5px;font-weight:700;cursor:pointer;box-shadow:0 10px 22px rgba(29,78,216,.28);transition:transform .15s,box-shadow .15s}
+.ia-primary:hover{transform:translateY(-1px);box-shadow:0 12px 26px rgba(29,78,216,.34)}
+.ia-primary svg{width:20px;height:20px}
+.ia-primary .ia-chev{width:16px;height:16px;margin-left:2px;opacity:.9}
+
+.ia-duo{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.ia-secondary{display:flex;align-items:center;justify-content:center;gap:8px;height:48px;border:1px solid #dbe6f7;border-radius:14px;background:var(--card);color:#1e293b;font-size:15px;font-weight:600;cursor:pointer;text-decoration:none;transition:all .15s}
+.ia-secondary:hover{border-color:#93c5fd;background:#f5f9ff;color:#2563eb}
+.ia-secondary svg{width:19px;height:19px}
+
+.ia-divider{height:1px;background:var(--border);margin:16px 0 12px}
+.ia-switch-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:2px 2px 14px}
+.ia-switch-label{display:inline-flex;align-items:center;gap:8px;font-size:15px;font-weight:600;color:var(--text)}
+.ia-switch-label svg{width:18px;height:18px;color:#64748b}
+.ia-switch{position:relative;display:inline-flex;cursor:pointer}
+.ia-switch input{position:absolute;opacity:0;width:0;height:0}
+.ia-switch-track{width:46px;height:26px;border-radius:999px;background:#cbd5e1;display:inline-flex;align-items:center;padding:3px;transition:background .18s}
+.ia-switch-thumb{width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.25);transition:transform .18s}
+.ia-switch input:checked+.ia-switch-track{background:#2563eb}
+.ia-switch input:checked+.ia-switch-track .ia-switch-thumb{transform:translateX(20px)}
+
+.ia-danger{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:46px;border:1px solid #ffd3d3;border-radius:14px;background:#fff1f1;color:#ef4444;font-size:15.5px;font-weight:700;cursor:pointer;transition:all .15s}
+.ia-danger:hover{background:#ffe4e4;border-color:#fca5a5}
+.ia-danger svg{width:18px;height:18px}
+html[data-theme="dark"] .ia-plan{background:linear-gradient(150deg,rgba(59,130,246,.18),rgba(29,78,216,.12))}
+html[data-theme="dark"] .ia-plan-name,html[data-theme="dark"] .ia-cell-value{color:#eaf2ff}
+html[data-theme="dark"] .ia-secondary{border-color:rgba(96,165,250,.3);color:#dbeafe}
+html[data-theme="dark"] .ia-danger{background:rgba(239,68,68,.12);border-color:rgba(248,113,113,.35);color:#fca5a5}
+/* 操作卡细节修正 */
+.ia-cell-value{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ia-plan-cell{padding-right:4px;min-width:0}
+.ia-plan-mark{top:auto;bottom:-10px;right:-8px;opacity:.1}
+.ia-plan-mark svg{width:64px;height:64px}
+.ia-plan-state{font-size:12px;padding:3px 10px}
+.instance-layout{grid-template-columns:minmax(0,1fr) 340px}
+.ia-cell-value{font-size:13.5px}
+.ia-plan-cell{padding-right:2px}
