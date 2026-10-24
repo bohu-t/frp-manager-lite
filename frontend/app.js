@@ -1609,15 +1609,45 @@ async function checkHostWizardStatus(silent){
   }catch(e){ if(!silent) show(e.message, true); }
 }
 
+function wecomBindCardHtml(wc){
+  wc = wc || {};
+  if(wc.bound){
+    return `<section class="card host-bind-card ok">
+      <div class="host-bind-icon">✓</div>
+      <div class="host-bind-copy"><b>企微群已绑定</b><span>你的企业微信已与账号关联，可正常提交托管申请，群通知会 @你。</span></div>
+    </section>`;
+  }
+  return `<section class="card host-bind-card">
+      <div class="host-bind-icon">👥</div>
+      <div class="host-bind-copy">
+        <b>托管需先加入企业微信群</b>
+        <span>加入后在群里发送绑定码完成验证，再回来提交母鸡。绑定码 1 小时内有效，可随时刷新。</span>
+        <code class="host-bind-code">${esc(wc.code || '点击下方按钮获取')}</code>
+      </div>
+      <div class="host-bind-actions">
+        <button type="button" class="secondary" onclick="refreshWecomBind()">刷新绑定码</button>
+      </div>
+    </section>`;
+}
+
+async function refreshWecomBind(){
+  try{
+    const wc = await api('/api/user/wecom/bindcode');
+    const el = document.querySelector('.host-bind-card');
+    if(el) el.outerHTML = wecomBindCardHtml(wc);
+  }catch(err){ show(err.message, true); }
+}
+
 async function loadHosts(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
-  let data, pdata, plData, eData;
+  let data, pdata, plData, eData, wc;
   try{
-    [data, pdata, plData, eData] = await Promise.all([
+    [data, pdata, plData, eData, wc] = await Promise.all([
       api('/api/user/hosts'),
       api('/api/user/provider/nodes').catch(() => ({nodes: []})),
       api('/api/user/provider/plans').catch(() => ({plans: []})),
-      api('/api/user/provider/earnings').catch(() => ({earnings: [], total_net: 0, commission_pct: 10}))
+      api('/api/user/provider/earnings').catch(() => ({earnings: [], total_net: 0, commission_pct: 10})),
+      api('/api/user/wecom/bindcode').catch(() => ({code: '', bound: false}))
     ]);
   }
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
@@ -1659,6 +1689,7 @@ async function loadHosts(){
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">HOSTING</span><h1>托管申请</h1><p>提交母鸡、上架套餐、查看收益与申请记录。</p></div>
       <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadHosts()">刷新</button><button type="button" onclick="hostFormModal()">＋ 添加母鸡</button></div></div>
+    ${wecomBindCardHtml(wc)}
     <nav class="seg-tabs">
       <button type="button" class="seg-tab${tab === 'nodes' ? ' active' : ''}" onclick="switchHostsTab('nodes')">我的节点${pNodes.length ? `<span>${pNodes.length}</span>` : ''}</button>
       <button type="button" class="seg-tab${tab === 'plans' ? ' active' : ''}" onclick="switchHostsTab('plans')">我的套餐${pPlans.length ? `<span>${pPlans.length}</span>` : ''}</button>
@@ -4923,6 +4954,29 @@ function adminR2CardHtml(r2, r2Status, r2Source){
   </section>`;
 }
 
+function adminBncrCardHtml(b){
+  b = b || {};
+  return `<section class="card admin-bncr-card">
+    <div class="settings-card-head"><span class="settings-card-icon icon-green">${stIcon('bell')}</span><div><h2>Bncr 企微群通知</h2><p>经本机 Bncr 推送到企业微信群，节点离线 / 新工单 / 工单超时会 @对应供货商</p></div><span class="status-badge ${b.enabled && b.group_id ? 'ok' : 'bad'}"><i></i>${b.enabled && b.group_id ? '已配置' : '未配置'}</span></div>
+    <form id="bncrConfigForm" class="settings-form r2-form-grid">
+      <div class="r2-field"><label>启用</label><div class="notify-row-control"><label class="switch"><input type="checkbox" name="enabled" value="1"${b.enabled ? ' checked' : ''} onchange="const st=document.getElementById('bncrSwitchState');if(st)st.textContent=this.checked?'已开启':'已关闭'"><span class="switch-track"><span class="switch-thumb"></span></span></label><span class="switch-state" id="bncrSwitchState">${b.enabled ? '已开启' : '已关闭'}</span></div></div>
+      <div class="r2-field"><label>Bncr 插件地址</label><input name="url" value="${esc(b.url || '')}" placeholder="http://127.0.0.1:9099"></div>
+      <div class="r2-field"><label>访问 Token</label><input name="token" value="${esc(b.token || '')}" placeholder="与 Bncr 插件一致，可留空"></div>
+      <div class="r2-field r2-field-half"><label>平台</label><input name="platform" value="${esc(b.platform || 'wecomLong')}" placeholder="wecomLong"></div>
+      <div class="r2-field r2-field-half"><label>群 chatid</label><input name="group_id" value="${esc(b.group_id || '')}" placeholder="群里发送「企业微信ID」查询"></div>
+      <div class="form-actions r2-actions"><button type="submit">保存配置</button><button type="button" class="secondary" onclick="sendBncrTest()">发送测试</button></div>
+    </form>
+    <p class="settings-hint">地址填 Bncr 容器可访问的本机回环或宿主 IP；群 chatid 在群里发「企业微信ID」即可拿到。</p>
+  </section>`;
+}
+
+async function sendBncrTest(){
+  try{
+    const r = await api('/api/admin/bncr-test', {method:'POST', body:{}});
+    show(r.message || '已发送');
+  }catch(err){ show(err.message || '发送失败', true); }
+}
+
 function selectNotifyChannel(type){
   type = type || '';
   const sel = document.querySelector('#notifyTypeSelect');
@@ -4956,6 +5010,20 @@ function syncNotifySwitch(el){
 function wireAdminSettingsForms(){
   const r2Form = document.querySelector('#r2ConfigForm');
   if(r2Form) r2Form.onsubmit = saveR2Config;
+  const bncrForm = document.querySelector('#bncrConfigForm');
+  if(bncrForm){
+    bncrForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const body = Object.fromEntries(fd);
+      body.enabled = fd.get('enabled') ? '1' : '0';
+      try{
+        const r = await api('/api/admin/bncr-config', {method:'POST', body});
+        await reloadAdminCurrentPage();
+        show(r.message || 'Bncr 设置已保存');
+      }catch(err){ show(err.message, true); }
+    };
+  }
   const smtpForm = document.querySelector('#smtpForm');
   if(smtpForm){
     smtpForm.onsubmit = async (e) => {
@@ -5060,6 +5128,7 @@ async function loadAdminSettings(){
   }
   const smtp = data.smtp || {}; adminSmtp = smtp;
   const notify = data.notify || {};
+  const bncr = data.bncr || {};
   setPanelMeta(data);
   const r2 = data.r2 || {};
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
@@ -5069,7 +5138,7 @@ async function loadAdminSettings(){
   app.innerHTML = appLayoutHtml(`
     <div class="admin-settings-grid">
       <div class="admin-settings-col">${adminNotifyCardHtml(notify)}${adminPaymentCardHtml(data.payment)}</div>
-      <div class="admin-settings-col">${adminSmtpCardHtml(smtp)}${adminBackupCardHtml(r2, r2Status, r2Source)}${adminR2CardHtml(r2, r2Status, r2Source)}</div>
+      <div class="admin-settings-col">${adminSmtpCardHtml(smtp)}${adminBncrCardHtml(bncr)}${adminBackupCardHtml(r2, r2Status, r2Source)}${adminR2CardHtml(r2, r2Status, r2Source)}</div>
     </div>
     ${adminPwdModalHtml()}
   `, 'admin-settings', '管理员设置');

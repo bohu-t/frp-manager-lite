@@ -432,6 +432,54 @@ NOTIFY_CHANNELS: list[dict[str, Any]] = [
 NOTIFY_CHANNEL_MAP = {c["type"]: c for c in NOTIFY_CHANNELS}
 
 
+def bncr_config(conn: sqlite3.Connection) -> dict[str, Any]:
+    return {
+        "enabled": setting_get(conn, "bncr_enabled", "0") == "1",
+        "url": setting_get(conn, "bncr_url", "").strip(),
+        "token": setting_get(conn, "bncr_token", "").strip(),
+        "platform": setting_get(conn, "bncr_platform", "wecomLong").strip() or "wecomLong",
+        "group_id": setting_get(conn, "bncr_group_id", "").strip(),
+    }
+
+
+def bncr_public(cfg: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "enabled": bool(cfg.get("enabled")),
+        "url": cfg.get("url", ""),
+        "token": cfg.get("token", ""),
+        "platform": cfg.get("platform", "wecomLong"),
+        "group_id": cfg.get("group_id", ""),
+    }
+
+
+def bncr_push(msg: str, at_userids: list[str] | None = None) -> bool:
+    """推送消息到 Bncr（企微群）。at_userids 为企微 userid 列表，会拼 <@userid>。"""
+    try:
+        with db() as conn:
+            cfg = bncr_config(conn)
+        if not cfg["enabled"] or not cfg["url"] or not cfg["group_id"]:
+            return False
+        at = [str(x).strip() for x in (at_userids or []) if str(x).strip()]
+        body = {"token": cfg["token"], "platform": cfg["platform"], "groupId": cfg["group_id"], "msg": msg, "at": at}
+        url = cfg["url"].rstrip("/") + "/push"
+        req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=8) as r:
+            return 200 <= r.status < 300
+    except Exception:
+        return False
+
+
+def bncr_notify_text(title: str, lines: list[str], at_userids: list[str] | None = None) -> bool:
+    at = [str(x).strip() for x in (at_userids or []) if str(x).strip()]
+    parts = ["## " + title, ""] + [str(x) for x in lines]
+    if at:
+        parts.append("")
+        parts.append(" ".join("<@" + u + ">" for u in at))
+    msg = chr(10).join(parts)
+    return bncr_push(msg, at)
+
+
 def notify_config(conn: sqlite3.Connection) -> dict[str, Any]:
     raw = setting_get(conn, "notify_params", "")
     try:
@@ -1940,6 +1988,13 @@ def apply_node_offline_policy(rows: list[dict[str, Any]]) -> None:
                 if int(row["active"] or 0) and not int(row["auto_suspended"] or 0) and last and (ts - last) >= threshold:
                     conn.execute("UPDATE nodes SET active=0, auto_suspended=1 WHERE id=?", (nid,))
                     audit("node_auto_suspend", None, nid, None, "", f"离线超过 {NODE_OFFLINE_SUSPEND_HOURS:g} 小时，自动停售")
+                    owner = conn.execute("""SELECT u.username, u.wecom_userid FROM nodes n JOIN users u ON u.id=n.owner_id WHERE n.id=?""", (nid,)).fetchone()
+                    if owner:
+                        bncr_notify_text(
+                            "节点离线告警",
+                            [f"节点「{n.get('name') or nid}」已离线超过 {NODE_OFFLINE_SUSPEND_HOURS:g} 小时，已自动停售。",
+                             "请尽快登录面板检查母鸡状态，恢复后平台会自动重新上架。"],
+                            [str(owner["wecom_userid"] or "")])
 
 
 def refresh_node_health_snapshot() -> None:
@@ -2380,6 +2435,7 @@ def start_plan_usage_loop() -> None:
                 auto_renew_plans_once()
                 accrue_provider_income_once()
                 expire_plans_once()
+                remind_stale_tickets_once(24)
                 with db() as conn:
                     reclaim_expired_plan_ports(conn)
                 global _abuse_last_check
@@ -3064,6 +3120,19 @@ def init_db() -> None:
         host_cols = {r["name"] for r in conn.execute("PRAGMA table_info(hosts)").fetchall()}
         if "deploy_token" not in host_cols:
             conn.execute("ALTER TABLE hosts ADD COLUMN deploy_token TEXT NOT NULL DEFAULT ''")
+        ticket_cols = {r["name"] for r in conn.execute("PRAGMA table_info(tickets)").fetchall()}
+        if "reminded_at" not in ticket_cols:
+            conn.execute("ALTER TABLE tickets ADD COLUMN reminded_at INTEGER NOT NULL DEFAULT 0")
+        user_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "wecom_userid" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN wecom_userid TEXT NOT NULL DEFAULT ''")
+        conn.execute("""CREATE TABLE IF NOT EXISTS wecom_bind_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL UNIQUE,
+                user_id INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL
+            )""")
         ann_cols = {r["name"] for r in conn.execute("PRAGMA table_info(announcements)").fetchall()}
         if "kind" not in ann_cols:
             conn.execute("ALTER TABLE announcements ADD COLUMN kind TEXT NOT NULL DEFAULT 'announcement'")
@@ -4997,6 +5066,30 @@ def claim_retained_ports(conn: sqlite3.Connection, user_id: int, new_plan_id: in
     return rows
 
 
+def remind_stale_tickets_once(hours: int = 24) -> int:
+    """工单超过 N 小时未响应，在群里 @供货商催办一次。"""
+    sent = 0
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT id, ticket_no, title, owner_id, updated_at FROM tickets WHERE status IN ('open','processing') AND updated_at<=? AND reminded_at<updated_at",
+            (now() - hours * 3600,)).fetchall()
+        for t in rows:
+            at_ids: list[str] = []
+            if int(t["owner_id"] or 0) > 0:
+                owner = conn.execute("SELECT wecom_userid FROM users WHERE id=?", (int(t["owner_id"]),)).fetchone()
+                if owner and str(owner["wecom_userid"] or "").strip():
+                    at_ids.append(str(owner["wecom_userid"]).strip())
+            ok = bncr_notify_text(
+                "工单超时催办",
+                [f"工单 {t['ticket_no']}：{t['title']}",
+                 f"已超过 {hours} 小时未响应，请尽快登录面板处理。"],
+                at_ids)
+            conn.execute("UPDATE tickets SET reminded_at=? WHERE id=?", (now(), int(t["id"])))
+            if ok:
+                sent += 1
+    return sent
+
+
 def auto_renew_plans_once() -> int:
     """自动续期：套餐到期时扣积分延期；积分不足则关闭开关，让其正常到期。"""
     renewed = 0
@@ -5802,6 +5895,9 @@ def create_host_application(user: sqlite3.Row, data: dict[str, Any]) -> tuple[bo
     if monthly <= 0:
         return False, "请填写月流量（GB，必须大于 0）", {}
     with db() as conn:
+        wecom_id = str(row_val(conn.execute("SELECT wecom_userid FROM users WHERE id=?", (user["id"],)).fetchone(), "wecom_userid", "") or "").strip()
+        if not wecom_id:
+            return False, "请先在企微群内发送绑定码完成入群验证，再提交托管申请", {}
         pending = conn.execute("SELECT COUNT(*) FROM hosts WHERE user_id=? AND status IN ('pending','pending_node')", (user["id"],)).fetchone()[0]
         if pending >= 5:
             return False, "待审核的托管申请过多，请等待处理", {}
@@ -6009,6 +6105,8 @@ class Handler(BaseHTTPRequestHandler):
             self.frp_plugin()
         elif path == "/api/setup/register-node":
             self.setup_register_node()
+        elif path == "/api/wecom/bind":
+            self.wecom_bind_callback()
         elif path == "/api/license/activate" and SOFTWARE_LICENSE_AUTHORITY:
             self.license_authority_activate()
         elif path == "/api/license/activate" and SOFTWARE_LICENSE_REQUIRED and not software_license_ok():
@@ -6027,6 +6125,35 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg, "license": payload}, 200 if ok else 400)
         except Exception as e:
             self.send_json({"ok": False, "error": str(e)}, 400)
+
+    def wecom_bind_callback(self) -> None:
+        """Bncr 插件回调：群里发送绑定码后，绑定企微 userid。"""
+        try:
+            data = self.read_json()
+        except Exception as e:
+            self.send_json({"ok": False, "error": str(e)}, 400)
+            return
+        code = str(data.get("code", "")).strip().upper()
+        userid = str(data.get("userid", "")).strip()[:64]
+        if not code.startswith("FML-"):
+            self.send_json({"ok": False, "error": "code invalid"}, 400)
+            return
+        with db() as conn:
+            cfg = bncr_config(conn)
+            if cfg["token"]:
+                supplied = str(data.get("token", ""))
+                if not hmac.compare_digest(supplied, cfg["token"]):
+                    self.send_json({"ok": False, "error": "token invalid"}, 403)
+                    return
+            row = conn.execute("SELECT id, user_id FROM wecom_bind_codes WHERE code=? AND expires_at>?", (code, now())).fetchone()
+            if not row:
+                self.send_json({"ok": False, "error": "code not found or expired"}, 404)
+                return
+            username = conn.execute("SELECT username FROM users WHERE id=?", (int(row["user_id"]),)).fetchone()
+            conn.execute("UPDATE users SET wecom_userid=? WHERE id=?", (userid, int(row["user_id"])))
+            conn.execute("DELETE FROM wecom_bind_codes WHERE id=?", (int(row["id"]),))
+        self.send_json({"ok": True, "message": "绑定成功", "username": username["username"] if username else ""})
+        return
 
     def setup_register_node(self) -> None:
         """One-click frps node registration — authenticated via FML_SETUP_KEY."""
@@ -6622,6 +6749,23 @@ class Handler(BaseHTTPRequestHandler):
                 unseen_ann = conn.execute("SELECT COUNT(*) FROM announcements WHERE active=1 AND created_at>?", (seen,)).fetchone()[0]
             self.send_json({"ok": True, "notifications": [dict(r) for r in rows], "unread": int(unread or 0) + int(unseen_ann or 0), "unread_notifications": int(unread or 0), "unseen_announcements": int(unseen_ann or 0)})
             return
+        if path == "/api/user/wecom/bindcode":
+            with db() as conn:
+                row = conn.execute("SELECT code, expires_at FROM wecom_bind_codes WHERE user_id=? AND expires_at>? ORDER BY id DESC LIMIT 1",
+                                   (int(user["id"]), now())).fetchone()
+                if row and now() < int(row["expires_at"]):
+                    code = row["code"]
+                else:
+                    code = "FML-" + secrets.token_hex(4).upper()
+                    conn.execute("DELETE FROM wecom_bind_codes WHERE user_id=? OR expires_at<=?", (int(user["id"]), now()))
+                    conn.execute("INSERT INTO wecom_bind_codes(code, user_id, created_at, expires_at) VALUES(?,?,?,?)",
+                                 (code, int(user["id"]), now(), now() + 3600))
+                cfg = bncr_config(conn)
+                bound = str(row_val(user, "wecom_userid", "") or "").strip() if user else ""
+                bound_now = conn.execute("SELECT wecom_userid FROM users WHERE id=?", (int(user["id"]),)).fetchone()
+            self.send_json({"ok": True, "code": code, "bound": bool(str(bound_now["wecom_userid"] or "").strip()) if bound_now else False,
+                            "expires_at": now() + 3600})
+            return
         if path == "/api/user/payout-account":
             with db() as conn:
                 row = conn.execute("SELECT * FROM payout_accounts WHERE user_id=?", (int(user["id"]),)).fetchone()
@@ -7089,6 +7233,7 @@ class Handler(BaseHTTPRequestHandler):
                 "payment": payment_public(payment_config(conn)),
                 "plans": list_plans(conn, active_only=False),
                 "notify": notify_public(notify_config(conn)),
+                "bncr": bncr_public(bncr_config(conn)),
                 "r2": r2_public,
                 "r2_configured": r2_public["configured"],
                 "frpc_users": frpc_users,
@@ -7442,8 +7587,20 @@ class Handler(BaseHTTPRequestHandler):
                 if owner_id:
                     notify(conn, owner_id, "ticket_new_owner", f"ticket:{int(conn.execute('SELECT last_insert_rowid()').fetchone()[0])}",
                            title=title, username=user["username"], ticket_no=tno, node=node_name or "不关联")
+                    owner_row = conn.execute("SELECT wecom_userid FROM users WHERE id=?", (owner_id,)).fetchone()
+                    bncr_notify_text(
+                        "新故障工单",
+                        [f"工单 {tno}：{title}",
+                         f"用户 {user['username']} 提交，关联实例：{node_name or '不关联'}",
+                         "请尽快登录面板处理，超时未处理会影响考核。"],
+                        [str((owner_row or {"wecom_userid": ""})["wecom_userid"] or "")])
                 else:
                     notify_admins_tpl(conn, "ticket_new_admin", "tickets", title=title, username=user["username"], ticket_no=tno, node=node_name or "不关联")
+                    bncr_notify_text(
+                        "新平台工单",
+                        [f"工单 {tno}：{title}",
+                         f"用户 {user['username']} 提交，关联实例：{node_name or '不关联'}",
+                         "请管理员登录面板处理。"])
             self.send_json({"ok": True, "message": "工单已提交"})
             return
 
@@ -7840,6 +7997,10 @@ class Handler(BaseHTTPRequestHandler):
             self.admin_smtp_config_save(user, data)
         elif path == "/api/admin/smtp-test":
             self.admin_smtp_test(user, data)
+        elif path == "/api/admin/bncr-config":
+            self.admin_bncr_config_save(user, data)
+        elif path == "/api/admin/bncr-test":
+            self.admin_bncr_test(user, data)
         elif path == "/api/admin/notify-config":
             self.admin_notify_config_save(user, data)
         elif path == "/api/admin/notify-test":
@@ -8495,6 +8656,41 @@ class Handler(BaseHTTPRequestHandler):
         else:
             detail = result.get("error") or "；".join(f"{r['channel']}: {r['message']}" for r in result.get("results", []))
             self.send_json({"ok": False, "error": detail or "发送失败"}, 400)
+
+    def admin_bncr_config_save(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        enabled = "1" if str(data.get("enabled", "")) in ("1", "true", "True", "on", "yes") else "0"
+        url = str(data.get("url", "")).strip()[:300]
+        token = str(data.get("token", "")).strip()[:200]
+        platform = str(data.get("platform", "wecomLong")).strip()[:40] or "wecomLong"
+        group_id = str(data.get("group_id", "")).strip()[:100]
+        if enabled == "1" and (not url.startswith("http://") and not url.startswith("https://")):
+            self.send_json({"ok": False, "error": "Bncr 地址必须以 http:// 或 https:// 开头"}, 400)
+            return
+        if enabled == "1" and not group_id:
+            self.send_json({"ok": False, "error": "请填写群 chatid（群里发送「企业微信ID」可查询）"}, 400)
+            return
+        with db() as conn:
+            setting_set(conn, "bncr_enabled", enabled)
+            setting_set(conn, "bncr_url", url)
+            setting_set(conn, "bncr_token", token)
+            setting_set(conn, "bncr_platform", platform)
+            setting_set(conn, "bncr_group_id", group_id)
+            cfg = bncr_config(conn)
+        audit("bncr_config_update", admin, None, None, "", f"更新 Bncr 群通知设置：enabled={cfg['enabled']}")
+        self.send_json({"ok": True, "message": "Bncr 通知设置已保存", "bncr": bncr_public(cfg)})
+
+    def admin_bncr_test(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
+        if not self.require_admin():
+            return
+        ok = bncr_notify_text("Frp 管理台测试通知",
+                              ["这是一条来自面板的测试消息，说明 Bncr 群通知链路已打通。",
+                               f"时间：{_beijing_now_text()}"])
+        if ok:
+            self.send_json({"ok": True, "message": "测试消息已发送，请在群里确认"})
+        else:
+            self.send_json({"ok": False, "error": "发送失败：请检查 Bncr 插件是否运行、地址与 token 是否匹配"}, 400)
 
     def account_change_password(self, user: sqlite3.Row, data: dict[str, Any]) -> None:
         old_pwd = str(data.get("old_password", ""))
