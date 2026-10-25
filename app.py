@@ -3962,13 +3962,23 @@ def ticket_public(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def payout_public(row: sqlite3.Row) -> dict[str, Any]:
+def payout_ticket_id(conn: sqlite3.Connection, payout_no: str) -> int:
+    """提现单对应的工单 id（提现工单内容里带有单号）。"""
+    if not payout_no:
+        return 0
+    row = conn.execute("SELECT id FROM tickets WHERE kind='withdraw' AND content LIKE ? ORDER BY id DESC LIMIT 1",
+                       (f"%{payout_no}%",)).fetchone()
+    return int(row["id"]) if row else 0
+
+
+def payout_public(row: sqlite3.Row, conn: sqlite3.Connection | None = None) -> dict[str, Any]:
     return {
         "id": int(row["id"]), "payout_no": row["payout_no"], "user_id": int(row["user_id"]),
         "username": row["username"], "points": int(row["points"] or 0), "method": row["method"],
         "account": row["account"], "holder": row["holder"],
         "qr_token": row_val(row, "qr_token", "") or "", "status": row["status"],
         "note": row["note"], "created_at": int(row["created_at"] or 0), "updated_at": int(row["updated_at"] or 0),
+        "ticket_id": payout_ticket_id(conn, str(row["payout_no"] or "")) if conn is not None else 0,
     }
 
 
@@ -6892,7 +6902,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/user/payouts":
             with db() as conn:
                 rows = conn.execute("SELECT * FROM payouts WHERE user_id=? ORDER BY id DESC LIMIT 50", (int(user["id"]),)).fetchall()
-            self.send_json({"ok": True, "payouts": [payout_public(r) for r in rows], "income": provider_income_balance(conn, int(user["id"]))})
+            self.send_json({"ok": True, "payouts": [payout_public(r, conn) for r in rows], "income": provider_income_balance(conn, int(user["id"]))})
             return
         if path == "/api/tickets/summary":
             with db() as conn:
@@ -6946,7 +6956,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with db() as conn:
                 rows = conn.execute("SELECT * FROM payouts ORDER BY id DESC LIMIT 200").fetchall()
-            self.send_json({"ok": True, "payouts": [payout_public(r) for r in rows]})
+            self.send_json({"ok": True, "payouts": [payout_public(r, conn) for r in rows]})
             return
         if path == "/api/admin/ledger/analysis":
             if not self.require_admin():
