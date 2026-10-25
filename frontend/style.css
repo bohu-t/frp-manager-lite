@@ -2526,3 +2526,4 @@ html[data-theme="dark"] .status-badge.warn{background:rgba(245,158,11,.18);color
 .host-detail-row span{color:var(--muted);flex:none}
 .host-detail-row b{color:var(--text-strong);font-weight:700;text-align:right;word-break:break-all}
 @media(max-width:900px){.host-detail-grid{grid-template-columns:1fr}}
+.ticket-detail-title{margin:-4px 0 14px;font-size:15px;font-weight:700;color:var(--text-strong)}

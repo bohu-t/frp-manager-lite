@@ -1982,8 +1982,11 @@ async function loadTicketDetail(id, scope){
     ...msgs.map(m => `<div class="ticket-msg ${m.role}"><div class="ticket-msg-head"><b>${esc(m.username)}</b><span>${m.role === 'owner' ? '机主' : (m.role === 'admin' ? '管理员' : '用户')} · ${fmtTs(m.created_at)}</span></div><p>${ticketBodyHtml(m.content)}</p>${attsHtml(m.attachments)}</div>`)
   ].join('');
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="${backFn}">${listLabel}</a> <span class="crumb-inline">›</span> ${esc(t.ticket_no || '')}</h1><p>${esc(t.title || '')}</p></div>
-      <button type="button" class="secondary" onclick="${backFn}">‹ 返回${listLabel}</button></div>
+    <div class="page-head-row">
+      ${instCrumbBar(t.ticket_no || '', [{ label: listLabel, onclick: backFn }])}
+      <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="${backFn}">‹ 返回${listLabel}</button></div>
+    </div>
+    <p class="ticket-detail-title">${esc(t.title || '')}</p>
     <div class="ticket-layout">
       <section class="card ticket-main">
         <div class="section-title"><div><h2>${stIcon('log')}沟通记录</h2><p>用户与机主在本页沟通，图片可点开查看原图</p></div>${ticketStatusBadge(t.status)}</div>
