@@ -1996,8 +1996,7 @@ async function loadTicketDetail(id, scope){
       <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="${backFn}">‹ 返回${listLabel}</button></div>
     </div>
     <p class="ticket-detail-title">${esc(t.title || '')}</p>
-    <div class="ticket-layout">
-      ${payout ? `<section class="card payout-panel">
+    ${payout ? `<section class="card payout-panel">
         <div class="section-title"><div><h2>${stIcon('key')}提现单 ${esc(payout.payout_no)}</h2><p>${payout.status === 'paid' ? '已打款' : (payout.status === 'pending' ? '等待处理' : '已拒绝')}</p></div>
           <span class="status-badge ${payout.status === 'paid' ? 'ok' : (payout.status === 'pending' ? 'warn' : 'bad')}"><i></i>${payout.status === 'paid' ? '已打款' : (payout.status === 'pending' ? '待处理' : '已拒绝')}</span></div>
         <div class="payout-panel-grid">
@@ -2009,6 +2008,7 @@ async function loadTicketDetail(id, scope){
         </div>
         ${isAdminView && payout.status === 'pending' ? `<div class="payout-panel-actions"><button type="button" onclick="reviewPayoutInTicket(${Number(payout.id)}, 'paid')">已打款</button><button type="button" class="secondary" onclick="reviewPayoutInTicket(${Number(payout.id)}, 'reject')">拒绝</button></div>` : ''}
       </section>` : ''}
+    <div class="ticket-layout">
       <section class="card ticket-main">
         <div class="section-title"><div><h2>${stIcon('log')}沟通记录</h2><p>用户与机主在本页沟通，图片可点开查看原图</p></div>${ticketStatusBadge(t.status)}</div>
         <div class="ticket-thread">${thread}</div>
