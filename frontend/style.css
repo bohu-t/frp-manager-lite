@@ -2518,3 +2518,6 @@ html[data-theme="dark"] .ia-danger{background:rgba(239,68,68,.12);border-color:r
 .app-shell.is-settings .admin-settings-grid{align-items:start}
 .app-shell.is-settings .admin-settings-col{height:auto}
 .app-shell.is-settings .admin-settings-col>.card:last-child{flex:0 0 auto}
+/* 提现状态配色 */
+.status-badge.warn{background:#fef3c7;color:#b45309}
+html[data-theme="dark"] .status-badge.warn{background:rgba(245,158,11,.18);color:#fbbf24}

@@ -1753,8 +1753,7 @@ async function loadHosts(){
   const earnSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('bolt')}收益</h2><p>按服务进度结算：${100 - pct}% 到账，${pct}% 留存为保证金</p></div><span class="section-count">已结算 ${pTotal} 积分 · 保证金 ${pGuarantee}</span></div>
       <div class="row" style="gap:10px;align-items:center;margin:6px 0 12px">
         <span class="muted small">可提现收益</span><b style="font-size:18px">${fmtPts(pIncome)} 积分</b>
-        <button type="button" class="secondary" onclick="providerWithdraw('balance')" ${pIncome > 0 ? '' : 'disabled'}>转入余额</button>
-        <button type="button" onclick="providerWithdraw('external')" ${pIncome > 0 ? '' : 'disabled'}>提现到收款账户</button>
+        <button type="button" onclick="loadPayoutTickets()" ${pIncome > 0 ? '' : 'disabled'}>提现</button>
       </div>
       <div class="table-wrap"><table><thead><tr><th>实例</th><th>节点</th><th>套餐价</th><th>已结算</th><th>保证金</th><th>进度</th><th>状态</th></tr></thead><tbody>
       ${pEarn.length ? pEarn.map(e => `<tr><td><b>${esc(e.plan_name || '-')}</b></td><td>${esc(e.node_name || ('#' + e.node_id))}</td><td>${e.price_points}</td><td><b>${e.paid_points}</b></td><td>${e.guarantee_points}</td><td>${Math.round(Number(e.progress || 0) * 100)}%</td><td>${e.status === 'active' ? '服务中' : (e.status === 'expired' ? '已到期' : (e.status === 'exhausted' ? '流量用尽' : '已退订'))}</td></tr>`).join('') : '<tr><td colspan="7" class="muted">暂无收益记录</td></tr>'}
@@ -1800,7 +1799,9 @@ async function loadTickets(){
       api('/api/user/nodes').catch(() => ({nodes: []})),
       api('/api/dashboard').catch(() => ({my_plans: []}))
     ]);
-    mine = a.tickets || []; received = b.tickets || []; nodes = c.nodes || []; plans = d.my_plans || [];
+    mine = (a.tickets || []).filter(t => (t.kind || 'issue') === 'issue');
+  received = (b.tickets || []).filter(t => (t.kind || 'issue') === 'issue');
+  nodes = c.nodes || []; plans = d.my_plans || [];
   }catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
   const nodeById = {}; nodes.forEach(n => { nodeById[Number(n.id)] = n; });
   const myNodeIds = [...new Set(plans.filter(p => p.status !== 'cancelled').map(p => Number(p.node_id)))].filter(Boolean);
@@ -2055,7 +2056,7 @@ async function closeTicket(id, scope){
 async function loadAdminTickets(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
   let tickets = [];
-  try{ tickets = (await api('/api/admin/tickets')).tickets || []; }
+  try{ tickets = ((await api('/api/admin/tickets')).tickets || []).filter(t => (t.kind || 'issue') === 'issue'); }
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
   const rows = tickets.map((t, i) => `<tr class="clickable-row" onclick="loadTicketDetail(${t.id}, 'admin')"><td>${i + 1}</td><td>${esc(t.ticket_no)}</td><td>${TICKET_KIND[t.kind] || t.kind}</td><td>${esc(t.title)}</td><td>${esc(t.username)}</td><td>${t.node_id ? esc(t.node_name || ('#' + t.node_id)) : '不关联'}</td><td>${ticketStatusBadge(t.status)}</td><td>${fmtTs(t.created_at)}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">暂无工单</td></tr>';
   app.innerHTML = appLayoutHtml(`
