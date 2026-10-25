@@ -1977,6 +1977,9 @@ async function loadTicketDetail(id, scope){
                : isHost ? (isAdminView ? 'loadAdminHosts()' : 'loadHosts()')
                : (isAdminView ? 'loadAdminTickets()' : 'loadTickets()');
   const listLabel = isWithdraw ? '提现工单' : (isHost ? '托管申请' : '故障工单');
+  const navKind = isWithdraw ? (isAdminView ? 'admin-payouts' : 'dashboard-payouts')
+                : isHost ? (isAdminView ? 'admin-hosts' : 'dashboard-hosts')
+                : (isAdminView ? 'admin-tickets' : 'dashboard-tickets');
   const thread = [
     `<div class="ticket-msg user"><div class="ticket-msg-head"><b>${esc(t.username || '')}</b><span>用户 · ${fmtTs(t.created_at)}</span></div><p>${ticketBodyHtml(t.content)}</p>${attsHtml(t.attachments)}</div>`,
     ...msgs.map(m => `<div class="ticket-msg ${m.role}"><div class="ticket-msg-head"><b>${esc(m.username)}</b><span>${m.role === 'owner' ? '机主' : (m.role === 'admin' ? '管理员' : '用户')} · ${fmtTs(m.created_at)}</span></div><p>${ticketBodyHtml(m.content)}</p>${attsHtml(m.attachments)}</div>`)
@@ -2015,7 +2018,7 @@ async function loadTicketDetail(id, scope){
         ${!isClosed ? `<button type="button" class="secondary" onclick="closeTicket(${Number(t.id)}, '${isAdminView ? 'admin' : 'user'}')">结束工单</button>` : ''}
       </aside>
     </div>
-  `, isAdminView ? 'admin-tickets' : 'dashboard-tickets', '工单');
+  `, navKind, listLabel);
   window.__replyAtts = [];
   const fileInput = document.querySelector('#tkReplyFile');
   if(fileInput) fileInput.onchange = async () => {
