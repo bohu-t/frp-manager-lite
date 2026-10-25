@@ -5286,7 +5286,7 @@ async function loadAdminSettings(){
   window.adminProxyTypeOptions = data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux'];
   app.innerHTML = appLayoutHtml(`
     <div class="admin-settings-grid">
-      <div class="admin-settings-col">${adminNotifyCardHtml(notify)}${adminPaymentCardHtml(data.payment)}</div>
+      <div class="admin-settings-col">${adminPaymentCardHtml(data.payment)}</div>
       <div class="admin-settings-col">${adminSmtpCardHtml(smtp)}${adminBncrCardHtml(bncr)}${adminBackupCardHtml(r2, r2Status, r2Source)}${adminR2CardHtml(r2, r2Status, r2Source)}</div>
     </div>
     ${adminPwdModalHtml()}
