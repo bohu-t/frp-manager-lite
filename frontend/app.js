@@ -1250,6 +1250,7 @@ async function renderRegister(){
       <form id="registerForm" class="stack-form auth-login-form">
         <div class="input-group"><label class="input-label" for="registerUsername">用户名</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('user')}</span><input id="registerUsername" class="input-ios" name="username" autocomplete="username" placeholder="请输入用户名" required></div></div>
         <div class="input-group"><label class="input-label" for="registerPassword">密码</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('lock')}</span><input id="registerPassword" class="input-ios auth-password-input" name="password" type="password" autocomplete="new-password" minlength="6" placeholder="请输入密码（至少 6 位）" required><button type="button" class="auth-password-toggle" onclick="togglePasswordVisibility('registerPassword', this)" aria-label="显示密码" title="显示密码">${iconSvg('eye')}</button></div></div>
+        <div class="input-group"><label class="input-label" for="registerPassword2">确认密码</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('lock')}</span><input id="registerPassword2" class="input-ios auth-password-input" name="password2" type="password" autocomplete="new-password" minlength="6" placeholder="请再次输入密码" required><button type="button" class="auth-password-toggle" onclick="togglePasswordVisibility('registerPassword2', this)" aria-label="显示密码" title="显示密码">${iconSvg('eye')}</button></div></div>
         ${openRegistration ? `<div class="input-group"><label class="input-label" for="registerEmail">邮箱</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('mail')}</span><input id="registerEmail" class="input-ios" name="email" type="email" autocomplete="email" placeholder="请输入邮箱，用于接收验证码" required></div></div>
         <div class="input-group"><label class="input-label" for="registerCode">邮箱验证码</label><div class="row" style="gap:8px"><input id="registerCode" class="input-ios" name="code" inputmode="numeric" maxlength="6" placeholder="6 位验证码" required style="flex:1;min-width:0"><button type="button" class="secondary" id="registerCodeBtn" onclick="sendRegisterCode()">获取验证码</button></div></div><input type="hidden" name="node_id" value="0"><input type="hidden" name="invite_key" value="">` : '<div class="input-group"><label class="input-label" for="registerNode">接入节点</label><select id="registerNode" class="input-ios" name="node_id" required>${nodeOptions(nodes)}</select></div><div class="input-group"><label class="input-label" for="registerKey">注册密钥</label><input id="registerKey" class="input-ios" name="invite_key" placeholder="FML-..." required></div>'}
         <p class="row"><button>注册</button><button type="button" class="secondary" onclick="renderLogin()">返回登录</button></p>
@@ -1257,6 +1258,11 @@ async function renderRegister(){
   document.querySelector('#registerForm').onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
+    const pwd = String(fd.get('password') || '');
+    const pwd2 = String(fd.get('password2') || '');
+    if(pwd !== pwd2){ show('两次输入的密码不一致', true); return; }
+    if(pwd.length < 6){ show('密码至少 6 位', true); return; }
+    fd.delete('password2');
     try{
       const r = await api('/api/register', {method:'POST', body:Object.fromEntries(fd)});
       show(r.message || '注册成功，请登录');
