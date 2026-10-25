@@ -3952,6 +3952,15 @@ def new_payout_no() -> str:
     return "PO" + time.strftime("%Y%m%d%H%M%S", time.localtime()) + secrets.token_hex(2).upper()
 
 
+def ticket_message_public(row: sqlite3.Row) -> dict[str, Any]:
+    d = dict(row)
+    try:
+        d["attachments"] = json.loads(d.get("attachments") or "[]")
+    except Exception:
+        d["attachments"] = []
+    return d
+
+
 def ticket_public(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": int(row["id"]), "ticket_no": row["ticket_no"], "kind": row["kind"], "status": row["status"],
@@ -6961,7 +6970,7 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_json({"ok": False, "error": "无权查看该工单"}, 403)
                         return
                     msgs = conn.execute("SELECT * FROM ticket_messages WHERE ticket_id=? ORDER BY id", (tid,)).fetchall()
-                    self.send_json({"ok": True, "ticket": ticket_public(row), "messages": [dict(m) for m in msgs]})
+                    self.send_json({"ok": True, "ticket": ticket_public(row), "messages": [ticket_message_public(m) for m in msgs]})
                     return
                 rows = conn.execute("SELECT t.*, n.name AS node_name FROM tickets t LEFT JOIN nodes n ON n.id=t.node_id WHERE t.user_id=? ORDER BY t.id DESC LIMIT 100", (int(user["id"]),)).fetchall()
             self.send_json({"ok": True, "tickets": [ticket_public(r) for r in rows]})

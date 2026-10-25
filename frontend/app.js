@@ -1856,7 +1856,10 @@ async function uploadImage(file, kind){
 }
 
 function attsHtml(tokens){
-  const list = Array.isArray(tokens) ? tokens : [];
+  let list = Array.isArray(tokens) ? tokens : [];
+  if(!list.length && typeof tokens === 'string' && tokens.trim()){
+    try{ const parsed = JSON.parse(tokens); if(Array.isArray(parsed)) list = parsed; }catch(e){}
+  }
   if(!list.length) return '';
   return `<div class="ticket-atts">${list.map(t => `<img src="/api/upload/${encodeURIComponent(t)}" alt="附件" onclick="showImageViewer('/api/upload/${encodeURIComponent(t)}')">`).join('')}</div>`;
 }
