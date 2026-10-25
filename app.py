@@ -6987,7 +6987,14 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_json({"ok": False, "error": "无权查看该工单"}, 403)
                         return
                     msgs = conn.execute("SELECT * FROM ticket_messages WHERE ticket_id=? ORDER BY id", (tid,)).fetchall()
-                    self.send_json({"ok": True, "ticket": ticket_public(row), "messages": [ticket_message_public(m) for m in msgs]})
+                    payout = None
+                    if (row["kind"] or "") == "withdraw":
+                        m = re.search(r"PO[0-9A-Za-z]{6,}", str(row["content"] or ""))
+                        if m:
+                            pr = conn.execute("SELECT * FROM payouts WHERE payout_no=?", (m.group(0),)).fetchone()
+                            if pr:
+                                payout = payout_public(pr, conn)
+                    self.send_json({"ok": True, "ticket": ticket_public(row), "messages": [ticket_message_public(m) for m in msgs], "payout": payout})
                     return
                 rows = conn.execute("SELECT t.*, n.name AS node_name FROM tickets t LEFT JOIN nodes n ON n.id=t.node_id WHERE t.user_id=? ORDER BY t.id DESC LIMIT 100", (int(user["id"]),)).fetchall()
             self.send_json({"ok": True, "tickets": [ticket_public(r) for r in rows]})
@@ -7892,7 +7899,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute("UPDATE tickets SET status='closed', resolution=?, updated_at=? WHERE id=?", (resolution, now(), tid))
                 refunded = False
                 if (row["kind"] or "") == "withdraw":
-                    m = re.search(r"PO\d{10,}", str(row["content"] or ""))
+                    m = re.search(r"PO[0-9A-Za-z]{6,}", str(row["content"] or ""))
                     if m:
                         pay = conn.execute("SELECT * FROM payouts WHERE payout_no=?", (m.group(0),)).fetchone()
                         refunded = reject_payout(conn, pay, "用户关闭提现工单，已退回收益")

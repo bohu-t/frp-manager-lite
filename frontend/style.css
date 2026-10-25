@@ -2527,3 +2527,11 @@ html[data-theme="dark"] .status-badge.warn{background:rgba(245,158,11,.18);color
 .host-detail-row b{color:var(--text-strong);font-weight:700;text-align:right;word-break:break-all}
 @media(max-width:900px){.host-detail-grid{grid-template-columns:1fr}}
 .ticket-detail-title{margin:-4px 0 14px;font-size:15px;font-weight:700;color:var(--text-strong)}
+/* 提现单卡片（工单内） */
+.payout-panel{margin-bottom:16px}
+.payout-panel-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px 18px}
+.payout-panel-grid>div{display:flex;flex-direction:column;gap:4px}
+.payout-panel-grid span{font-size:12px;color:var(--muted)}
+.payout-panel-grid b{font-size:15px;color:var(--text-strong);font-weight:700}
+.payout-qr img{width:96px;height:96px;object-fit:contain;border-radius:10px;border:1px solid var(--border);cursor:zoom-in}
+.payout-panel-actions{display:flex;gap:10px;margin-top:14px}

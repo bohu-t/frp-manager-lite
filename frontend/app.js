@@ -1971,6 +1971,7 @@ async function loadTicketDetail(id, scope){
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
   const t = data.ticket || {};
   const msgs = data.messages || [];
+  const payout = data.payout || null;
   window.__currentTicketId = Number(id);
   const isClosed = t.status === 'closed';
   const kind = t.kind || 'issue';
@@ -1980,7 +1981,7 @@ async function loadTicketDetail(id, scope){
                : isHost ? (isAdminView ? 'loadAdminHosts()' : 'loadHosts()')
                : (isAdminView ? 'loadAdminTickets()' : 'loadTickets()');
   const listLabel = isWithdraw ? '提现工单' : (isHost ? '托管申请' : '故障工单');
-  const payoutMatch = String(t.content || '').match(/PO\d{10,}/);
+  const payoutMatch = String(t.content || '').match(/PO[0-9A-Za-z]{6,}/);
   const displayNo = isWithdraw && payoutMatch ? payoutMatch[0] : (t.ticket_no || '');
   const navKind = isWithdraw ? (isAdminView ? 'admin-payouts' : 'dashboard-payouts')
                 : isHost ? (isAdminView ? 'admin-hosts' : 'dashboard-hosts')
@@ -1996,6 +1997,18 @@ async function loadTicketDetail(id, scope){
     </div>
     <p class="ticket-detail-title">${esc(t.title || '')}</p>
     <div class="ticket-layout">
+      ${payout ? `<section class="card payout-panel">
+        <div class="section-title"><div><h2>${stIcon('key')}提现单 ${esc(payout.payout_no)}</h2><p>${payout.status === 'paid' ? '已打款' : (payout.status === 'pending' ? '等待处理' : '已拒绝')}</p></div>
+          <span class="status-badge ${payout.status === 'paid' ? 'ok' : (payout.status === 'pending' ? 'warn' : 'bad')}"><i></i>${payout.status === 'paid' ? '已打款' : (payout.status === 'pending' ? '待处理' : '已拒绝')}</span></div>
+        <div class="payout-panel-grid">
+          <div><span>金额</span><b>¥${fmtPts(payout.points)}</b></div>
+          <div><span>方式</span><b>${esc(payout.method)}</b></div>
+          <div><span>账号</span><b>${esc(payout.account)}</b></div>
+          <div><span>姓名</span><b>${esc(payout.holder)}</b></div>
+          ${payout.qr_token ? `<div class="payout-qr"><span>收款码</span><img src="/api/upload/${encodeURIComponent(payout.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(payout.qr_token)}')"></div>` : ''}
+        </div>
+        ${isAdminView && payout.status === 'pending' ? `<div class="payout-panel-actions"><button type="button" onclick="reviewPayoutInTicket(${Number(payout.id)}, 'paid')">已打款</button><button type="button" class="secondary" onclick="reviewPayoutInTicket(${Number(payout.id)}, 'reject')">拒绝</button></div>` : ''}
+      </section>` : ''}
       <section class="card ticket-main">
         <div class="section-title"><div><h2>${stIcon('log')}沟通记录</h2><p>用户与机主在本页沟通，图片可点开查看原图</p></div>${ticketStatusBadge(t.status)}</div>
         <div class="ticket-thread">${thread}</div>
@@ -2065,6 +2078,16 @@ function renderReplyAtts(){
   box.innerHTML = list.map((tok, i) => `<span class="tk-att"><img src="/api/upload/${encodeURIComponent(tok)}" alt=""><button type="button" onclick="removeReplyAtt(${i})">×</button></span>`).join('');
 }
 function removeReplyAtt(i){ (window.__replyAtts || []).splice(i, 1); renderReplyAtts(); }
+
+async function reviewPayoutInTicket(pid, action){
+  const label = action === 'paid' ? '标记为已打款' : '拒绝该提现';
+  if(!await appConfirm(`确认${label}？`, {title:'提现处理', okText:'确认', danger: action !== 'paid'})) return;
+  try{
+    const r = await api('/api/admin/payouts/review', {method:'POST', body:{id:Number(pid), action}});
+    show(r.message || '已处理');
+    if(window.__currentTicketId) await loadTicketDetail(window.__currentTicketId, 'admin');
+  }catch(err){ show(err.message, true); }
+}
 
 async function closeTicket(id, scope){
   const resolution = await appPrompt('处理结果（可选，填了会展示在工单里）', '', {title:'结束工单'});
@@ -2295,7 +2318,7 @@ async function loadAdminPayouts(){
   let payouts = [];
   try{ payouts = (await api('/api/admin/payouts')).payouts || []; }
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
-  const rows = payouts.map((p, i) => `<tr class="${p.ticket_id ? 'clickable-row' : ''}"${p.ticket_id ? ` onclick="loadTicketDetail(${p.ticket_id}, 'admin')"` : ''}><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td>${esc(p.username)}</td><td><b>${fmtPts(p.points)}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${esc(p.holder)}</td><td>${p.qr_token ? `<img class="qr-thumb" src="/api/upload/${encodeURIComponent(p.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(p.qr_token)}')">` : '-'}</td><td><span class="status-badge ${p.status === 'paid' ? 'ok' : (p.status === 'pending' ? 'warn' : 'bad')}"><i></i>${p.status === 'paid' ? '已打款' : (p.status === 'pending' ? '待处理' : '已拒绝')}</span></td><td>${fmtTs(p.created_at)}</td><td class="actions node-actions">${p.status === 'pending' ? `<button class="node-action" onclick="reviewPayout(${p.id}, 'paid')">标记已打款</button><button class="node-action node-action-danger" onclick="reviewPayout(${p.id}, 'reject')">拒绝</button>` : '<span class="muted small">—</span>'}</td></tr>`).join('') || '<tr><td colspan="11" class="muted">暂无提现申请</td></tr>';
+  const rows = payouts.map((p, i) => `<tr class="${p.ticket_id ? 'clickable-row' : ''}"${p.ticket_id ? ` onclick="loadTicketDetail(${p.ticket_id}, 'admin')"` : ''}><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td>${esc(p.username)}</td><td><b>${fmtPts(p.points)}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${esc(p.holder)}</td><td>${p.qr_token ? `<img class="qr-thumb" src="/api/upload/${encodeURIComponent(p.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(p.qr_token)}')">` : '-'}</td><td><span class="status-badge ${p.status === 'paid' ? 'ok' : (p.status === 'pending' ? 'warn' : 'bad')}"><i></i>${p.status === 'paid' ? '已打款' : (p.status === 'pending' ? '待处理' : '已拒绝')}</span></td><td>${fmtTs(p.created_at)}</td><td class="muted small">${p.ticket_id ? '点行处理' : '—'}</td></tr>`).join('') || '<tr><td colspan="11" class="muted">暂无提现申请</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">PAYOUTS</span><h1>提现工单</h1><p>处理供给方的收款提现申请</p></div><button type="button" class="secondary" onclick="loadAdminPayouts()">刷新</button></div>
     <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>用户</th><th>积分</th><th>方式</th><th>账号</th><th>姓名</th><th>收款码</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
