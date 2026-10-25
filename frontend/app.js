@@ -1427,7 +1427,7 @@ const HOST_RULES = [
 ];
 
 function hostRowsHtml(hosts, admin){
-  return hosts.map((h, i) => `<tr>
+  return hosts.map((h, i) => `<tr${admin ? ` class="clickable-row" onclick="loadAdminHostDetail(${h.id})"` : ''}>
       <td>${i + 1}</td>
       <td>${esc(h.name)}</td>
       <td>${esc(h.region)}</td>
@@ -1438,8 +1438,8 @@ function hostRowsHtml(hosts, admin){
       <td><span class="status-badge ${HOST_STATUS_CLASS[h.status] || ''}"><i></i>${esc(h.status_text)}</span></td>
       <td>${fmtTs(h.created_at)}</td>
       <td class="actions node-actions">${admin ? `
-        ${h.status === 'pending' ? `<button class="node-action" onclick="hostReview(${h.id}, 'approve')">通过</button><button class="node-action node-action-danger" onclick="hostReview(${h.id}, 'reject')">拒绝</button>` : ''}
-        ${h.status !== 'blacklisted' ? `<button class="node-action node-action-danger" onclick="hostReview(${h.id}, 'blacklist')">拉黑</button>` : '<span class="muted small">已拉黑</span>'}
+        ${h.status === 'pending' ? `<button class="node-action" onclick="event.stopPropagation();hostReview(${h.id}, 'approve')">通过</button><button class="node-action node-action-danger" onclick="event.stopPropagation();hostReview(${h.id}, 'reject')">拒绝</button>` : ''}
+        ${h.status !== 'blacklisted' ? `<button class="node-action node-action-danger" onclick="event.stopPropagation();hostReview(${h.id}, 'blacklist')">拉黑</button>` : '<span class="muted small">已拉黑</span>'}
       ` : '<span class="muted small">—</span>'}</td>
     </tr>`).join('') || `<tr><td colspan="${admin ? 11 : 10}" class="muted">暂无托管记录</td></tr>`;
 }
@@ -2380,13 +2380,55 @@ async function loadAdminHosts(){
     </section>`, 'admin-hosts', '托管申请');
 }
 
+async function loadAdminHostDetail(id){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
+  let hosts = [];
+  try{ hosts = (await api('/api/admin/hosts')).hosts || []; }
+  catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
+  const h = hosts.find(x => Number(x.id) === Number(id));
+  if(!h){ show('托管申请不存在', true); return loadAdminHosts(); }
+  const rows = [
+    ['提交人', h.username],
+    ['地区', h.region],
+    ['接入地址', `${h.server_addr}:${h.server_port}`],
+    ['端口池', `${h.port_start} - ${h.port_end}`],
+    ['带宽', h.bandwidth_mbps ? `${h.bandwidth_mbps} Mbps` : '不限'],
+    ['月流量', h.monthly_traffic_gb ? `${h.monthly_traffic_gb} GB` : '不限'],
+    ['服务器到期', h.expires_at ? fmtTs(h.expires_at) : '-'],
+    ['提交时间', fmtTs(h.created_at)],
+    ['备注', h.note || '-']
+  ];
+  app.innerHTML = appLayoutHtml(`
+    ${instCrumbBar(h.name, [{ label: '托管申请', onclick: 'loadAdminHosts()' }])}
+    <div class="instance-layout">
+      <div class="instance-main">
+        <section class="card">
+          <div class="section-title"><div><div class="section-kicker">HOST</div><h2>${stIcon('cloud')}母鸡信息</h2></div>${ticketStatusBadge(h.status === 'pending' ? 'open' : (h.status === 'approved' ? 'closed' : 'rejected'))}</div>
+          <div class="host-detail-grid">${rows.map(([k, v]) => `<div class="host-detail-row"><span>${k}</span><b>${esc(String(v))}</b></div>`).join('')}</div>
+        </section>
+        <section class="card host-rules">
+          <div class="section-title"><div><h2>${stIcon('shield')}托管规则与准则</h2><p>审核时请对照以下约定</p></div></div>
+          <ol class="host-rule-list">${HOST_RULES.map(r => `<li>${esc(r)}</li>`).join('')}</ol>
+        </section>
+      </div>
+      <aside class="instance-side">
+        <section class="card ia-card">
+          <div class="ia-head"><span class="ia-head-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2.5 5.8 13.1h5.2l-1.2 8.4 7.6-10.8h-5.2z" fill="currentColor"/></svg></span><div class="ia-head-copy"><h2>审核</h2><p>当前状态：${esc(h.status_text || h.status)}</p></div></div>
+          ${h.status === 'pending' ? `<button type="button" class="ia-primary" onclick="hostReview(${h.id}, 'approve')"><span>通过审核</span></button>
+          <div class="ia-duo"><button type="button" class="ia-secondary" onclick="hostReview(${h.id}, 'reject')"><span>拒绝</span></button><button type="button" class="ia-secondary" onclick="hostReview(${h.id}, 'blacklist')"><span>拉黑</span></button></div>`
+          : `<button type="button" class="ia-secondary" onclick="loadAdminHosts()"><span>返回列表</span></button>`}
+        </section>
+      </aside>
+    </div>`, 'admin-hosts', '托管申请');
+}
+
 async function hostReview(id, action){
   const labels = {approve:'通过', reject:'拒绝', blacklist:'拉黑'};
   if(!await appConfirm(`确认${labels[action]}该托管申请？`, {title:'托管审核', okText:labels[action], danger: action !== 'approve'})) return;
   try{
     const r = await api('/api/admin/hosts/review', {method:'POST', body:{id, action}});
     await appAlert(r.message || '已处理', {title:'审核完成'});
-    loadAdminHosts();
+    loadAdminHostDetail(id);
   }catch(err){ await appAlert(err.message, {title:'操作失败'}); }
 }
 

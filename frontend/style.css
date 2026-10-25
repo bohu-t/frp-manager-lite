@@ -2521,3 +2521,8 @@ html[data-theme="dark"] .ia-danger{background:rgba(239,68,68,.12);border-color:r
 /* 提现状态配色 */
 .status-badge.warn{background:#fef3c7;color:#b45309}
 html[data-theme="dark"] .status-badge.warn{background:rgba(245,158,11,.18);color:#fbbf24}
+.host-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}
+.host-detail-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 2px;border-bottom:1px solid var(--border);font-size:13px}
+.host-detail-row span{color:var(--muted);flex:none}
+.host-detail-row b{color:var(--text-strong);font-weight:700;text-align:right;word-break:break-all}
+@media(max-width:900px){.host-detail-grid{grid-template-columns:1fr}}
