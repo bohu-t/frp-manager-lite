@@ -1969,13 +1969,17 @@ async function loadTicketDetail(id, scope){
   const t = data.ticket || {};
   const msgs = data.messages || [];
   const isClosed = t.status === 'closed';
+  const isWithdraw = (t.kind || 'issue') === 'withdraw';
+  const backFn = isWithdraw ? (isAdminView ? 'loadAdminPayouts()' : 'loadPayoutTickets()')
+                            : (isAdminView ? 'loadAdminTickets()' : 'loadTickets()');
+  const listLabel = isWithdraw ? '提现工单' : '故障工单';
   const thread = [
     `<div class="ticket-msg user"><div class="ticket-msg-head"><b>${esc(t.username || '')}</b><span>用户 · ${fmtTs(t.created_at)}</span></div><p>${ticketBodyHtml(t.content)}</p>${attsHtml(t.attachments)}</div>`,
     ...msgs.map(m => `<div class="ticket-msg ${m.role}"><div class="ticket-msg-head"><b>${esc(m.username)}</b><span>${m.role === 'owner' ? '机主' : (m.role === 'admin' ? '管理员' : '用户')} · ${fmtTs(m.created_at)}</span></div><p>${ticketBodyHtml(m.content)}</p>${attsHtml(m.attachments)}</div>`)
   ].join('');
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="${isAdminView ? "loadAdminTickets()" : "loadTickets()"}">工单</a> <span class="crumb-inline">›</span> ${esc(t.ticket_no || '')}</h1><p>${esc(t.title || '')}</p></div>
-      <button type="button" class="secondary" onclick="${isAdminView ? "loadAdminTickets()" : "loadTickets()"}">‹ 返回列表</button></div>
+    <div class="ov-page-head"><div><span class="section-kicker">TICKETS</span><h1><a href="javascript:void(0)" class="crumb-link" onclick="${backFn}">${listLabel}</a> <span class="crumb-inline">›</span> ${esc(t.ticket_no || '')}</h1><p>${esc(t.title || '')}</p></div>
+      <button type="button" class="secondary" onclick="${backFn}">‹ 返回${listLabel}</button></div>
     <div class="ticket-layout">
       <section class="card ticket-main">
         <div class="section-title"><div><h2>${stIcon('log')}沟通记录</h2><p>用户与机主在本页沟通，图片可点开查看原图</p></div>${ticketStatusBadge(t.status)}</div>
