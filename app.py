@@ -3973,6 +3973,19 @@ def ticket_public(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def reject_payout(conn: sqlite3.Connection, row: sqlite3.Row, reason: str = "") -> bool:
+    """把待处理的提现单置为已拒绝，并把积分退回收益池。"""
+    if not row or str(row["status"] or "") != "pending":
+        return False
+    conn.execute("UPDATE payouts SET status='rejected', updated_at=? WHERE id=?", (now(), int(row["id"])))
+    conn.execute(
+        "INSERT INTO provider_income(owner_id, points, updated_at) VALUES(?,?,?) ON CONFLICT(owner_id) DO UPDATE SET points=points+excluded.points, updated_at=excluded.updated_at",
+        (int(row["user_id"]), int(row["points"] or 0), now()))
+    ledger_add(conn, "points", "in", "payout_reject", q2(row["points"]), int(row["user_id"]),
+               row["username"], 0, str(row["payout_no"]), "", reason or "提现驳回退回")
+    return True
+
+
 def payout_ticket_id(conn: sqlite3.Connection, payout_no: str) -> int:
     """提现单对应的工单 id（提现工单内容里带有单号）。"""
     if not payout_no:
@@ -7872,7 +7885,16 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 resolution = sanitize_ticket_html(str(data.get("resolution", "")))[:1000]
                 conn.execute("UPDATE tickets SET status='closed', resolution=?, updated_at=? WHERE id=?", (resolution, now(), tid))
-            self.send_json({"ok": True, "message": "工单已关闭"})
+                refunded = False
+                if (row["kind"] or "") == "withdraw":
+                    m = re.search(r"PO\d{10,}", str(row["content"] or ""))
+                    if m:
+                        pay = conn.execute("SELECT * FROM payouts WHERE payout_no=?", (m.group(0),)).fetchone()
+                        refunded = reject_payout(conn, pay, "用户关闭提现工单，已退回收益")
+            msg = "工单已关闭"
+            if refunded:
+                msg = "工单已关闭，提现已取消，积分已退回收益池"
+            self.send_json({"ok": True, "message": msg})
             return
 
         if path == "/api/admin/payouts/review":
