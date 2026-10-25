@@ -1980,6 +1980,8 @@ async function loadTicketDetail(id, scope){
                : isHost ? (isAdminView ? 'loadAdminHosts()' : 'loadHosts()')
                : (isAdminView ? 'loadAdminTickets()' : 'loadTickets()');
   const listLabel = isWithdraw ? '提现工单' : (isHost ? '托管申请' : '故障工单');
+  const payoutMatch = String(t.content || '').match(/PO\d{10,}/);
+  const displayNo = isWithdraw && payoutMatch ? payoutMatch[0] : (t.ticket_no || '');
   const navKind = isWithdraw ? (isAdminView ? 'admin-payouts' : 'dashboard-payouts')
                 : isHost ? (isAdminView ? 'admin-hosts' : 'dashboard-hosts')
                 : (isAdminView ? 'admin-tickets' : 'dashboard-tickets');
@@ -1989,7 +1991,7 @@ async function loadTicketDetail(id, scope){
   ].join('');
   app.innerHTML = appLayoutHtml(`
     <div class="page-head-row">
-      ${instCrumbBar(t.ticket_no || '', [{ label: listLabel, onclick: backFn }])}
+      ${instCrumbBar(displayNo, [{ label: listLabel, onclick: backFn }])}
       <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="${backFn}">‹ 返回${listLabel}</button></div>
     </div>
     <p class="ticket-detail-title">${esc(t.title || '')}</p>
