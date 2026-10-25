@@ -1427,7 +1427,7 @@ const HOST_RULES = [
 ];
 
 function hostRowsHtml(hosts, admin){
-  return hosts.map((h, i) => `<tr${admin ? ` class="clickable-row" onclick="loadAdminHostDetail(${h.id})"` : ''}>
+  return hosts.map((h, i) => `<tr${h.ticket_id ? ` class="clickable-row" onclick="loadTicketDetail(${h.ticket_id}${admin ? ", 'admin'" : ''})"` : ''}>
       <td>${i + 1}</td>
       <td>${esc(h.name)}</td>
       <td>${esc(h.region)}</td>
@@ -1787,7 +1787,7 @@ let ticketsTab = 'mine';
 const TICKET_STATUS = { open: '待处理', processing: '处理中', closed: '已关闭', rejected: '已拒绝' };
 const TICKET_STATUS_CLASS = { open: 'tk-open', processing: 'tk-processing', closed: 'tk-closed', rejected: 'tk-rejected' };
 const ticketStatusBadge = (status) => `<span class="status-badge ${TICKET_STATUS_CLASS[status] || ''}"><i></i>${TICKET_STATUS[status] || esc(status)}</span>`;
-const TICKET_KIND = { issue: '问题工单', withdraw: '提现工单' };
+const TICKET_KIND = { issue: '问题工单', withdraw: '提现工单', host: '托管申请' };
 
 async function loadTickets(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
@@ -1968,11 +1968,15 @@ async function loadTicketDetail(id, scope){
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
   const t = data.ticket || {};
   const msgs = data.messages || [];
+  window.__currentTicketId = Number(id);
   const isClosed = t.status === 'closed';
-  const isWithdraw = (t.kind || 'issue') === 'withdraw';
+  const kind = t.kind || 'issue';
+  const isWithdraw = kind === 'withdraw';
+  const isHost = kind === 'host';
   const backFn = isWithdraw ? (isAdminView ? 'loadAdminPayouts()' : 'loadPayoutTickets()')
-                            : (isAdminView ? 'loadAdminTickets()' : 'loadTickets()');
-  const listLabel = isWithdraw ? '提现工单' : '故障工单';
+               : isHost ? (isAdminView ? 'loadAdminHosts()' : 'loadHosts()')
+               : (isAdminView ? 'loadAdminTickets()' : 'loadTickets()');
+  const listLabel = isWithdraw ? '提现工单' : (isHost ? '托管申请' : '故障工单');
   const thread = [
     `<div class="ticket-msg user"><div class="ticket-msg-head"><b>${esc(t.username || '')}</b><span>用户 · ${fmtTs(t.created_at)}</span></div><p>${ticketBodyHtml(t.content)}</p>${attsHtml(t.attachments)}</div>`,
     ...msgs.map(m => `<div class="ticket-msg ${m.role}"><div class="ticket-msg-head"><b>${esc(m.username)}</b><span>${m.role === 'owner' ? '机主' : (m.role === 'admin' ? '管理员' : '用户')} · ${fmtTs(m.created_at)}</span></div><p>${ticketBodyHtml(m.content)}</p>${attsHtml(m.attachments)}</div>`)
@@ -1984,6 +1988,7 @@ async function loadTicketDetail(id, scope){
       <section class="card ticket-main">
         <div class="section-title"><div><h2>${stIcon('log')}沟通记录</h2><p>用户与机主在本页沟通，图片可点开查看原图</p></div>${ticketStatusBadge(t.status)}</div>
         <div class="ticket-thread">${thread}</div>
+        ${isHost && isAdminView && !isClosed ? `<div class="row" style="gap:8px;margin:12px 0"><button type="button" onclick="hostReview(${Number(t.host_id || 0)}, 'approve')">通过审核</button><button type="button" class="secondary" onclick="hostReview(${Number(t.host_id || 0)}, 'reject')">拒绝</button><button type="button" class="node-action node-action-danger" onclick="hostReview(${Number(t.host_id || 0)}, 'blacklist')">拉黑</button></div>` : ''}
         ${isClosed ? `<p class="muted small">该工单已关闭${t.resolution ? ' · 处理结果：' + ticketBodyHtml(t.resolution) : ''}</p>` : `
         <div class="ticket-reply">
           <label class="tk-field"><span>回复内容</span><textarea id="tkReplyText" rows="4" placeholder="输入回复内容"></textarea></label>
@@ -2428,7 +2433,8 @@ async function hostReview(id, action){
   try{
     const r = await api('/api/admin/hosts/review', {method:'POST', body:{id, action}});
     await appAlert(r.message || '已处理', {title:'审核完成'});
-    loadAdminHostDetail(id);
+    if(window.__currentTicketId) loadTicketDetail(window.__currentTicketId, 'admin');
+    else loadAdminHosts();
   }catch(err){ await appAlert(err.message, {title:'操作失败'}); }
 }
 

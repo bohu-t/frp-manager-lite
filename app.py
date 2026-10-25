@@ -3176,6 +3176,8 @@ def init_db() -> None:
         if "deploy_token" not in host_cols:
             conn.execute("ALTER TABLE hosts ADD COLUMN deploy_token TEXT NOT NULL DEFAULT ''")
         ticket_cols = {r["name"] for r in conn.execute("PRAGMA table_info(tickets)").fetchall()}
+        if "host_id" not in ticket_cols:
+            conn.execute("ALTER TABLE tickets ADD COLUMN host_id INTEGER NOT NULL DEFAULT 0")
         if "reminded_at" not in ticket_cols:
             conn.execute("ALTER TABLE tickets ADD COLUMN reminded_at INTEGER NOT NULL DEFAULT 0")
         user_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
@@ -5845,7 +5847,12 @@ def handle_payment_notify(provider: str, raw_body: bytes, form: dict[str, str], 
 HOST_STATUS_TEXT = {"pending": "待审核", "approved": "已通过", "rejected": "已拒绝", "blacklisted": "已拉黑"}
 
 
-def host_public(row: sqlite3.Row) -> dict[str, Any]:
+def host_ticket_id(conn: sqlite3.Connection, host_id: int) -> int:
+    row = conn.execute("SELECT id FROM tickets WHERE kind='host' AND host_id=? ORDER BY id DESC LIMIT 1", (int(host_id),)).fetchone()
+    return int(row["id"]) if row else 0
+
+
+def host_public(row: sqlite3.Row, conn: sqlite3.Connection | None = None) -> dict[str, Any]:
     return {
         "id": int(row["id"]),
         "user_id": int(row["user_id"]),
@@ -5864,6 +5871,7 @@ def host_public(row: sqlite3.Row) -> dict[str, Any]:
         "note": row["note"] or "",
         "status": row["status"] or "pending",
         "status_text": HOST_STATUS_TEXT.get(row["status"] or "pending", row["status"] or ""),
+        "ticket_id": host_ticket_id(conn, int(row["id"])) if conn is not None else 0,
         "node_id": int(row["node_id"] or 0),
         "reviewed_at": int(row["reviewed_at"] or 0),
         "expires_at": int(row_val(row, "expires_at", 0) or 0),
@@ -5973,7 +5981,7 @@ def list_hosts(conn: sqlite3.Connection, user_id: int | None = None) -> list[dic
         rows = conn.execute("SELECT * FROM hosts ORDER BY id DESC LIMIT 300").fetchall()
     else:
         rows = conn.execute("SELECT * FROM hosts WHERE user_id=? ORDER BY id DESC LIMIT 100", (user_id,)).fetchall()
-    return [host_public(r) for r in rows]
+    return [host_public(r, conn) for r in rows]
 
 
 def create_host_application(user: sqlite3.Row, data: dict[str, Any]) -> tuple[bool, str, dict[str, Any]]:
@@ -6038,6 +6046,17 @@ def create_host_application(user: sqlite3.Row, data: dict[str, Any]) -> tuple[bo
             (user["id"], user["username"], name, region, server_addr, server_port, port_start, port_end,
              bandwidth, monthly, "", "", "", note, "pending_node", node_id, deploy_token, now(), now(), expires_at))
         host_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+        summary = (
+            f"<p>母鸡：{name}（{region}）</p>"
+            f"<p>接入地址：{server_addr}:{server_port}</p>"
+            f"<p>端口池：{port_start}-{port_end} · 带宽 {bandwidth} Mbps · 月流量 {monthly} GB</p>"
+            f"<p>服务器到期：{fmt_time(expires_at)}</p>"
+            f"<p>备注：{note}</p>"
+        )
+        conn.execute(
+            "INSERT INTO tickets(ticket_no, user_id, username, kind, status, node_id, owner_id, host_id, title, content, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (new_ticket_no(), int(user["id"]), user["username"], "host", "open", 0, 0, host_id,
+             f"托管申请：{name}", summary, now(), now()))
     return True, "母鸡信息已保存，请继续配置套餐并执行接入脚本", {
         "host_id": host_id, "node_id": node_id, "node_name": node_name,
         "deploy_token": deploy_token, "auth_token": node_token,
@@ -6057,6 +6076,8 @@ def review_host_application(admin: sqlite3.Row, host_id: int, action: str, reaso
         if action == "reject":
             conn.execute("UPDATE hosts SET status='rejected', reviewed_by=?, reviewed_at=?, updated_at=? WHERE id=?",
                          (admin["id"], now(), now(), host_id))
+            conn.execute("UPDATE tickets SET status='closed', resolution=?, updated_at=? WHERE kind='host' AND host_id=?",
+                         (f"审核未通过：{reason}" if reason else "审核未通过", now(), host_id))
             return True, "已拒绝该申请"
         if action == "blacklist":
             conn.execute("UPDATE hosts SET status='blacklisted', reviewed_by=?, reviewed_at=?, updated_at=? WHERE id=?",
@@ -6064,6 +6085,8 @@ def review_host_application(admin: sqlite3.Row, host_id: int, action: str, reaso
             if host["node_id"]:
                 conn.execute("UPDATE nodes SET active=0 WHERE id=?", (int(host["node_id"]),))
                 refund_plans_on_node(conn, int(host["node_id"]), "节点被平台下架，按剩余价值退款")
+            conn.execute("UPDATE tickets SET status='closed', resolution=?, updated_at=? WHERE kind='host' AND host_id=?",
+                         ("已加入黑名单", now(), host_id))
             return True, "已加入黑名单"
         if host["status"] == "approved" and host["node_id"]:
             return False, "该申请已通过"
@@ -6081,6 +6104,8 @@ def review_host_application(admin: sqlite3.Row, host_id: int, action: str, reaso
                          (admin["id"], now(), now(), host_id))
             notify(conn, int(host["user_id"]), "host_approved", "hosts",
                    name=str(host["name"]))
+            conn.execute("UPDATE tickets SET status='closed', resolution=?, updated_at=? WHERE kind='host' AND host_id=?",
+                         ("审核通过，节点与套餐已上架", now(), host_id))
             return True, "已通过审核，节点与套餐已上架"
         # approve -> create node
         base_name = str(host["name"])
