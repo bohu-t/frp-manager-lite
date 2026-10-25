@@ -1437,11 +1437,7 @@ function hostRowsHtml(hosts, admin){
       ${admin ? `<td>${esc(h.username)}</td>` : ''}
       <td><span class="status-badge ${HOST_STATUS_CLASS[h.status] || ''}"><i></i>${esc(h.status_text)}</span></td>
       <td>${fmtTs(h.created_at)}</td>
-      <td class="actions node-actions">${admin ? `
-        ${h.status === 'pending' ? `<button class="node-action" onclick="event.stopPropagation();hostReview(${h.id}, 'approve')">通过</button><button class="node-action node-action-danger" onclick="event.stopPropagation();hostReview(${h.id}, 'reject')">拒绝</button>` : ''}
-        ${h.status !== 'blacklisted' ? `<button class="node-action node-action-danger" onclick="event.stopPropagation();hostReview(${h.id}, 'blacklist')">拉黑</button>` : '<span class="muted small">已拉黑</span>'}
-      ` : '<span class="muted small">—</span>'}</td>
-    </tr>`).join('') || `<tr><td colspan="${admin ? 11 : 10}" class="muted">暂无托管记录</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="${admin ? 9 : 8}" class="muted">暂无托管记录</td></tr>`;
 }
 
 let hostWizard = { step: 1, host: null, timer: null };
@@ -1761,7 +1757,7 @@ async function loadHosts(){
       <p class="muted small" style="margin-top:10px">保证金在服务正常到期后转为平台服务费；提前清退或节点故障时，一半补偿买家，一半归平台。</p>
     </section>`;
   const hostsSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('cloud')}申请记录</h2><p>共 ${hosts.length} 条，包含待审核与被拒绝的母鸡</p></div></div>
-      <div class="table-wrap"><table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>到期时间</th><th>带宽 / 流量</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${hostRowsHtml(hosts, false)}</tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>到期时间</th><th>带宽 / 流量</th><th>状态</th><th>提交时间</th></tr></thead><tbody>${hostRowsHtml(hosts, false)}</tbody></table></div>
     </section>`;
   const sections = { nodes: nodesSection, plans: plansSection, earn: earnSection, hosts: hostsSection };
   app.innerHTML = appLayoutHtml(`
@@ -2318,10 +2314,10 @@ async function loadAdminPayouts(){
   let payouts = [];
   try{ payouts = (await api('/api/admin/payouts')).payouts || []; }
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
-  const rows = payouts.map((p, i) => `<tr class="${p.ticket_id ? 'clickable-row' : ''}"${p.ticket_id ? ` onclick="loadTicketDetail(${p.ticket_id}, 'admin')"` : ''}><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td>${esc(p.username)}</td><td><b>${fmtPts(p.points)}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${esc(p.holder)}</td><td>${p.qr_token ? `<img class="qr-thumb" src="/api/upload/${encodeURIComponent(p.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(p.qr_token)}')">` : '-'}</td><td><span class="status-badge ${p.status === 'paid' ? 'ok' : (p.status === 'pending' ? 'warn' : 'bad')}"><i></i>${p.status === 'paid' ? '已打款' : (p.status === 'pending' ? '待处理' : '已拒绝')}</span></td><td>${fmtTs(p.created_at)}</td><td class="muted small">${p.ticket_id ? '点行处理' : '—'}</td></tr>`).join('') || '<tr><td colspan="11" class="muted">暂无提现申请</td></tr>';
+  const rows = payouts.map((p, i) => `<tr class="${p.ticket_id ? 'clickable-row' : ''}"${p.ticket_id ? ` onclick="loadTicketDetail(${p.ticket_id}, 'admin')"` : ''}><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td>${esc(p.username)}</td><td><b>${fmtPts(p.points)}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${esc(p.holder)}</td><td>${p.qr_token ? `<img class="qr-thumb" src="/api/upload/${encodeURIComponent(p.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(p.qr_token)}')">` : '-'}</td><td><span class="status-badge ${p.status === 'paid' ? 'ok' : (p.status === 'pending' ? 'warn' : 'bad')}"><i></i>${p.status === 'paid' ? '已打款' : (p.status === 'pending' ? '待处理' : '已拒绝')}</span></td><td>${fmtTs(p.created_at)}</td></tr>`).join('') || '<tr><td colspan="10" class="muted">暂无提现申请</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">PAYOUTS</span><h1>提现工单</h1><p>处理供给方的收款提现申请</p></div><button type="button" class="secondary" onclick="loadAdminPayouts()">刷新</button></div>
-    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>用户</th><th>积分</th><th>方式</th><th>账号</th><th>姓名</th><th>收款码</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>用户</th><th>积分</th><th>方式</th><th>账号</th><th>姓名</th><th>收款码</th><th>状态</th><th>时间</th></tr></thead><tbody>${rows}</tbody></table></div></section>
   `, 'admin-payouts', '提现');
 }
 
@@ -2415,7 +2411,7 @@ async function loadAdminHosts(){
       <ol class="host-rule-list">${HOST_RULES.map(r => `<li>${esc(r)}</li>`).join('')}</ol>
     </section>
     <section class="card"><div class="section-title"><div><h2>${stIcon('cloud')}托管列表</h2><p>共 ${hosts.length} 条</p></div></div>
-      <table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>到期时间</th><th>带宽 / 流量</th><th>提交人</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${hostRowsHtml(hosts, true)}</tbody></table>
+      <table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>到期时间</th><th>带宽 / 流量</th><th>提交人</th><th>状态</th><th>提交时间</th></tr></thead><tbody>${hostRowsHtml(hosts, true)}</tbody></table>
     </section>`, 'admin-hosts', '托管申请');
 }
 
