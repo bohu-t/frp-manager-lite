@@ -432,6 +432,48 @@ NOTIFY_CHANNELS: list[dict[str, Any]] = [
 NOTIFY_CHANNEL_MAP = {c["type"]: c for c in NOTIFY_CHANNELS}
 
 
+USER_NOTIFY_EVENTS = {
+    "plan_expiring": "实例到期提醒",
+    "traffic_low": "流量即将用尽",
+    "node_status": "节点状态变化",
+}
+
+
+def user_notify_config_get(conn: sqlite3.Connection, user_id: int) -> dict[str, Any]:
+    row = conn.execute("SELECT * FROM user_notify_config WHERE user_id=?", (int(user_id),)).fetchone()
+    if not row:
+        return {"enabled": False, "type": "", "params": {}, "events": []}
+    try:
+        params = json.loads(row["params"] or "{}")
+    except Exception:
+        params = {}
+    events = [e for e in str(row["events"] or "").split(",") if e in USER_NOTIFY_EVENTS]
+    return {"enabled": bool(int(row["enabled"] or 0)), "type": str(row["type"] or ""),
+            "params": params if isinstance(params, dict) else {}, "events": events}
+
+
+def user_notify_send(conn: sqlite3.Connection, user_id: int, event: str, title: str, content: str, ref: str = "") -> bool:
+    """按用户自己的配置推送；站内通知由调用方负责。同一天同一事件同一 ref 只发一次。"""
+    cfg = user_notify_config_get(conn, user_id)
+    if not cfg["enabled"] or event not in cfg["events"] or not cfg["type"]:
+        return False
+    if cfg["type"] not in _NOTIFY_SENDERS:
+        return False
+    day = local_day_str()
+    dup = conn.execute("SELECT 1 FROM user_notify_log WHERE user_id=? AND event=? AND ref=? AND day=?",
+                       (int(user_id), event, str(ref)[:64], day)).fetchone()
+    if dup:
+        return False
+    try:
+        ok, _msg = _NOTIFY_SENDERS[cfg["type"]](cfg["params"], title, content)
+    except Exception:
+        ok = False
+    if ok:
+        conn.execute("INSERT INTO user_notify_log(user_id, event, ref, day, created_at) VALUES(?,?,?,?,?)",
+                     (int(user_id), event, str(ref)[:64], day, now()))
+    return bool(ok)
+
+
 def bncr_config(conn: sqlite3.Connection) -> dict[str, Any]:
     return {
         "enabled": setting_get(conn, "bncr_enabled", "0") == "1",
@@ -1983,12 +2025,24 @@ def apply_node_offline_policy(rows: list[dict[str, Any]]) -> None:
                 if int(row["auto_suspended"] or 0):
                     conn.execute("UPDATE nodes SET active=1, auto_suspended=0 WHERE id=?", (nid,))
                     audit("node_auto_resume", None, nid, None, "", "节点恢复在线，自动重新上架")
+                    for up in conn.execute("SELECT DISTINCT user_id FROM user_plans WHERE node_id=? AND status='active'", (nid,)).fetchall():
+                        uid = int(up["user_id"])
+                        notify_user(conn, uid, "node_status", "节点已恢复",
+                                    f"实例所在节点「{n.get('name') or nid}」已恢复在线，服务正常。", "tunnels")
+                        user_notify_send(conn, uid, "node_status", "节点已恢复",
+                                         f"实例所在节点「{n.get('name') or nid}」已恢复在线。", ref=f"node{nid}:up")
             else:
                 last = int(row["last_online_at"] or 0)
                 if int(row["active"] or 0) and not int(row["auto_suspended"] or 0) and last and (ts - last) >= threshold:
                     conn.execute("UPDATE nodes SET active=0, auto_suspended=1 WHERE id=?", (nid,))
                     audit("node_auto_suspend", None, nid, None, "", f"离线超过 {NODE_OFFLINE_SUSPEND_HOURS:g} 小时，自动停售")
                     owner = conn.execute("""SELECT u.username, u.wecom_userid FROM nodes n JOIN users u ON u.id=n.owner_id WHERE n.id=?""", (nid,)).fetchone()
+                    for up in conn.execute("SELECT DISTINCT user_id FROM user_plans WHERE node_id=? AND status='active'", (nid,)).fetchall():
+                        uid = int(up["user_id"])
+                        notify_user(conn, uid, "node_status", "节点已停售",
+                                    f"实例所在节点「{n.get('name') or nid}」因离线被自动停售，已购实例暂不受影响，我们会尽快恢复。", "tunnels")
+                        user_notify_send(conn, uid, "node_status", "节点已停售",
+                                         f"实例所在节点「{n.get('name') or nid}」因离线被自动停售。", ref=f"node{nid}:down")
                     if owner:
                         bncr_notify_text(
                             "节点离线告警",
@@ -2436,6 +2490,7 @@ def start_plan_usage_loop() -> None:
                 accrue_provider_income_once()
                 expire_plans_once()
                 remind_stale_tickets_once(24)
+                remind_user_plans_once()
                 with db() as conn:
                     reclaim_expired_plan_ports(conn)
                 global _abuse_last_check
@@ -3126,6 +3181,22 @@ def init_db() -> None:
         user_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
         if "wecom_userid" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN wecom_userid TEXT NOT NULL DEFAULT ''")
+        conn.execute("""CREATE TABLE IF NOT EXISTS user_notify_config (
+                user_id INTEGER PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                type TEXT NOT NULL DEFAULT '',
+                params TEXT NOT NULL DEFAULT '{}',
+                events TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL DEFAULT 0
+            )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS user_notify_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                event TEXT NOT NULL,
+                ref TEXT NOT NULL DEFAULT '',
+                day TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            )""")
         conn.execute("""CREATE TABLE IF NOT EXISTS wecom_bind_codes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 code TEXT NOT NULL UNIQUE,
@@ -5066,6 +5137,36 @@ def claim_retained_ports(conn: sqlite3.Connection, user_id: int, new_plan_id: in
     return rows
 
 
+def remind_user_plans_once() -> int:
+    """到期前 3 天、流量用掉 90% 时，按用户自己的渠道提醒一次/天。"""
+    sent = 0
+    with db() as conn:
+        soon = now() + 3 * 86400
+        rows = conn.execute(
+            """SELECT * FROM user_plans WHERE status='active' AND billing_mode='time'
+               AND expires_at>? AND expires_at<=?""", (now(), soon)).fetchall()
+        for p in rows:
+            left_days = max(1, (int(p["expires_at"]) - now()) // 86400)
+            if user_notify_send(conn, int(p["user_id"]), "plan_expiring",
+                                "实例即将到期",
+                                f"你的实例「{p['plan_name']}」还有 {left_days} 天到期，请及时续费以免端口被回收。",
+                                ref=f"plan:{p['id']}"):
+                sent += 1
+        traffic = conn.execute(
+            """SELECT * FROM user_plans WHERE status='active' AND quota_bytes>0""").fetchall()
+        for p in traffic:
+            quota = int(p["quota_bytes"] or 0)
+            used = int(p["used_bytes"] or 0)
+            if quota and used >= quota * 0.9:
+                pct = min(100, int(used * 100 / quota))
+                if user_notify_send(conn, int(p["user_id"]), "traffic_low",
+                                    "流量即将用尽",
+                                    f"实例「{p['plan_name']}」已使用 {pct}% 流量，用尽后将停止服务。",
+                                    ref=f"quota:{p['id']}"):
+                    sent += 1
+    return sent
+
+
 def remind_stale_tickets_once(hours: int = 24) -> int:
     """工单超过 N 小时未响应，在群里 @供货商催办一次。"""
     sent = 0
@@ -6749,6 +6850,11 @@ class Handler(BaseHTTPRequestHandler):
                 unseen_ann = conn.execute("SELECT COUNT(*) FROM announcements WHERE active=1 AND created_at>?", (seen,)).fetchone()[0]
             self.send_json({"ok": True, "notifications": [dict(r) for r in rows], "unread": int(unread or 0) + int(unseen_ann or 0), "unread_notifications": int(unread or 0), "unseen_announcements": int(unseen_ann or 0)})
             return
+        if path == "/api/user/notify-config":
+            with db() as conn:
+                cfg = user_notify_config_get(conn, int(user["id"]))
+            self.send_json({"ok": True, "config": cfg, "channels": NOTIFY_CHANNELS, "events": USER_NOTIFY_EVENTS})
+            return
         if path == "/api/user/wecom/bindcode":
             with db() as conn:
                 row = conn.execute("SELECT code, expires_at FROM wecom_bind_codes WHERE user_id=? AND expires_at>? ORDER BY id DESC LIMIT 1",
@@ -7477,6 +7583,56 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, "token": tok, "url": f"/api/upload/{tok}"})
             return
 
+        if path == "/api/user/notify-config":
+            user = self.require_user()
+            if not user:
+                return
+            enabled = "1" if str(data.get("enabled", "")) in ("1", "true", "True", "on", "yes") else "0"
+            ctype = str(data.get("type", "")).strip()
+            if ctype and ctype not in NOTIFY_CHANNEL_MAP:
+                self.send_json({"ok": False, "error": "不支持的通知方式"}, 400)
+                return
+            raw_params = data.get("params")
+            if not isinstance(raw_params, dict):
+                raw_params = {}
+            clean: dict[str, str] = {}
+            if ctype:
+                for f in NOTIFY_CHANNEL_MAP[ctype]["fields"]:
+                    val = raw_params.get(f["key"], "")
+                    if val is None:
+                        val = ""
+                    clean[f["key"]] = str(val).strip()[:2000]
+            events_raw = data.get("events")
+            if isinstance(events_raw, list):
+                events = [str(x) for x in events_raw if str(x) in USER_NOTIFY_EVENTS]
+            else:
+                events = [x for x in str(events_raw or "").split(",") if x in USER_NOTIFY_EVENTS]
+            with db() as conn:
+                conn.execute(
+                    """INSERT INTO user_notify_config(user_id, enabled, type, params, events, updated_at)
+                       VALUES(?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET
+                       enabled=excluded.enabled, type=excluded.type, params=excluded.params,
+                       events=excluded.events, updated_at=excluded.updated_at""",
+                    (int(user["id"]), int(enabled), ctype, json.dumps(clean, ensure_ascii=False), ",".join(events), now()))
+            self.send_json({"ok": True, "message": "通知设置已保存"})
+            return
+        if path == "/api/user/notify-test":
+            user = self.require_user()
+            if not user:
+                return
+            with db() as conn:
+                cfg = user_notify_config_get(conn, int(user["id"]))
+            if not cfg["enabled"] or not cfg["type"] or cfg["type"] not in _NOTIFY_SENDERS:
+                self.send_json({"ok": False, "error": "请先启用并选择通知方式"}, 400)
+                return
+            try:
+                ok, msg = _NOTIFY_SENDERS[cfg["type"]](cfg["params"], "【Frp 管理台】测试通知",
+                                                       f"这是一条测试通知，说明你的通知渠道已配置成功。\n时间：{_beijing_now_text()}")
+            except Exception as e:
+                ok, msg = False, str(e)
+            self.send_json({"ok": ok, "message": "测试通知已发送" if ok else None, "error": None if ok else (msg or "发送失败")},
+                           200 if ok else 400)
+            return
         if path == "/api/user/payout-account/save":
             user = self.require_user()
             if not user:

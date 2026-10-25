@@ -792,6 +792,7 @@ function appSidebarHtml(kind='dashboard'){
     '__tickets__',
     ['dashboard-hosts','cloud','托管申请'],
     ['dashboard-points','bolt','账单与充值'],
+    ['dashboard-notify','bell','通知设置'],
     ['dashboard-profile','user','个人中心']
   ];
   const financeItems = [
@@ -1124,6 +1125,7 @@ app.addEventListener('click', async (e) => {
     if(action === 'dashboard-config') return loadDashboard('config');
     if(action === 'dashboard-editor') return loadDashboard('editor');
     if(action === 'dashboard-profile') return loadDashboard('profile');
+    if(action === 'dashboard-notify') return loadUserNotify();
     if(action === 'dashboard-plans') return loadPlans();
     if(action === 'dashboard-points') return loadPoints();
     if(action === 'dashboard-tickets') return loadTickets();
@@ -1607,6 +1609,77 @@ async function checkHostWizardStatus(silent){
       el.textContent = '等待母鸡接入…';
     }
   }catch(e){ if(!silent) show(e.message, true); }
+}
+
+let userNotifyState = { cfg: null, channels: [], events: {} };
+
+async function loadUserNotify(){
+  hideFlash(); clearAdminDashboardTimer(); setNav();
+  let data;
+  try{ data = await api('/api/user/notify-config'); }
+  catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
+  userNotifyState.cfg = data.config || {};
+  userNotifyState.channels = data.channels || [];
+  userNotifyState.events = data.events || {};
+  renderUserNotifyPage();
+}
+
+function userNotifyFieldsHtml(type, params){
+  const ch = userNotifyState.channels.find(c => c.type === type);
+  if(!ch) return '<p class="muted small">请先选择通知方式</p>';
+  return (ch.fields || []).map(f => adminNotifyFieldHtml(f, params || {})).join('');
+}
+
+function renderUserNotifyPage(){
+  const cfg = userNotifyState.cfg || {};
+  const channels = userNotifyState.channels || [];
+  const events = userNotifyState.events || {};
+  const curType = cfg.type || (channels[0] || {}).type || '';
+  const selected = new Set(cfg.events || []);
+  const options = channels.map(c => `<option value="${esc(c.type)}"${c.type === curType ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
+  const eventRows = Object.entries(events).map(([k, label]) => `<label class="check"><input type="checkbox" name="events" value="${esc(k)}"${selected.has(k) ? ' checked' : ''}> ${esc(label)}</label>`).join('');
+  app.innerHTML = appLayoutHtml(`
+    ${instCrumbBar('通知设置')}
+    <section class="card">
+      <div class="settings-card-head"><span class="settings-card-icon icon-blue">${stIcon('bell')}</span><div><h2>我的通知设置</h2><p>选择你希望接收的通知渠道和事件；站内通知始终保留。</p></div><span class="status-badge ${cfg.enabled && cfg.type ? 'ok' : 'bad'}"><i></i>${cfg.enabled && cfg.type ? '已启用' : '未启用'}</span></div>
+      <form id="userNotifyForm" class="settings-form">
+        <div class="notify-row notify-row-duo">
+          <div class="notify-cell"><div class="notify-row-label"><label>通知开关</label></div><div class="notify-row-control"><label class="switch"><input type="checkbox" name="enabled" value="1"${cfg.enabled ? ' checked' : ''}><span class="switch-track"><span class="switch-thumb"></span></span></label></div></div>
+          <div class="notify-cell"><div class="notify-row-label"><label>通知方式</label></div><div class="notify-row-control"><select name="type" id="userNotifyType">${options}</select></div></div>
+        </div>
+        <div class="notify-row notify-row-block"><div class="notify-row-label"><label>渠道参数</label></div><div id="userNotifyFields" class="notify-channel-fields" style="display:grid">${userNotifyFieldsHtml(curType, cfg.params || {})}</div></div>
+        <div class="notify-row notify-row-block"><div class="notify-row-label"><label>接收哪些事件</label></div><div class="notify-row-control">${eventRows}</div></div>
+        <div class="form-actions"><button type="submit">保存设置</button><button type="button" class="secondary" onclick="testUserNotify()">发送测试</button></div>
+      </form>
+      <p class="settings-hint">渠道凭证只保存在你的账号下；同一事件每天最多提醒一次，避免打扰。</p>
+    </section>
+  `, 'dashboard-notify', '通知设置');
+
+  const form = document.querySelector('#userNotifyForm');
+  const typeSel = document.querySelector('#userNotifyType');
+  if(typeSel) typeSel.onchange = () => {
+    const box = document.querySelector('#userNotifyFields');
+    if(box) box.innerHTML = userNotifyFieldsHtml(typeSel.value, {});
+  };
+  if(form) form.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    const body = { enabled: fd.get('enabled') ? '1' : '0', type: fd.get('type') || '', events: fd.getAll('events'), params: {} };
+    const ch = userNotifyState.channels.find(c => c.type === body.type);
+    (ch ? ch.fields : []).forEach(f => { body.params[f.key] = fd.get(f.key) || ''; });
+    try{
+      const r = await api('/api/user/notify-config', {method:'POST', body});
+      show(r.message || '已保存');
+      await loadUserNotify();
+    }catch(err){ show(err.message, true); }
+  };
+}
+
+async function testUserNotify(){
+  try{
+    const r = await api('/api/user/notify-test', {method:'POST', body:{}});
+    show(r.message || '已发送');
+  }catch(err){ show(err.message || '发送失败', true); }
 }
 
 function wecomBindCardHtml(wc){
