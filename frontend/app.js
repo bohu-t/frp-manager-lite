@@ -5156,6 +5156,64 @@ function syncNotifySwitch(el){
   if(s) s.textContent = (el && el.checked) ? '已开启' : '已关闭';
 }
 
+function adminSystemInfoCardHtml(data){
+  const up = Number(data.uptime_seconds || 0);
+  const upText = up > 86400 ? `${Math.floor(up / 86400)} 天 ${Math.floor((up % 86400) / 3600)} 小时`
+                            : (up > 3600 ? `${Math.floor(up / 3600)} 小时 ${Math.floor((up % 3600) / 60)} 分` : `${Math.floor(up / 60)} 分钟`);
+  const ps = data.port_stats || {};
+  const rows = [
+    ['面板版本', `v${esc(data.version || '-')}`],
+    ['运行时长', upText],
+    ['节点数量', `${Number(data.active_node_count || 0)} / ${Number(data.node_count || 0)} 在线`],
+    ['端口池', `已用 ${Number(ps.used || 0)} · 空闲 ${Number(ps.free || 0)} · 共 ${Number(ps.total || 0)}`],
+    ['隧道总数', `${Number(data.tunnel_count || 0)} 条`]
+  ];
+  return `<section class="card admin-sysinfo-card">
+    <div class="settings-card-head"><span class="settings-card-icon icon-blue">${stIcon('monitor')}</span><div><h2>系统信息</h2><p>当前面板运行概况</p></div></div>
+    <div class="sysinfo-list">${rows.map(([k, v]) => `<div class="sysinfo-row"><span>${k}</span><b>${v}</b></div>`).join('')}</div>
+  </section>`;
+}
+
+function balanceSettingsGrid(){
+  const grid = document.querySelector('.admin-settings-grid');
+  if(!grid) return;
+  const cards = Array.from(grid.children).filter(el => el.classList && el.classList.contains('card'));
+  if(cards.length < 2) return;
+  if(window.innerWidth <= 1180){
+    grid.classList.add('single-col');
+    grid.innerHTML = '';
+    cards.forEach(c => grid.appendChild(c));
+    return;
+  }
+  grid.classList.remove('single-col');
+  const heights = cards.map(c => c.getBoundingClientRect().height || 320);
+  const n = Math.min(cards.length, 12);
+  // 第一张固定放左列，其余枚举最优分配
+  const baseA = heights[0] + 20;
+  let bestMask = 0, bestDiff = Infinity;
+  for(let mask = 0; mask < (1 << (n - 1)); mask++){
+    let a = baseA, b = 0, anyB = false;
+    for(let i = 1; i < n; i++){
+      if(mask & (1 << (i - 1))) a += heights[i] + 20;
+      else { b += heights[i] + 20; anyB = true; }
+    }
+    if(!anyB) continue;
+    const diff = Math.abs(a - b);
+    if(diff < bestDiff){ bestDiff = diff; bestMask = mask; }
+  }
+  grid.innerHTML = '';
+  const colA = document.createElement('div');
+  const colB = document.createElement('div');
+  colA.className = 'admin-settings-col';
+  colB.className = 'admin-settings-col';
+  grid.appendChild(colA);
+  grid.appendChild(colB);
+  cards.forEach((card, i) => {
+    const toA = i === 0 ? true : (i < n ? !!(bestMask & (1 << (i - 1))) : (colA.children.length <= colB.children.length));
+    (toA ? colA : colB).appendChild(card);
+  });
+}
+
 function wireAdminSettingsForms(){
   const r2Form = document.querySelector('#r2ConfigForm');
   if(r2Form) r2Form.onsubmit = saveR2Config;
@@ -5286,12 +5344,17 @@ async function loadAdminSettings(){
   window.adminProxyTypeOptions = data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux'];
   app.innerHTML = appLayoutHtml(`
     <div class="admin-settings-grid">
-      <div class="admin-settings-col">${adminPaymentCardHtml(data.payment)}</div>
-      <div class="admin-settings-col">${adminSmtpCardHtml(smtp)}${adminBncrCardHtml(bncr)}${adminBackupCardHtml(r2, r2Status, r2Source)}${adminR2CardHtml(r2, r2Status, r2Source)}</div>
+      ${adminPaymentCardHtml(data.payment)}
+      ${adminSmtpCardHtml(smtp)}
+      ${adminBncrCardHtml(bncr)}
+      ${adminBackupCardHtml(r2, r2Status, r2Source)}
+      ${adminR2CardHtml(r2, r2Status, r2Source)}
+      ${adminSystemInfoCardHtml(data)}
     </div>
     ${adminPwdModalHtml()}
   `, 'admin-settings', '管理员设置');
   wireAdminSettingsForms();
+  balanceSettingsGrid();
 }
 
 async function loadAdminDashboard(auto=false){
