@@ -4386,21 +4386,28 @@ def restore_full_backup_zip(admin_username: str, filename: str, content_base64: 
         return False, f"备份 zip 无效：{e}", {}
     if meta and meta.get("app") != APP_NAME:
         return False, "备份文件不是 frp-manager-lite 生成的", {}
-    mem = sqlite3.connect(":memory:")
+    # 用临时文件校验：内存库 deserialize 后执行 PRAGMA 会报
+    # "unable to open database file"，因此必须落盘校验。
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    probe = DB_PATH.parent / f".restore-probe-{secrets.token_hex(6)}.db"
     try:
-        if not hasattr(mem, "deserialize"):
-            return False, "当前 Python sqlite3 不支持内存校验恢复", {}
-        mem.deserialize(db_bytes)
-        ok = mem.execute("PRAGMA integrity_check").fetchone()[0]
-        if ok != "ok":
-            return False, f"SQLite 完整性检查失败：{ok}", {}
-        required = {"users", "nodes", "ports", "tunnels", "invite_keys"}
-        tables = {r[0] for r in mem.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        missing = sorted(required - tables)
-        if missing:
-            return False, "备份数据库缺少必要表：" + ", ".join(missing), {}
+        probe.write_bytes(db_bytes)
+        with sqlite3.connect(probe) as chk:
+            ok = chk.execute("PRAGMA integrity_check").fetchone()[0]
+            if ok != "ok":
+                return False, f"SQLite 完整性检查失败：{ok}", {}
+            required = {"users", "nodes", "ports", "tunnels", "invite_keys"}
+            tables = {r[0] for r in chk.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            missing = sorted(required - tables)
+            if missing:
+                return False, "备份数据库缺少必要表：" + ", ".join(missing), {}
     finally:
-        mem.close()
+        try:
+            probe.unlink()
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
     backup_stamp, current_payload = make_full_backup_zip(admin_username)
     restore_dir = DB_PATH.parent / "restore-backups"
     restore_dir.mkdir(parents=True, exist_ok=True)
