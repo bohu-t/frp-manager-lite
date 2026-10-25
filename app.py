@@ -3854,6 +3854,10 @@ NOTIFY_TEMPLATES: dict[str, dict[str, str]] = {
         "title": "托管待审核：{name}",
         "content": "用户 {username} 的母鸡「{name}」已接入平台，请核查信息后决定是否上架。",
     },
+    "income_to_balance": {
+        "title": "收益已转入余额：¥{amount}",
+        "content": "你的托管收益 ¥{amount} 已转入账户余额，可直接用于购买套餐。",
+    },
     "payout_rejected": {
         "title": "提现被驳回：¥{amount}",
         "content": "提现单 {payout_no} 未通过审核，金额已退回可提现收益。原因：{reason}",
@@ -7746,6 +7750,7 @@ class Handler(BaseHTTPRequestHandler):
                     provider_income_consume(conn, int(user["id"]), points)
                     if mode == "balance":
                         points_change(conn, int(user["id"]), points, "provider_withdraw", "balance", "收益转入余额")
+                        notify(conn, int(user["id"]), "income_to_balance", "dashboard-points", amount=f"{q2(points):.2f}")
                         self.send_json({"ok": True, "message": f"{q2(points):.2f} 积分已转入余额"})
                         return
                     if mode != "external":
