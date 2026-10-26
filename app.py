@@ -3986,8 +3986,8 @@ def reject_payout(conn: sqlite3.Connection, row: sqlite3.Row, reason: str = "", 
     conn.execute(
         "INSERT INTO provider_income(owner_id, points, updated_at) VALUES(?,?,?) ON CONFLICT(owner_id) DO UPDATE SET points=points+excluded.points, updated_at=excluded.updated_at",
         (int(row["user_id"]), int(row["points"] or 0), now()))
-    ledger_add(conn, "points", "in", "payout_reject", q2(row["points"]), int(row["user_id"]),
-               row["username"], 0, str(row["payout_no"]), "", reason or "提现驳回退回")
+    ledger_add(conn, "points", "reverse", "payout_reject", q2(row["points"]), int(row["user_id"]),
+               row["username"], 0, str(row["payout_no"]), "", reason or "提现冲正")
     return True
 
 
@@ -4895,6 +4895,7 @@ LEDGER_CATEGORIES = {
     "node_refund": "节点故障退款",
     "provider_settle": "供应商结算",
     "guarantee": "保证金留存",
+    "income_to_balance": "收益转余额",
     "withdraw_points": "收益转出",
     "withdraw_cash": "提现打款",
     "payout_reject": "提现驳回退回",
@@ -7109,7 +7110,7 @@ class Handler(BaseHTTPRequestHandler):
                     open_args = open_args + [start_ts]
                 if start_ts:
                     row = conn.execute(
-                        "SELECT COALESCE(SUM(CASE WHEN direction='in' THEN amt ELSE -amt END),0) FROM ("
+                        "SELECT COALESCE(SUM(CASE direction WHEN 'in' THEN amt WHEN 'out' THEN -amt WHEN 'reverse' THEN amt ELSE 0 END),0) FROM ("
                         " SELECT CASE WHEN unit='cash' THEN amount ELSE amount * 1.0 / ? END AS amt, direction FROM ledger"
                         + open_clause + ")", (rate, *open_args)).fetchone()
                     opening = q2(row[0] if row else 0)
@@ -7120,14 +7121,19 @@ class Handler(BaseHTTPRequestHandler):
                 totals = conn.execute(
                     "SELECT direction, COALESCE(SUM(CASE WHEN unit='cash' THEN amount ELSE amount * 1.0 / ? END),0)"
                     " FROM ledger" + clause + " GROUP BY direction", (rate, *args)).fetchall()
-            summary = {"in": 0.0, "out": 0.0}
+            summary = {"in": 0.0, "out": 0.0, "reverse": 0.0}
             for d, total in totals:
                 summary[str(d)] = q2(total)
             balance = opening
             out_rows = []
             for r in rows:
                 amt = q2(r["amount"] if r["unit"] == "cash" else r["amount"] / rate)
-                balance = q2(balance + (amt if r["direction"] == "in" else -amt))
+                if r["direction"] == "in":
+                    balance = q2(balance + amt)
+                elif r["direction"] == "out":
+                    balance = q2(balance - amt)
+                elif r["direction"] == "reverse":
+                    balance = q2(balance + amt)
                 out_rows.append({
                     "id": int(r["id"]), "ts": int(r["ts"]), "unit": r["unit"], "direction": r["direction"],
                     "category": r["category"], "category_text": LEDGER_CATEGORIES.get(r["category"], r["category"]),
@@ -7796,6 +7802,8 @@ class Handler(BaseHTTPRequestHandler):
                     provider_income_consume(conn, int(user["id"]), points)
                     if mode == "balance":
                         points_change(conn, int(user["id"]), points, "provider_withdraw", "balance", "收益转入余额")
+                        ledger_add(conn, "points", "none", "income_to_balance", points, int(user["id"]), user["username"],
+                                   0, "", "balance", "收益转入余额（内部划转）")
                         notify(conn, int(user["id"]), "income_to_balance", "dashboard-points", amount=f"{q2(points):.2f}")
                         self.send_json({"ok": True, "message": f"{q2(points):.2f} 积分已转入余额"})
                         return
@@ -7974,8 +7982,8 @@ class Handler(BaseHTTPRequestHandler):
                                int(row["user_id"]), row["username"], 0, str(row["payout_no"]), "", f"提现打款 {row['method']}")
                 else:
                     conn.execute("UPDATE payouts SET status='rejected', updated_at=? WHERE id=?", (now(), pid))
-                    ledger_add(conn, "points", "in", "payout_reject", q2(row["points"]), int(row["user_id"]),
-                               row["username"], 0, str(row["payout_no"]), "", "提现驳回退回")
+                    ledger_add(conn, "points", "reverse", "payout_reject", q2(row["points"]), int(row["user_id"]),
+                               row["username"], 0, str(row["payout_no"]), "", "提现冲正")
                     conn.execute(
                         "INSERT INTO provider_income(owner_id, points, updated_at) VALUES(?,?,?) ON CONFLICT(owner_id) DO UPDATE SET points=points+excluded.points, updated_at=excluded.updated_at",
                         (int(row["user_id"]), int(row["points"] or 0), now()))

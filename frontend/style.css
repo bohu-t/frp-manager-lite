@@ -2549,3 +2549,7 @@ html[data-theme="dark"] .status-badge.warn{background:rgba(245,158,11,.18);color
 .ledger-table td.num{white-space:nowrap}
 .ledger-table tbody tr:hover>td{background:#f8fafc}
 html[data-theme="dark"] .ledger-table tbody tr:hover>td{background:rgba(90,140,220,.08)}
+.ledger-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;background:#eef2f7;color:#64748b;font-size:10px;font-weight:600}
+.ledger-tag.reverse{background:#fff4e5;color:#b45309}
+.ledger-reverse{color:#b45309}
+.ledger-table tr.is-event>td{opacity:.72}

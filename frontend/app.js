@@ -2315,22 +2315,28 @@ async function loadAdminLedger(){
   const cats = data.categories || {};
   const money = (v) => Number(v || 0).toFixed(2);
   const opening = Number(data.opening || 0);
+  const netOut = Number(sum.out || 0) - Number(sum.reverse || 0);
   const closing = Number(data.closing || 0);
   const catOptions = Object.entries(cats).map(([k, v]) => `<option value="${esc(k)}"${ledgerFilter.category === k ? ' selected' : ''}>${esc(v)}</option>`).join('');
-  const rowHtml = rows.map(r => `<tr>
+  const rowHtml = rows.map(r => {
+    const isReverse = r.direction === 'reverse';
+    const isNone = r.direction === 'none';
+    const summaryText = [r.username, r.order_no, r.note].filter(Boolean).join(' · ') || '-';
+    return `<tr${isNone ? ' class="is-event"' : ''}>
       <td class="muted small">${fmtTs(r.ts)}</td>
-      <td><b>${esc(r.category_text || r.category)}</b></td>
-      <td class="muted small">${esc([r.username, r.order_no, r.note].filter(Boolean).join(' · ') || '-')}</td>
+      <td><b>${esc(r.category_text || r.category)}</b>${isNone ? ' <span class="ledger-tag">不计收支</span>' : (isReverse ? ' <span class="ledger-tag reverse">冲正</span>' : '')}</td>
+      <td class="muted small">${esc(summaryText)}</td>
       <td class="num ledger-in">${r.direction === 'in' ? money(r.amount) : ''}</td>
-      <td class="num ledger-out">${r.direction === 'out' ? money(r.amount) : ''}</td>
+      <td class="num ${isReverse ? 'ledger-reverse' : 'ledger-out'}">${r.direction === 'out' ? money(r.amount) : (isReverse ? '-' + money(r.amount) : '')}</td>
       <td class="num"><b>${money(r.balance)}</b></td>
-    </tr>`).join('') || '<tr><td colspan="6" class="muted">该条件下暂无流水</td></tr>';
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" class="muted">该条件下暂无流水</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">LEDGER</span><h1>收支表</h1><p>平台资金流水，按时间顺序记录每笔收入与支出</p></div><button type="button" class="secondary" onclick="loadAdminLedger()">刷新</button></div>
     <div class="ledger-cards">
       <div class="ledger-card"><span>期初余额</span><b>¥${money(opening)}</b><small>筛选起始前累计</small></div>
       <div class="ledger-card"><span>本期收入</span><b class="ledger-in">+¥${money(sum.in)}</b><small>充值 / 套餐 / 保证金</small></div>
-      <div class="ledger-card"><span>本期支出</span><b class="ledger-out">-¥${money(sum.out)}</b><small>退款 / 结算 / 提现</small></div>
+      <div class="ledger-card"><span>本期支出</span><b class="ledger-out">-¥${money(netOut)}</b><small>已扣除冲正 ¥${money(sum.reverse)}</small></div>
       <div class="ledger-card"><span>期末余额</span><b>¥${money(closing)}</b><small>当前筛选范围</small></div>
     </div>
     <section class="card">
