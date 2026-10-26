@@ -1763,11 +1763,21 @@ function wecomJoinInnerHtml(wc){
     return `<div class="section-kicker">WECOM GROUP</div><h3>${stIcon('chat')}企业微信群</h3>
       <p class="muted small" style="margin:6px 0 0">已加入并完成绑定，群通知会 @你。</p>`;
   }
+  const qr = wc.group_qr
+    ? `<img src="/api/upload/${encodeURIComponent(wc.group_qr)}" alt="企业微信群二维码" style="display:block;width:150px;max-width:100%;margin:10px 0;border-radius:10px;border:1px solid var(--border)">`
+    : '';
+  const step1 = wc.group_qr
+    ? '扫描二维码加入企业微信群'
+    : '在企业微信「工作台」找到智能机器人';
+  const step2 = wc.group_qr
+    ? '在群里 @机器人 发送绑定码'
+    : '私聊机器人发送绑定码';
   return `<div class="section-kicker">WECOM GROUP</div><h3>${stIcon('chat')}加入企业微信群</h3>
+    ${qr}
     <ol class="muted small" style="margin:8px 0 12px 18px;line-height:1.9">
-      <li>在企业微信里打开智能机器人</li>
-      <li>私聊发送绑定码：<code class="token">${esc(wc.code || '-')}</code></li>
-      <li>机器人会拉你进群，并自动完成账号绑定</li>
+      <li>${step1}</li>
+      <li>${step2}：<code class="token">${esc(wc.code || '-')}</code></li>
+      <li>机器人会完成账号绑定${wc.group_qr ? '' : '，并把你拉进群'}</li>
     </ol>
     <button type="button" class="secondary" onclick="refreshWecomJoin()">刷新绑定码</button>`;
 }
@@ -5387,9 +5397,10 @@ function adminBncrCardHtml(b){
       <div class="r2-field"><label>访问 Token</label><input name="token" value="${esc(b.token || '')}" placeholder="与 Bncr 插件一致，可留空"></div>
       <div class="r2-field r2-field-half"><label>平台</label><input name="platform" value="${esc(b.platform || 'wecomLong')}" placeholder="wecomLong"></div>
       <div class="r2-field r2-field-half"><label>群 chatid</label><input name="group_id" value="${esc(b.group_id || '')}" placeholder="群里发送「企业微信ID」查询"></div>
+      <div class="r2-field r2-field-half"><label>群二维码</label><input type="file" id="bncrQrFile" accept="image/png,image/jpeg,image/webp"><input type="hidden" name="group_qr" value="${esc(b.group_qr || '')}"><div id="bncrQrPreview" style="margin-top:6px">${b.group_qr ? `<img src="/api/upload/${encodeURIComponent(b.group_qr)}" alt="群二维码" style="max-width:140px;border-radius:8px">` : ''}</div></div>
       <div class="form-actions r2-actions"><button type="submit">保存配置</button><button type="button" class="secondary" onclick="sendBncrTest()">发送测试</button></div>
     </form>
-    <p class="settings-hint">地址填 Bncr 容器可访问的本机回环或宿主 IP；群 chatid 在群里发「企业微信ID」即可拿到。</p>
+    <p class="settings-hint">地址填 Bncr 容器可访问的本机回环或宿主 IP；群 chatid 在群里发「企业微信ID」即可拿到。上传群二维码后，用户面板会直接显示扫码进群入口。</p>
   </section>`;
 }
 
@@ -5502,6 +5513,20 @@ function wireAdminSettingsForms(){
         const r = await api('/api/admin/bncr-config', {method:'POST', body});
         await reloadAdminCurrentPage();
         show(r.message || 'Bncr 设置已保存');
+      }catch(err){ show(err.message, true); }
+    };
+  }
+  const bncrQrFile = document.querySelector('#bncrQrFile');
+  if(bncrQrFile){
+    bncrQrFile.onchange = async () => {
+      const f = bncrQrFile.files && bncrQrFile.files[0];
+      if(!f) return;
+      try{
+        const tok = await uploadImage(f, 'groupqr');
+        const hid = document.querySelector('#bncrConfigForm input[name="group_qr"]');
+        if(hid) hid.value = tok;
+        const pv = document.querySelector('#bncrQrPreview');
+        if(pv) pv.innerHTML = `<img src="/api/upload/${encodeURIComponent(tok)}" alt="群二维码" style="max-width:140px;border-radius:8px">`;
       }catch(err){ show(err.message, true); }
     };
   }

@@ -508,6 +508,7 @@ def bncr_config(conn: sqlite3.Connection) -> dict[str, Any]:
         "token": setting_get(conn, "bncr_token", "").strip(),
         "platform": setting_get(conn, "bncr_platform", "wecomLong").strip() or "wecomLong",
         "group_id": setting_get(conn, "bncr_group_id", "").strip(),
+        "group_qr": setting_get(conn, "bncr_group_qr", "").strip(),
     }
 
 
@@ -518,6 +519,7 @@ def bncr_public(cfg: dict[str, Any]) -> dict[str, Any]:
         "token": cfg.get("token", ""),
         "platform": cfg.get("platform", "wecomLong"),
         "group_id": cfg.get("group_id", ""),
+        "group_qr": cfg.get("group_qr", ""),
     }
 
 
@@ -7031,6 +7033,7 @@ class Handler(BaseHTTPRequestHandler):
                 bound = str(row_val(user, "wecom_userid", "") or "").strip() if user else ""
                 bound_now = conn.execute("SELECT wecom_userid FROM users WHERE id=?", (int(user["id"]),)).fetchone()
             self.send_json({"ok": True, "code": code, "bound": bool(str(bound_now["wecom_userid"] or "").strip()) if bound_now else False,
+                            "group_qr": cfg.get("group_qr", ""),
                             "expires_at": now() + 3600})
             return
         if path == "/api/user/payout-account":
@@ -9087,6 +9090,7 @@ class Handler(BaseHTTPRequestHandler):
         token = str(data.get("token", "")).strip()[:200]
         platform = str(data.get("platform", "wecomLong")).strip()[:40] or "wecomLong"
         group_id = str(data.get("group_id", "")).strip()[:100]
+        group_qr = str(data.get("group_qr", "")).strip()[:200]
         if enabled == "1" and (not url.startswith("http://") and not url.startswith("https://")):
             self.send_json({"ok": False, "error": "Bncr 地址必须以 http:// 或 https:// 开头"}, 400)
             return
@@ -9099,6 +9103,8 @@ class Handler(BaseHTTPRequestHandler):
             setting_set(conn, "bncr_token", token)
             setting_set(conn, "bncr_platform", platform)
             setting_set(conn, "bncr_group_id", group_id)
+            if "group_qr" in data:
+                setting_set(conn, "bncr_group_qr", group_qr)
             cfg = bncr_config(conn)
         audit("bncr_config_update", admin, None, None, "", f"更新 Bncr 群通知设置：enabled={cfg['enabled']}")
         self.send_json({"ok": True, "message": "Bncr 通知设置已保存", "bncr": bncr_public(cfg)})
