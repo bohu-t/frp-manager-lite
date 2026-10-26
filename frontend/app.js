@@ -3189,6 +3189,17 @@ async function loadPoints(){
   const channelHtml = usableChannels.length > 1
     ? `<div class="span-2"><label>支付方式</label><div class="pay-channels">${usableChannels.map((x, i) => `<label class="check"><input type="radio" name="provider" value="${x.key}"${i === 0 ? ' checked' : ''}> ${x.name}</label>`).join('')}</div></div>`
     : (usableChannels.length === 1 ? `<input type="hidden" name="provider" value="${usableChannels[0].key}">` : '');
+  // 未开通任何在线支付渠道时不展示充值表单，避免用户提交后必然失败
+  const onlineRechargeHtml = usableChannels.length ? `
+          <div class="section-title"><div><h2>${stIcon('license')}在线充值</h2><p>选择金额并完成支付，余额立即到账</p></div></div>
+          <form id="pointsRechargeForm" class="grid">
+            <div><label>充值金额（元）</label><input name="amount" type="number" min="0.01" step="0.01" value="10" required><span class="muted small" id="pointsAmountHint">应付 ¥10.00</span></div>
+            ${channelHtml}
+            <div class="form-actions" style="grid-column:1/-1"><button>去支付</button></div>
+          </form>
+          <div class="billing-divider"></div>` : `
+          <p class="muted small">当前仅支持密钥充值，在线支付暂未开通。</p>
+          <div class="billing-divider"></div>`;
   const kindText = {recharge:'在线充值', key_recharge:'密钥充值', plan_purchase:'购买套餐', admin_adjust:'管理员调整'};
   const rows = (data.logs || []).map((l, i) => `<tr>
       <td>${i + 1}</td>
@@ -3208,13 +3219,7 @@ async function loadPoints(){
           <div class="billing-balance-meta"><span>余额仅用于购买套餐，不可提现</span><span>收益提现请到提现工单</span></div>
         </section>
         <section class="card">
-          <div class="section-title"><div><h2>${stIcon('license')}在线充值</h2><p>选择金额并完成支付，余额立即到账</p></div></div>
-          <form id="pointsRechargeForm" class="grid">
-            <div><label>充值金额（元）</label><input name="amount" type="number" min="0.01" step="0.01" value="10" required><span class="muted small" id="pointsAmountHint">应付 ¥10.00</span></div>
-            ${channelHtml}
-            <div class="form-actions" style="grid-column:1/-1"><button>去支付</button></div>
-          </form>
-          <div class="billing-divider"></div>
+          ${onlineRechargeHtml}
           <div class="section-title"><div><h2>${stIcon('key')}充值密钥</h2><p>输入管理员发放的密钥，立即到账</p></div></div>
           <form id="pointsKeyForm" class="grid">
             <div><label>充值密钥</label><input name="key" placeholder="PT-..." required></div>
