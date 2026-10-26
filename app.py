@@ -1823,14 +1823,6 @@ def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int | None) 
             last_proxy_expr = "COALESCE(last_proxy_at, 0)" if "last_proxy_at" in old_tunnel_cols else "0"
             conn.execute(f"INSERT OR IGNORE INTO tunnels(id, node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at, last_proxy_at) SELECT id, node_id, user_id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, secret_key, enabled, created_at, {last_proxy_expr} FROM tunnels_old")
             conn.execute("DROP TABLE tunnels_old")
-    tunnel_cols2 = {r["name"] for r in conn.execute("PRAGMA table_info(tunnels)").fetchall()}
-    if "plan_id" not in tunnel_cols2:
-        conn.execute("ALTER TABLE tunnels ADD COLUMN plan_id INTEGER NOT NULL DEFAULT 0")
-    conn.execute(
-        """UPDATE tunnels SET plan_id=COALESCE((SELECT upp.user_plan_id FROM user_plan_ports upp
-           WHERE upp.user_id=tunnels.user_id AND upp.node_id=tunnels.node_id AND upp.port=tunnels.remote_port LIMIT 1), 0)
-           WHERE plan_id=0 AND remote_port>0"""
-    )
     schema = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tunnels'").fetchone()["sql"] or ""
     if "UNIQUE(user_id, name)" in schema:
         # frp 的代理名在同一个 frps（节点）内全局唯一，改为按节点去重
@@ -1859,6 +1851,15 @@ def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int | None) 
         conn.execute("DROP TABLE tunnels_old")
     conn.execute("DROP INDEX IF EXISTS idx_tunnels_node_port")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tunnels_node_port_remote ON tunnels(node_id, remote_port) WHERE remote_port > 0")
+    # plan_id 必须在隧道表重建之后补：上面的重建会按旧结构新建表，提前加会被丢掉。
+    tunnel_cols2 = {r["name"] for r in conn.execute("PRAGMA table_info(tunnels)").fetchall()}
+    if "plan_id" not in tunnel_cols2:
+        conn.execute("ALTER TABLE tunnels ADD COLUMN plan_id INTEGER NOT NULL DEFAULT 0")
+    conn.execute(
+        """UPDATE tunnels SET plan_id=COALESCE((SELECT upp.user_plan_id FROM user_plan_ports upp
+           WHERE upp.user_id=tunnels.user_id AND upp.node_id=tunnels.node_id AND upp.port=tunnels.remote_port LIMIT 1), 0)
+           WHERE plan_id=0 AND remote_port>0"""
+    )
 
 
 def attach_node_month_usage(conn: sqlite3.Connection, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -3293,7 +3294,9 @@ def init_db() -> None:
             if _cols("point_logs") and not _cols("balance_logs"):
                 conn.execute("ALTER TABLE point_logs RENAME TO balance_logs")
             # 订单金额：历史订单 points 即元，补齐 amount_cents
-            conn.execute("UPDATE orders SET amount_cents=CAST(ROUND(amount*100) AS INTEGER) WHERE amount_cents=0 AND amount>0")
+            # 新库的 orders 表此时还没有 amount 列（后续才 ALTER 补），需先判断。
+            if "amount" in _cols("orders"):
+                conn.execute("UPDATE orders SET amount_cents=CAST(ROUND(amount*100) AS INTEGER) WHERE amount_cents=0 AND amount>0")
             setting_set(conn, "cash_only_v1", "1")
         ledger_cols = {r["name"] for r in conn.execute("PRAGMA table_info(ledger)").fetchall()}
         if "book" not in ledger_cols:
