@@ -3539,8 +3539,15 @@ async function loadInstancePorts(nodeId){
     const r = await api('/api/user/nodes/' + Number(nodeId) + '/ports');
     const ports = r.ports || [];
     const cur = sel.value;
+    // 正在编辑的隧道自己占用的端口不能禁用：disabled 的选中项不会随表单提交，
+    // 后端会收到 0 并提示「TCP/UDP 必须选择公网端口」。
+    const editing = (lastTunnels || []).find(t => Number(t.id) === Number(editingTunnelId));
+    const ownPort = editing ? Number(editing.remote_port) : 0;
     sel.innerHTML = ports.length
-      ? ports.map(p => `<option value="${p.port}"${p.used ? ' disabled' : ''}${String(p.port) === String(cur) ? ' selected' : ''}>${p.port}${p.used ? '（已用）' : ''}</option>`).join('')
+      ? ports.map(p => {
+          const own = Number(p.port) === ownPort;
+          return `<option value="${p.port}"${p.used && !own ? ' disabled' : ''}${String(p.port) === String(cur) ? ' selected' : ''}>${p.port}${p.used && !own ? '（已用）' : ''}</option>`;
+        }).join('')
       : '<option value="">该实例暂无端口</option>';
   }catch(e){}
 }

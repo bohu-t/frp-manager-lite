@@ -8570,7 +8570,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("本地端口不合法")
             if proxy_type in REMOTE_PORT_PROXY_TYPES:
                 if not (1 <= remote_port <= 65535):
-                    raise ValueError("TCP/UDP 必须选择公网端口")
+                    # 修改隧道时允许前端不传端口：稍后用隧道原端口兜底。
+                    remote_port = 0
             else:
                 remote_port = 0
             if proxy_type in DOMAIN_PROXY_TYPES and not custom_domains:
@@ -8584,6 +8585,10 @@ class Handler(BaseHTTPRequestHandler):
                 if proxy_type in SECRET_KEY_PROXY_TYPES and not secret_key:
                     secret_key = t["secret_key"] or secrets.token_urlsafe(16)
                 if proxy_type in REMOTE_PORT_PROXY_TYPES:
+                    if not remote_port:
+                        remote_port = int(t["remote_port"] or 0)
+                    if not (1 <= remote_port <= 65535):
+                        raise ValueError("TCP/UDP 必须选择公网端口")
                     # 用户端口是预分配的：改隧道只需确认新端口仍属于本账号，
                     # 不改动 ports 归属（否则旧端口会被误释放、从「端口资源」里消失）。
                     owned = conn.execute("SELECT 1 FROM ports WHERE node_id=? AND user_id=? AND port=?", (node_id, user["id"], remote_port)).fetchone()
