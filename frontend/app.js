@@ -2050,7 +2050,7 @@ async function loadTicketDetail(id, scope){
         <div class="ticket-side-actions">
           ${isWithdraw && isAdminView && payout && payout.status === 'pending' ? `<button type="button" onclick="reviewPayoutInTicket(${Number(payout.id)}, 'paid')">已打款</button><button type="button" class="secondary" onclick="reviewPayoutInTicket(${Number(payout.id)}, 'reject')">拒绝</button>` : ''}
           ${isHost && isAdminView && !isClosed ? `<button type="button" onclick="hostReview(${Number(t.host_id || 0)}, 'approve')">通过审核</button><button type="button" class="secondary" onclick="hostReview(${Number(t.host_id || 0)}, 'reject')">拒绝</button><button type="button" class="node-action node-action-danger" onclick="hostReview(${Number(t.host_id || 0)}, 'blacklist')">拉黑</button>` : ''}
-          ${!isClosed ? `<button type="button" class="secondary" onclick="closeTicket(${Number(t.id)}, '${isAdminView ? 'admin' : 'user'}')">结束工单</button>` : ''}
+          ${!isClosed ? `<button type="button" class="secondary" onclick="closeTicket(${Number(t.id)}, '${isAdminView ? 'admin' : 'user'}')">${isAdminView ? '结束工单' : '撤销工单'}</button>` : ''}
         </div>
       </aside>
     </div>
@@ -2108,9 +2108,11 @@ async function reviewPayoutInTicket(pid, action){
 }
 
 async function closeTicket(id, scope){
-  const resolution = await appPrompt('处理结果（可选，填了会展示在工单里）', '', {title:'结束工单'});
+  const isAdmin = scope === 'admin';
+  const resolution = await appPrompt(isAdmin ? '处理结果（可选，填了会展示在工单里）' : '撤销原因（可选，填了会展示在工单里）', '',
+    {title: isAdmin ? '结束工单' : '撤销工单'});
   if(resolution === null) return;
-  try{ await api('/api/user/tickets/close', {method:'POST', body:{id:Number(id), resolution}}); show('工单已结束'); await loadTicketDetail(id, scope); }
+  try{ await api('/api/user/tickets/close', {method:'POST', body:{id:Number(id), resolution}}); show(isAdmin ? '工单已结束' : '工单已撤销'); await loadTicketDetail(id, scope); }
   catch(err){ show(err.message, true); }
 }
 
