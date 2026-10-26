@@ -2540,3 +2540,5 @@ html[data-theme="dark"] .status-badge.warn{background:rgba(245,158,11,.18);color
 .img-viewer img{max-width:min(90vw,900px);max-height:85vh;border-radius:12px;box-shadow:0 24px 60px rgba(0,0,0,.5);background:#fff;cursor:default}
 .img-viewer-close{position:fixed;top:24px;right:28px;width:40px;height:40px;border:0;border-radius:50%;background:rgba(255,255,255,.16);color:#fff;font-size:22px;line-height:1;cursor:pointer}
 .img-viewer-close:hover{background:rgba(255,255,255,.28)}
+.ticket-side-actions{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+.ticket-side-actions>button{width:100%}

@@ -2022,13 +2022,11 @@ async function loadTicketDetail(id, scope){
           <div><span>姓名</span><b>${esc(payout.holder)}</b></div>
           ${payout.qr_token ? `<div class="payout-qr"><span>收款码</span><img src="/api/upload/${encodeURIComponent(payout.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(payout.qr_token)}')"></div>` : ''}
         </div>
-        ${isAdminView && payout.status === 'pending' ? `<div class="payout-panel-actions"><button type="button" onclick="reviewPayoutInTicket(${Number(payout.id)}, 'paid')">已打款</button><button type="button" class="secondary" onclick="reviewPayoutInTicket(${Number(payout.id)}, 'reject')">拒绝</button></div>` : ''}
       </section>` : ''}
     <div class="ticket-layout">
       <section class="card ticket-main">
-        <div class="section-title"><div><h2>${stIcon('log')}沟通记录</h2><p>用户与机主在本页沟通，图片可点开查看原图</p></div>${ticketStatusBadge(t.status)}</div>
+        <div class="section-title"><div><h2>${stIcon('log')}沟通记录</h2><p>${isWithdraw ? '与用户确认收款信息与打款进度' : '用户与机主在本页沟通，图片可点开查看原图'}</p></div>${payout ? '' : ticketStatusBadge(t.status)}</div>
         <div class="ticket-thread">${thread}</div>
-        ${isHost && isAdminView && !isClosed ? `<div class="row" style="gap:8px;margin:12px 0"><button type="button" onclick="hostReview(${Number(t.host_id || 0)}, 'approve')">通过审核</button><button type="button" class="secondary" onclick="hostReview(${Number(t.host_id || 0)}, 'reject')">拒绝</button><button type="button" class="node-action node-action-danger" onclick="hostReview(${Number(t.host_id || 0)}, 'blacklist')">拉黑</button></div>` : ''}
         ${isClosed ? `<p class="muted small">该工单已关闭${t.resolution ? ' · 处理结果：' + ticketBodyHtml(t.resolution) : ''}</p>` : `
         <div class="ticket-reply">
           <label class="tk-field"><span>回复内容</span><textarea id="tkReplyText" rows="4" placeholder="输入回复内容"></textarea></label>
@@ -2041,15 +2039,19 @@ async function loadTicketDetail(id, scope){
         </div>`}
       </section>
       <aside class="card ticket-side">
-        <div class="section-title"><div><h2>工单信息</h2></div></div>
+        <div class="section-title"><div><h2>${isWithdraw ? '提现信息' : (isHost ? '申请信息' : '工单信息')}</h2></div>${payout ? `<span class="status-badge ${payout.status === 'paid' ? 'ok' : (payout.status === 'pending' ? 'warn' : 'bad')}"><i></i>${payout.status === 'paid' ? '已打款' : (payout.status === 'pending' ? '待处理' : '已拒绝')}</span>` : ''}</div>
         <div class="instance-action-meta">
-          <div><span>编号</span><b>${esc(t.ticket_no || '')}</b></div>
+          <div><span>编号</span><b>${esc(displayNo)}</b></div>
           <div><span>类型</span><b>${TICKET_KIND[t.kind] || t.kind}</b></div>
-          <div><span>实例节点</span><b>${t.node_id ? esc(t.node_name || ('#' + t.node_id)) : '不关联'}</b></div>
-          <div><span>状态</span><b>${TICKET_STATUS[t.status] || t.status}</b></div>
+          ${isWithdraw ? '' : `<div><span>实例节点</span><b>${t.node_id ? esc(t.node_name || ('#' + t.node_id)) : '不关联'}</b></div>`}
+          ${payout ? '' : `<div><span>状态</span><b>${TICKET_STATUS[t.status] || t.status}</b></div>`}
           <div><span>创建时间</span><b>${fmtTs(t.created_at)}</b></div>
         </div>
-        ${!isClosed ? `<button type="button" class="secondary" onclick="closeTicket(${Number(t.id)}, '${isAdminView ? 'admin' : 'user'}')">结束工单</button>` : ''}
+        <div class="ticket-side-actions">
+          ${isWithdraw && isAdminView && payout && payout.status === 'pending' ? `<button type="button" onclick="reviewPayoutInTicket(${Number(payout.id)}, 'paid')">已打款</button><button type="button" class="secondary" onclick="reviewPayoutInTicket(${Number(payout.id)}, 'reject')">拒绝</button>` : ''}
+          ${isHost && isAdminView && !isClosed ? `<button type="button" onclick="hostReview(${Number(t.host_id || 0)}, 'approve')">通过审核</button><button type="button" class="secondary" onclick="hostReview(${Number(t.host_id || 0)}, 'reject')">拒绝</button><button type="button" class="node-action node-action-danger" onclick="hostReview(${Number(t.host_id || 0)}, 'blacklist')">拉黑</button>` : ''}
+          ${!isClosed ? `<button type="button" class="secondary" onclick="closeTicket(${Number(t.id)}, '${isAdminView ? 'admin' : 'user'}')">结束工单</button>` : ''}
+        </div>
       </aside>
     </div>
   `, navKind, listLabel);
