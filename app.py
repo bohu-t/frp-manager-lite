@@ -6958,14 +6958,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/tickets/summary":
             with db() as conn:
                 if user["role"] == "admin":
-                    t_count = conn.execute("SELECT COUNT(*) FROM tickets WHERE status='open'").fetchone()[0]
+                    t_count = conn.execute("SELECT COUNT(*) FROM tickets WHERE status='open' AND kind='issue'").fetchone()[0]
                     p_count = conn.execute("SELECT COUNT(*) FROM payouts WHERE status='pending'").fetchone()[0]
                     h_count = conn.execute("SELECT COUNT(*) FROM hosts WHERE status='pending'").fetchone()[0]
                 else:
-                    t_own = conn.execute("SELECT COUNT(*) FROM tickets WHERE user_id=? AND status='processing'", (int(user["id"]),)).fetchone()[0]
+                    t_own = conn.execute("SELECT COUNT(*) FROM tickets WHERE user_id=? AND status='processing' AND kind='issue'", (int(user["id"]),)).fetchone()[0]
                     t_owner = conn.execute(
                         """SELECT COUNT(*) FROM tickets t JOIN nodes n ON n.id=t.node_id
-                           WHERE n.owner_id=? AND t.status='open' AND t.user_id<>?""",
+                           WHERE n.owner_id=? AND t.status='open' AND t.user_id<>? AND t.kind='issue'""",
                         (int(user["id"]), int(user["id"]))).fetchone()[0]
                     t_count = int(t_own or 0) + int(t_owner or 0)
                     p_count = 0
