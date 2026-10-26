@@ -430,6 +430,7 @@ const QICON_SETTINGS = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><circle 
 /* --- UI icon set (monochrome stroke icons, inherit currentColor) --- */
 const UIICONS = {
   home:'<path d="M4 10.6 12 4l8 6.6V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z"/>',
+  coins:'<ellipse cx="12" cy="7" rx="7.2" ry="3.2"/><path d="M4.8 7v4.2c0 1.8 3.2 3.2 7.2 3.2s7.2-1.4 7.2-3.2V7"/><path d="M4.8 11.6v4.2c0 1.8 3.2 3.2 7.2 3.2s7.2-1.4 7.2-3.2v-4.2"/>',
   users:'<circle cx="9" cy="8" r="3.4"/><path d="M3 20c0-3.2 2.7-5.2 6-5.2s6 2 6 5.2"/><path d="M16 5.2a3 3 0 0 1 0 5.8M17.5 14.9c2 .6 3.5 2.2 3.5 4.4"/>',
   user:'<circle cx="12" cy="8" r="3.6"/><path d="M5 20c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5"/>',
   userPlus:'<circle cx="10" cy="8" r="3.4"/><path d="M3.5 20c0-3.2 2.9-5.2 6.5-5.2 1.4 0 2.7.3 3.7.8"/><path d="M17.5 14v6M14.5 17h6"/>',
