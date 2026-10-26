@@ -7941,7 +7941,12 @@ class Handler(BaseHTTPRequestHandler):
                     conn.execute(
                         "INSERT INTO provider_income(owner_id, points, updated_at) VALUES(?,?,?) ON CONFLICT(owner_id) DO UPDATE SET points=points+excluded.points, updated_at=excluded.updated_at",
                         (int(row["user_id"]), int(row["points"] or 0), now()))
-            self.send_json({"ok": True, "message": "已处理"})
+                # 处理完提现单，同步关闭对应工单
+                tid = payout_ticket_id(conn, str(row["payout_no"] or ""))
+                if tid:
+                    conn.execute("UPDATE tickets SET status='closed', resolution=?, updated_at=? WHERE id=? AND status<>'closed'",
+                                 ("已打款，提现完成" if action == "paid" else "已拒绝，积分退回收益池", now(), tid))
+            self.send_json({"ok": True, "message": "已打款，工单已关闭" if action == "paid" else "已拒绝，工单已关闭"})
             return
 
         if path == "/api/user/plans/cancel":
