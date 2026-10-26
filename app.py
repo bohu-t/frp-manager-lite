@@ -194,9 +194,10 @@ def record_val(record: sqlite3.Row | dict[str, Any], key: str, default: Any = ""
     return record.get(key, default)
 
 
-def db() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=SQLITE_BUSY_TIMEOUT)
+_db_local = threading.local()
+
+
+def _configure_conn(conn: sqlite3.Connection) -> None:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     # 有些部署的 /data 存储 fsync 极慢（实测 0.5~1.0s/次）。SQLite 默认的
@@ -216,7 +217,33 @@ def db() -> sqlite3.Connection:
         conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT}")
     except Exception:
         pass
+
+
+def db() -> sqlite3.Connection:
+    """每个线程复用一个连接。
+
+    sqlite3 的 with 语句只提交/回滚，不会关闭连接；而面板大量代码在 with 块
+    之后还会继续用 conn 组装响应。逐请求新建连接会让 fd 持续累积（实测 300
+    请求多出上百个句柄）。这里改为线程内复用，并在请求线程结束时由
+    close_thread_db() 统一关闭，既避免泄漏，也不破坏既有的 with 用法。
+    """
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = getattr(_db_local, "conn", None)
+    if conn is None:
+        conn = sqlite3.connect(DB_PATH, timeout=SQLITE_BUSY_TIMEOUT)
+        _configure_conn(conn)
+        _db_local.conn = conn
     return conn
+
+
+def close_thread_db() -> None:
+    conn = getattr(_db_local, "conn", None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        _db_local.conn = None
 
 
 def effective_setup_key() -> str:
@@ -9457,6 +9484,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"reject": True, "reject_reason": f"plugin error: {e}"})
 
 
+class _PanelHTTPServer(ThreadingHTTPServer):
+    """请求线程结束时释放该线程复用的 SQLite 连接。"""
+
+    def process_request_thread(self, request, client_address) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            close_thread_db()
+
+
 def main() -> None:
     init_db()
     start_traffic_sampler()
@@ -9470,7 +9507,7 @@ def main() -> None:
     print(f"DB: {DB_PATH}")
     if ADMIN_PASSWORD == "admin123":
         print("WARNING: default admin password is admin123. Set FML_ADMIN_PASSWORD in production.")
-    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+    _PanelHTTPServer((HOST, PORT), Handler).serve_forever()
 
 
 if __name__ == "__main__":
