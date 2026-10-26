@@ -3977,11 +3977,12 @@ def ticket_public(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def reject_payout(conn: sqlite3.Connection, row: sqlite3.Row, reason: str = "") -> bool:
-    """把待处理的提现单置为已拒绝，并把积分退回收益池。"""
+def reject_payout(conn: sqlite3.Connection, row: sqlite3.Row, reason: str = "", status: str = "rejected") -> bool:
+    """把待处理的提现单置为已拒绝/已撤销，并把积分退回收益池。"""
     if not row or str(row["status"] or "") != "pending":
         return False
-    conn.execute("UPDATE payouts SET status='rejected', updated_at=? WHERE id=?", (now(), int(row["id"])))
+    status = "cancelled" if status == "cancelled" else "rejected"
+    conn.execute("UPDATE payouts SET status=?, updated_at=? WHERE id=?", (status, now(), int(row["id"])))
     conn.execute(
         "INSERT INTO provider_income(owner_id, points, updated_at) VALUES(?,?,?) ON CONFLICT(owner_id) DO UPDATE SET points=points+excluded.points, updated_at=excluded.updated_at",
         (int(row["user_id"]), int(row["points"] or 0), now()))
@@ -7902,7 +7903,10 @@ class Handler(BaseHTTPRequestHandler):
                     m = re.search(r"PO[0-9A-Za-z]{6,}", str(row["content"] or ""))
                     if m:
                         pay = conn.execute("SELECT * FROM payouts WHERE payout_no=?", (m.group(0),)).fetchone()
-                        refunded = reject_payout(conn, pay, "用户关闭提现工单，已退回收益")
+                        by_user = user["role"] != "admin" and pay and int(pay["user_id"]) == int(user["id"])
+                        refunded = reject_payout(conn, pay,
+                                                 "用户撤销提现工单，已退回收益" if by_user else "管理员结束工单，提现已取消",
+                                                 "cancelled" if by_user else "rejected")
             msg = "工单已关闭"
             if refunded:
                 msg = "工单已关闭，提现已取消，积分已退回收益池"
