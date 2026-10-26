@@ -6954,6 +6954,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/user/payouts":
             with db() as conn:
                 rows = conn.execute("SELECT * FROM payouts WHERE user_id=? ORDER BY id DESC LIMIT 50", (int(user["id"]),)).fetchall()
+            conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? AND read_at=0 AND link='payouts'", (now(), int(user["id"])))
             self.send_json({"ok": True, "payouts": [payout_public(r, conn) for r in rows], "income": provider_income_balance(conn, int(user["id"]))})
             return
         if path == "/api/tickets/summary":
@@ -6987,6 +6988,8 @@ class Handler(BaseHTTPRequestHandler):
                     if int(row["user_id"]) != int(user["id"]) and not is_owner and user["role"] != "admin":
                         self.send_json({"ok": False, "error": "无权查看该工单"}, 403)
                         return
+                    conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? AND read_at=0 AND link=?",
+                                 (now(), int(user["id"]), f"ticket:{tid}"))
                     msgs = conn.execute("SELECT * FROM ticket_messages WHERE ticket_id=? ORDER BY id", (tid,)).fetchall()
                     payout = None
                     if (row["kind"] or "") == "withdraw":
@@ -6998,6 +7001,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"ok": True, "ticket": ticket_public(row), "messages": [ticket_message_public(m) for m in msgs], "payout": payout})
                     return
                 rows = conn.execute("SELECT t.*, n.name AS node_name FROM tickets t LEFT JOIN nodes n ON n.id=t.node_id WHERE t.user_id=? ORDER BY t.id DESC LIMIT 100", (int(user["id"]),)).fetchall()
+                conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? AND read_at=0 AND link='tickets'", (now(), int(user["id"])))
             self.send_json({"ok": True, "tickets": [ticket_public(r) for r in rows]})
             return
         if path == "/api/provider/tickets":
@@ -7015,6 +7019,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with db() as conn:
                 rows = conn.execute("SELECT * FROM payouts ORDER BY id DESC LIMIT 200").fetchall()
+            conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? AND read_at=0 AND link='payouts'", (now(), int(user["id"])))
             self.send_json({"ok": True, "payouts": [payout_public(r, conn) for r in rows]})
             return
         if path == "/api/admin/ledger/analysis":
@@ -7109,6 +7114,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with db() as conn:
                 rows = conn.execute("SELECT t.*, n.name AS node_name FROM tickets t LEFT JOIN nodes n ON n.id=t.node_id ORDER BY t.id DESC LIMIT 200").fetchall()
+                conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? AND read_at=0 AND link='tickets'", (now(), int(user["id"])))
             self.send_json({"ok": True, "tickets": [ticket_public(r) for r in rows]})
             return
         if path == "/api/user/provider/earnings":
@@ -7149,6 +7155,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/user/hosts":
             with db() as conn:
+                conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? AND read_at=0 AND link='hosts'", (now(), int(user["id"])))
                 self.send_json({"ok": True, "hosts": list_hosts(conn, int(user["id"]))})
             return
         if path == "/api/user/points":
@@ -7205,6 +7212,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.require_admin():
                 return
             with db() as conn:
+                conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? AND read_at=0 AND link='hosts'", (now(), int(user["id"])))
                 self.send_json({"ok": True, "hosts": list_hosts(conn)})
             return
         if path == "/api/admin/plans":
