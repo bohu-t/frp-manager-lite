@@ -793,7 +793,6 @@ function appSidebarHtml(kind='dashboard'){
     '__tickets__',
     ['dashboard-hosts','cloud','托管申请'],
     ['dashboard-points','bolt','账单与充值'],
-    ['dashboard-notify','bell','通知设置'],
     ['dashboard-profile','user','个人中心']
   ];
   const financeItems = [
@@ -1126,7 +1125,7 @@ app.addEventListener('click', async (e) => {
     if(action === 'dashboard-config') return loadDashboard('config');
     if(action === 'dashboard-editor') return loadDashboard('editor');
     if(action === 'dashboard-profile') return loadDashboard('profile');
-    if(action === 'dashboard-notify') return loadUserNotify();
+    if(action === 'dashboard-notify') return loadDashboard('profile');
     if(action === 'dashboard-plans') return loadPlans();
     if(action === 'dashboard-points') return loadPoints();
     if(action === 'dashboard-tickets') return loadTickets();
@@ -1616,15 +1615,12 @@ async function checkHostWizardStatus(silent){
 
 let userNotifyState = { cfg: null, channels: [], events: {} };
 
-async function loadUserNotify(){
-  hideFlash(); clearAdminDashboardTimer(); setNav();
-  let data;
-  try{ data = await api('/api/user/notify-config'); }
-  catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
+async function fetchUserNotifyConfig(){
+  const data = await api('/api/user/notify-config');
   userNotifyState.cfg = data.config || {};
   userNotifyState.channels = data.channels || [];
   userNotifyState.events = data.events || {};
-  renderUserNotifyPage();
+  return userNotifyState;
 }
 
 function userNotifyFieldsHtml(type, params){
@@ -1633,47 +1629,94 @@ function userNotifyFieldsHtml(type, params){
   return (ch.fields || []).map(f => adminNotifyFieldHtml(f, params || {})).join('');
 }
 
-function renderUserNotifyPage(){
+function userNotifyChannelSvg(type){
+  const svg = NOTIFY_CHANNEL_SVG[type];
+  return svg ? `<svg viewBox="0 0 24 24" class="chip-svg">${svg}</svg>`
+             : `<svg viewBox="0 0 24 24" class="chip-svg chip-svg-link">${NOTIFY_LINK_ICON}</svg>`;
+}
+
+function userNotifyCardHtml(){
   const cfg = userNotifyState.cfg || {};
   const channels = userNotifyState.channels || [];
   const events = userNotifyState.events || {};
-  const curType = cfg.type || (channels[0] || {}).type || '';
+  const cur = cfg.type || (channels[0] || {}).type || '';
+  const curCh = channels.find(c => c.type === cur);
+  const params = cfg.params || {};
   const selected = new Set(cfg.events || []);
-  const options = channels.map(c => `<option value="${esc(c.type)}"${c.type === curType ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
+  const ready = !!(curCh && (curCh.fields || []).filter(f => f.required).every(f => String(params[f.key] || '').trim() !== ''));
+  const enabled = !!cfg.enabled && !!cur;
   const eventRows = Object.entries(events).map(([k, label]) => `<label class="check"><input type="checkbox" name="events" value="${esc(k)}"${selected.has(k) ? ' checked' : ''}> ${esc(label)}</label>`).join('');
-  app.innerHTML = appLayoutHtml(`
-    ${instCrumbBar('通知设置')}
-    <section class="card">
-      <div class="settings-card-head"><span class="settings-card-icon icon-blue">${stIcon('bell')}</span><div><h2>我的通知设置</h2><p>选择你希望接收的通知渠道和事件；站内通知始终保留。</p></div><span class="status-badge ${cfg.enabled && cfg.type ? 'ok' : 'bad'}"><i></i>${cfg.enabled && cfg.type ? '已启用' : '未启用'}</span></div>
-      <form id="userNotifyForm" class="settings-form">
-        <div class="notify-row notify-row-duo">
-          <div class="notify-cell"><div class="notify-row-label"><label>通知开关</label></div><div class="notify-row-control"><label class="switch"><input type="checkbox" name="enabled" value="1"${cfg.enabled ? ' checked' : ''}><span class="switch-track"><span class="switch-thumb"></span></span></label></div></div>
-          <div class="notify-cell"><div class="notify-row-label"><label>通知方式</label></div><div class="notify-row-control"><select name="type" id="userNotifyType">${options}</select></div></div>
-        </div>
-        <div class="notify-row notify-row-block"><div class="notify-row-label"><label>渠道参数</label></div><div id="userNotifyFields" class="notify-channel-fields" style="display:grid">${userNotifyFieldsHtml(curType, cfg.params || {})}</div></div>
-        <div class="notify-row notify-row-block"><div class="notify-row-label"><label>接收哪些事件</label></div><div class="notify-row-control">${eventRows}</div></div>
-        <div class="form-actions"><button type="submit">保存设置</button><button type="button" class="secondary" onclick="testUserNotify()">发送测试</button></div>
-      </form>
-      <p class="settings-hint">渠道凭证只保存在你的账号下；同一事件每天最多提醒一次，避免打扰。</p>
-    </section>
-  `, 'dashboard-notify', '通知设置');
+  const chips = channels.map(c => `<button type="button" class="notify-chip${c.type === cur ? ' active' : ''}" data-channel="${esc(c.type)}" data-name="${esc(c.name)}" onclick="openUserNotifyConfig('${esc(c.type)}')"><span class="chip-ico">${userNotifyChannelSvg(c.type)}</span>${esc(c.name)}</button>`).join('');
+  const groups = channels.map(c => `<div class="notify-channel-fields" data-channel="${esc(c.type)}" style="display:${c.type === cur ? 'grid' : 'none'}">${(c.fields || []).map(f => adminNotifyFieldHtml(f, params)).join('')}</div>`).join('');
+  return `<section class="card admin-notify-card user-notify" style="grid-column:1/-1">
+    <div class="settings-card-head"><span class="settings-card-icon icon-blue">${stIcon('bell')}</span><div><h2>通知设置</h2><p>选择你希望接收的通知渠道和事件；站内通知始终保留。</p></div><span class="status-badge ${enabled && ready ? 'ok' : 'bad'}"><i></i>${enabled && ready ? '已启用' : (enabled ? '待完善' : '未启用')}</span></div>
+    <form id="userNotifyForm" class="settings-form">
+      <div class="notify-row notify-row-duo">
+        <div class="notify-cell"><div class="notify-row-label"><label>通知开关</label></div><div class="notify-row-control"><label class="switch"><input type="checkbox" name="enabled" value="1"${cfg.enabled ? ' checked' : ''} onchange="syncUserNotifySwitch(this)"><span class="switch-track"><span class="switch-thumb"></span></span></label><span class="switch-state" id="userNotifySwitchState">${cfg.enabled ? '已开启' : '已关闭'}</span></div></div>
+        <div class="notify-cell"><div class="notify-row-label"><label>通知方式</label></div><div class="notify-row-control"><b id="userNotifyCurName" style="font-size:13px;color:var(--text)">${esc(curCh ? curCh.name : '未选择')}</b></div></div>
+      </div>
+      <div class="notify-row notify-row-block"><div class="notify-row-label"><label>通知渠道</label></div><div class="notify-chips">${chips || '<span class="muted small">暂无可用的通知渠道</span>'}</div></div>
+      <input type="hidden" name="notify_type" id="userNotifyType" value="${esc(cur)}">
+      <div class="notify-row notify-row-block"><div class="notify-row-label"><label>接收哪些事件</label></div><div class="notify-row-control" style="justify-content:flex-start;flex-wrap:wrap;gap:10px 18px">${eventRows || '<span class="muted small">暂无可选事件</span>'}</div></div>
+      <div class="form-actions"><button type="submit">保存设置</button><button type="button" class="secondary" onclick="testUserNotify()">发送测试</button></div>
+      <div id="userNotifyConfigModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="userNotifyConfigTitle" onclick="if(event.target===this)closeUserNotifyConfig()">
+        <section class="modal-page card notify-config-modal" style="width:min(720px,100%)">
+          <div class="section-title modal-title"><div><h2 id="userNotifyConfigTitle">渠道配置</h2><p>填写该渠道的参数，点「保存设置」后生效。</p></div><button type="button" class="secondary modal-close" onclick="closeUserNotifyConfig()">关闭 ×</button></div>
+          <div class="notify-config">${groups}</div>
+          <div class="form-actions"><button type="button" onclick="closeUserNotifyConfig()">完成</button></div>
+        </section>
+      </div>
+    </form>
+    <p class="settings-hint">渠道凭证只保存在你的账号下；同一事件每天最多提醒一次，避免打扰。</p>
+  </section>`;
+}
 
+function selectUserNotifyChannel(type){
+  type = type || '';
+  const inp = document.querySelector('#userNotifyType');
+  if(inp) inp.value = type;
   const form = document.querySelector('#userNotifyForm');
-  const typeSel = document.querySelector('#userNotifyType');
-  if(typeSel) typeSel.onchange = () => {
-    const box = document.querySelector('#userNotifyFields');
-    if(box) box.innerHTML = userNotifyFieldsHtml(typeSel.value, {});
-  };
-  if(form) form.onsubmit = async (e) => {
+  if(!form) return;
+  let activeName = '';
+  form.querySelectorAll('.notify-chip[data-channel]').forEach(c => {
+    const on = (c.dataset.channel || '') === type;
+    c.classList.toggle('active', on);
+    if(on) activeName = c.dataset.name || '';
+  });
+  form.querySelectorAll('.notify-channel-fields').forEach(g => { g.style.display = (g.dataset.channel === type) ? 'grid' : 'none'; });
+  const cur = document.querySelector('#userNotifyCurName');
+  if(cur) cur.textContent = activeName || '未选择';
+}
+
+function openUserNotifyConfig(type){
+  selectUserNotifyChannel(type);
+  const modal = document.querySelector('#userNotifyConfigModal');
+  if(modal) modal.classList.remove('hidden');
+}
+
+function closeUserNotifyConfig(){
+  const modal = document.querySelector('#userNotifyConfigModal');
+  if(modal) modal.classList.add('hidden');
+}
+
+function syncUserNotifySwitch(el){
+  const s = document.querySelector('#userNotifySwitchState');
+  if(s) s.textContent = (el && el.checked) ? '已开启' : '已关闭';
+}
+
+function initUserNotifyForm(){
+  const form = document.querySelector('#userNotifyForm');
+  if(!form) return;
+  form.onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
-    const body = { enabled: fd.get('enabled') ? '1' : '0', type: fd.get('type') || '', events: fd.getAll('events'), params: {} };
+    const body = { enabled: fd.get('enabled') ? '1' : '0', type: fd.get('notify_type') || '', events: fd.getAll('events'), params: {} };
     const ch = userNotifyState.channels.find(c => c.type === body.type);
     (ch ? ch.fields : []).forEach(f => { body.params[f.key] = fd.get(f.key) || ''; });
     try{
       const r = await api('/api/user/notify-config', {method:'POST', body});
-      show(r.message || '已保存');
-      await loadUserNotify();
+      await loadDashboard('profile');
+      show(r.message || '通知设置已保存');
     }catch(err){ show(err.message, true); }
   };
 }
@@ -3648,7 +3691,6 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
           <button class="quick-action" onclick="loadNewNode()"><span class="quick-action-icon">${QICON_TUNNEL}</span><b>新建实例</b><small>选购地区与套餐</small></button>
           <button class="quick-action" onclick="loadTicketNew()"><span class="quick-action-icon">${QICON_RISK}</span><b>提交工单</b><small>故障与售后</small></button>
           <button class="quick-action" onclick="loadPoints()"><span class="quick-action-icon">${QICON_KEY}</span><b>账单与充值</b><small>余额与订单</small></button>
-          <button class="quick-action" onclick="loadUserNotify()"><span class="quick-action-icon">${QICON_SETTINGS}</span><b>通知设置</b><small>到期与告警提醒</small></button>
           <button class="quick-action" onclick="loadDashboard('profile')"><span class="quick-action-icon">${QICON_USER}</span><b>个人中心</b><small>邮箱与收款</small></button>
         </div></section>
         <section class="card dashboard-tunnels-preview"><div class="section-title"><div><div class="section-kicker">MY TUNNELS</div><h2>${stIcon('tunnel')}我的隧道</h2></div><button class="secondary tunnel-preview-all" onclick="loadDashboard('tunnels')">查看全部隧道 ↗</button></div><div id="tunnelPreviewRotator" class="tunnel-preview-rotator">${tunnelPreviewRows}</div></section>
@@ -3888,6 +3930,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
       </tr>`).join('') || '<tr><td colspan="7" class="muted">还没有购买过套餐</td></tr>';
     let payoutAcc = { method: 'alipay', account: '', holder: '' };
     try{ payoutAcc = (await api('/api/user/payout-account')).account || payoutAcc; }catch(e){}
+    try{ await fetchUserNotifyConfig(); }catch(e){ userNotifyState.cfg = {}; }
     const latestExpiry = activePlans.length
       ? (activePlans.every(p => p.billing_mode === 'traffic')
           ? '按流量计费'
@@ -3921,9 +3964,11 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
           <div class="form-actions" style="grid-column:1/-1"><button type="submit">保存收款信息</button></div>
         </form>
         </section>
+        ${userNotifyCardHtml()}
       </div>`, 'dashboard-profile', '个人中心');
     initUserEmailForm();
     initPayoutAccountForm();
+    initUserNotifyForm();
     initPasswordForm();
     return;
   }
