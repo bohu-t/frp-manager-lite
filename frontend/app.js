@@ -1852,6 +1852,25 @@ async function uploadImage(file, kind){
   return r.token;
 }
 
+function showImageViewer(url){
+  if(!url) return;
+  const old = document.querySelector('#imgViewer');
+  if(old) old.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div class="img-viewer" id="imgViewer" onclick="if(event.target===this)closeImageViewer()">
+    <img src="${esc(url)}" alt="预览">
+    <button type="button" class="img-viewer-close" onclick="closeImageViewer()" aria-label="关闭">×</button>
+  </div>`);
+  if(!window.__imgViewerKey){
+    window.__imgViewerKey = true;
+    document.addEventListener('keydown', e => { if(e.key === 'Escape') closeImageViewer(); });
+  }
+}
+
+function closeImageViewer(){
+  const el = document.querySelector('#imgViewer');
+  if(el) el.remove();
+}
+
 function attsHtml(tokens){
   let list = Array.isArray(tokens) ? tokens : [];
   if(!list.length && typeof tokens === 'string' && tokens.trim()){

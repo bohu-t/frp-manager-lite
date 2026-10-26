@@ -2535,3 +2535,8 @@ html[data-theme="dark"] .status-badge.warn{background:rgba(245,158,11,.18);color
 .payout-panel-grid b{font-size:15px;color:var(--text-strong);font-weight:700}
 .payout-qr img{width:96px;height:96px;object-fit:contain;border-radius:10px;border:1px solid var(--border);cursor:zoom-in}
 .payout-panel-actions{display:flex;gap:10px;margin-top:14px}
+/* 图片预览 */
+.img-viewer{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:40px;background:rgba(8,15,30,.82);backdrop-filter:blur(2px);cursor:zoom-out}
+.img-viewer img{max-width:min(90vw,900px);max-height:85vh;border-radius:12px;box-shadow:0 24px 60px rgba(0,0,0,.5);background:#fff;cursor:default}
+.img-viewer-close{position:fixed;top:24px;right:28px;width:40px;height:40px;border:0;border-radius:50%;background:rgba(255,255,255,.16);color:#fff;font-size:22px;line-height:1;cursor:pointer}
+.img-viewer-close:hover{background:rgba(255,255,255,.28)}
