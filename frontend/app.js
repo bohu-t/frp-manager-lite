@@ -2280,7 +2280,10 @@ async function loadAdminRecharge(){
   };
 }
 
-let ledgerFilter = { category: '', range: '30', q: '' };
+let ledgerFilter = { book: 'cash', category: '', range: '30', q: '', userId: 0 };
+let ledgerUsers = null;
+
+const LEDGER_BOOK_TABS = [['cash', '平台现金账'], ['points', '平台积分账'], ['user', '用户流水']];
 
 function ledgerRangeTs(range){
   const now = Math.floor(Date.now() / 1000);
@@ -2292,6 +2295,7 @@ function ledgerRangeTs(range){
 
 function ledgerSetFilter(key, value){
   ledgerFilter[key] = value;
+  if(key === 'book'){ ledgerFilter.category = ''; ledgerFilter.q = ''; }
   loadAdminLedger();
   if(key === 'q'){
     const el = document.getElementById('ledgerSearch');
@@ -2299,52 +2303,85 @@ function ledgerSetFilter(key, value){
   }
 }
 
+async function ledgerFetchUsers(){
+  if(ledgerUsers) return ledgerUsers;
+  try{ ledgerUsers = (await api('/api/admin/ledger/users')).users || []; }
+  catch(err){ ledgerUsers = []; }
+  return ledgerUsers;
+}
+
 async function loadAdminLedger(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
+  const book = ledgerFilter.book || 'cash';
+  let userOptions = '';
+  if(book === 'user'){
+    const users = await ledgerFetchUsers();
+    if(!ledgerFilter.userId && users.length) ledgerFilter.userId = users[0].id;
+    userOptions = users.map(u => `<option value="${u.id}"${Number(ledgerFilter.userId) === Number(u.id) ? ' selected' : ''}>${esc(u.username || ('#' + u.id))}（${u.count} 笔）</option>`).join('');
+  }
   const qs = new URLSearchParams();
+  qs.set('book', book);
   if(ledgerFilter.category) qs.set('category', ledgerFilter.category);
   if(ledgerFilter.q) qs.set('q', ledgerFilter.q);
   const from = ledgerRangeTs(ledgerFilter.range);
   if(from) qs.set('from', String(from));
   qs.set('limit', '300');
-  let data;
-  try{ data = await api('/api/admin/ledger?' + qs.toString()); }
-  catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
+  if(book === 'user' && ledgerFilter.userId) qs.set('user_id', String(ledgerFilter.userId));
+  let data = { rows: [], summary: {}, categories: {}, user: null };
+  if(book !== 'user' || ledgerFilter.userId){
+    try{ data = await api('/api/admin/ledger?' + qs.toString()); }
+    catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
+  }
   const rows = data.rows || [];
   const sum = data.summary || {};
   const cats = data.categories || {};
   const money = (v) => Number(v || 0).toFixed(2);
-  const income = Number(sum.in || 0);
-  const expense = Number(sum.out || 0) - Number(sum.reverse || 0);
-  const net = income - expense;
-  const catOptions = Object.entries(cats).map(([k, v]) => `<option value="${esc(k)}"${ledgerFilter.category === k ? ' selected' : ''}>${esc(v)}</option>`).join('');
-  const dirMeta = (d) => d === 'in' ? { cls: 'in', text: '收入' }
-                       : d === 'out' ? { cls: 'out', text: '支出' }
+  const unitText = (u) => u === 'cash' ? '¥' : '积分';
+  const unit = book === 'cash' ? '¥' : '积分';
+  const raise = Number(sum.in || 0) + Number(sum.reverse || 0);
+  const cut = Number(sum.out || 0);
+  const cashNet = Number(sum.in || 0) - cut + Number(sum.reverse || 0);
+  const catOptions = Object.entries(cats).map(([k, v]) => `<option value="${k}"${ledgerFilter.category === k ? ' selected' : ''}>${esc(v)}</option>`).join('');
+  const dirMeta = (d) => d === 'in' ? { cls: 'in', text: book === 'cash' ? '收入' : '增加' }
+                       : d === 'out' ? { cls: 'out', text: book === 'cash' ? '支出' : '减少' }
                        : d === 'reverse' ? { cls: 'reverse', text: '冲正' }
                        : { cls: 'none', text: '事件' };
+  const dirSign = (d) => d === 'in' ? '+' : (d === 'out' ? '-' : (d === 'reverse' ? (book === 'cash' ? '-' : '+') : ''));
+  const cards = book === 'cash'
+    ? `<div class="ledger-card"><span>现金收入</span><b class="ledger-in">+¥${money(sum.in)}</b><small>在线充值到账</small></div>
+       <div class="ledger-card"><span>现金支出</span><b class="ledger-out">-¥${money(cut - Number(sum.reverse || 0))}</b><small>提现打款（已扣冲正）</small></div>
+       <div class="ledger-card"><span>现金净额</span><b class="${cashNet >= 0 ? 'ledger-in' : 'ledger-out'}">${cashNet >= 0 ? '+' : '-'}¥${money(Math.abs(cashNet))}</b><small>当前筛选范围</small></div>`
+    : `<div class="ledger-card"><span>${book === 'user' ? '积分增加' : '负债增加'}</span><b class="ledger-in">+${money(raise)} 积分</b><small>充值到账 / 退款 / 冲正</small></div>
+       <div class="ledger-card"><span>${book === 'user' ? '积分减少' : '负债减少'}</span><b class="ledger-out">-${money(cut)} 积分</b><small>套餐消费 / 提现转出</small></div>
+       <div class="ledger-card"><span>净变动</span><b class="${(raise - cut) >= 0 ? 'ledger-in' : 'ledger-out'}">${(raise - cut) >= 0 ? '+' : '-'}${money(Math.abs(raise - cut))} 积分</b><small>${book === 'user' ? `当前积分 ${money(data.user ? data.user.points : 0)}` : '当前筛选范围'}</small></div>`;
   const rowHtml = rows.map(r => {
     const meta = dirMeta(r.direction);
-    const signed = r.direction === 'in' ? '+' : (r.direction === 'out' ? '-' : (r.direction === 'reverse' ? '-' : ''));
+    const signed = dirSign(r.direction);
     const cls = r.direction === 'in' ? 'ledger-in' : (r.direction === 'out' ? 'ledger-out' : (r.direction === 'reverse' ? 'ledger-reverse' : 'ledger-muted'));
+    const u = book === 'user' ? unitText(r.unit) : unit;
     return `<tr${r.direction === 'none' ? ' class="is-event"' : ''}>
       <td class="muted small">${fmtTs(r.ts)}</td>
       <td><span class="ledger-dir ${meta.cls}">${meta.text}</span></td>
       <td>${esc(r.category_text || r.category)}</td>
-      <td><b class="${cls}">${signed}¥${money(r.amount)}</b></td>
+      <td><b class="${cls}">${signed}${money(r.amount)} ${u}</b></td>
       <td>${esc(r.username || '-')}</td>
       <td class="muted small">${esc(r.order_no || '-')}</td>
       <td class="muted small">${esc(r.note || '-')}</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="7" class="muted">该条件下暂无流水</td></tr>';
+  }).join('') || `<tr><td colspan="7" class="muted">${book === 'user' && !ledgerFilter.userId ? '还没有产生流水的用户' : '该条件下暂无流水'}</td></tr>`;
+  const tabs = LEDGER_BOOK_TABS.map(([k, t]) => `<button type="button" class="ledger-tab${book === k ? ' active' : ''}" onclick="ledgerSetFilter('book','${k}')">${t}</button>`).join('');
+  const subtitles = {
+    cash: '真金白银的进出：在线充值入账、提现打款出账',
+    points: '平台欠用户的积分（负债）：充值到账增加，消费与提现减少，结算与保证金属内部划转',
+    user: '单个用户的积分与现金流水，从两本账按用户派生'
+  };
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">LEDGER</span><h1>收支表</h1><p>平台全部收支流水，金额统一以 ¥ 计</p></div><button type="button" class="secondary" onclick="loadAdminLedger()">刷新</button></div>
-    <div class="ledger-cards">
-      <div class="ledger-card"><span>总收入</span><b class="ledger-in">+¥${money(income)}</b><small>充值 / 套餐 / 保证金</small></div>
-      <div class="ledger-card"><span>总支出</span><b class="ledger-out">-¥${money(expense)}</b><small>退款 / 结算 / 提现（已扣冲正）</small></div>
-      <div class="ledger-card"><span>净额</span><b class="${net >= 0 ? 'ledger-in' : 'ledger-out'}">${net >= 0 ? '+' : '-'}¥${money(Math.abs(net))}</b><small>当前筛选范围</small></div>
-    </div>
+    <div class="ov-page-head"><div><span class="section-kicker">LEDGER</span><h1>收支表</h1><p>${esc(subtitles[book] || '')}</p></div><button type="button" class="secondary" onclick="loadAdminLedger()">刷新</button></div>
+    <div class="ledger-tabs">${tabs}</div>
+    <div class="ledger-cards">${cards}</div>
     <section class="card">
       <div class="ledger-toolbar">
+        ${book === 'user' ? `<select onchange="ledgerSetFilter('userId', Number(this.value))">${userOptions || '<option value="">暂无用户</option>'}</select>` : ''}
         <label class="ledger-search"><span>⌕</span><input id="ledgerSearch" placeholder="搜索单号 / 用户 / 备注" value="${esc(ledgerFilter.q || '')}" oninput="ledgerSetFilter('q', this.value)"></label>
         <select onchange="ledgerSetFilter('range', this.value)">
           ${[['7','近 7 天'],['30','近 30 天'],['90','近 90 天'],['all','全部']].map(([v, t]) => `<option value="${v}"${ledgerFilter.range === v ? ' selected' : ''}>${t}</option>`).join('')}
@@ -5041,9 +5078,9 @@ async function setFinRange(days){
   const badge = document.querySelector('#finBadge');
   if(badge){ badge.className = 'status-badge ' + (net >= 0 ? 'ok' : 'bad'); }
   setHtml('#finSummary', `
-    <div><span>总收入</span><b class="ledger-in">+¥${money(income)}</b></div>
-    <div><span>总支出</span><b class="ledger-out">-¥${money(expense)}</b></div>
-    <div><span>净额</span><b class="${net >= 0 ? 'ledger-in' : 'ledger-out'}">${net >= 0 ? '+' : '-'}¥${money(Math.abs(net))}</b></div>`);
+    <div><span>现金收入</span><b class="ledger-in">+¥${money(income)}</b></div>
+    <div><span>现金支出</span><b class="ledger-out">-¥${money(expense)}</b></div>
+    <div><span>现金净额</span><b class="${net >= 0 ? 'ledger-in' : 'ledger-out'}">${net >= 0 ? '+' : '-'}¥${money(Math.abs(net))}</b></div>`);
   setHtml('#finChart', financeChartSvg(info.points || []));
   setHtml('#finCats', (info.categories || []).map(c => `<span class="fin-cat ${c.direction}">${esc(c.text)} <b>${c.direction === 'in' ? '+' : '-'}¥${money(c.amount)}</b></span>`).join(''));
   document.querySelectorAll('.fin-range-btn').forEach(b => b.classList.toggle('active', Number(b.dataset.days) === finRange));
@@ -5583,9 +5620,9 @@ async function loadAdminDashboard(auto=false){
       <section class="card admin-finance-card">
         <div class="section-title"><div><div class="section-kicker">FINANCE</div><h2>${stIcon('chart')}收支分析</h2></div><div class="fin-range">${[[1,'今天'],[7,'7 天'],[30,'30 天'],[90,'90 天']].map(([d, t]) => `<button type="button" class="fin-range-btn${finRange === d ? ' active' : ''}" data-days="${d}" onclick="setFinRange(${d})">${t}</button>`).join('')}</div><span class="status-badge ${finNet >= 0 ? 'ok' : 'bad'}" id="finBadge"><i></i>${finRangeLabel(finRange)} ${finNet >= 0 ? '+' : '-'}¥${money(Math.abs(finNet))}</span></div>
         <div class="fin-summary" id="finSummary">
-          <div><span>总收入</span><b class="ledger-in">+¥${money(finIncome)}</b></div>
-          <div><span>总支出</span><b class="ledger-out">-¥${money(finExpense)}</b></div>
-          <div><span>净额</span><b class="${finNet >= 0 ? 'ledger-in' : 'ledger-out'}">${finNet >= 0 ? '+' : '-'}¥${money(Math.abs(finNet))}</b></div>
+          <div><span>现金收入</span><b class="ledger-in">+¥${money(finIncome)}</b></div>
+          <div><span>现金支出</span><b class="ledger-out">-¥${money(finExpense)}</b></div>
+          <div><span>现金净额</span><b class="${finNet >= 0 ? 'ledger-in' : 'ledger-out'}">${finNet >= 0 ? '+' : '-'}¥${money(Math.abs(finNet))}</b></div>
         </div>
         <div class="fin-chart" id="finChart">
           ${financeChartSvg(ledgerDaily)}

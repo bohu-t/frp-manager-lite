@@ -3049,7 +3049,8 @@ def init_db() -> None:
                 order_no TEXT NOT NULL DEFAULT '',
                 ref TEXT NOT NULL DEFAULT '',
                 note TEXT NOT NULL DEFAULT '',
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                book TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_ledger_ts ON ledger(ts);
             CREATE TABLE IF NOT EXISTS provider_earnings (
@@ -3236,6 +3237,18 @@ def init_db() -> None:
             # 历史套餐：有流量额度且没有有效期，按流量模式处理（只执行一次）
             conn.execute("UPDATE plans SET billing_mode='traffic' WHERE duration_days=0 AND traffic_limit_bytes>0")
             setting_set(conn, "migration_billing_mode_v1", "1")
+        ledger_cols = {r["name"] for r in conn.execute("PRAGMA table_info(ledger)").fetchall()}
+        if "book" not in ledger_cols:
+            conn.execute("ALTER TABLE ledger ADD COLUMN book TEXT NOT NULL DEFAULT ''")
+        conn.execute("UPDATE ledger SET book = CASE WHEN unit='cash' THEN 'cash' ELSE 'points' END WHERE book='' OR book IS NULL")
+        if setting_get(conn, "ledger_books_v1", "") != "1":
+            # 拆三本账：积分账按负债口径重排历史流水
+            #   用户消费扣积分 = 负债减少；退款回积分 = 负债增加；结算/保证金 = 负债内部划转
+            conn.execute("UPDATE ledger SET direction='out' WHERE book='points' AND category='plan_sale' AND direction='in'")
+            conn.execute("UPDATE ledger SET direction='in' WHERE book='points' AND category IN ('refund','node_refund') AND direction='out'")
+            conn.execute("UPDATE ledger SET direction='none' WHERE book='points' AND category IN ('provider_settle','guarantee') AND direction IN ('in','out')")
+            setting_set(conn, "ledger_books_v1", "1")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_book_ts ON ledger(book, ts)")
         up_cols = {r["name"] for r in conn.execute("PRAGMA table_info(user_plans)").fetchall()}
         if "billing_mode" not in up_cols:
             conn.execute("ALTER TABLE user_plans ADD COLUMN billing_mode TEXT NOT NULL DEFAULT 'time'")
@@ -4886,6 +4899,8 @@ def points_balance(user_id: int) -> float:
     return q2(row["points"]) if row else 0.0
 
 
+LEDGER_CASH_CATEGORIES = {"recharge_cash", "withdraw_cash"}
+
 LEDGER_CATEGORIES = {
     "plan_sale": "套餐销售",
     "recharge_cash": "在线充值",
@@ -4904,17 +4919,25 @@ LEDGER_CATEGORIES = {
 
 def ledger_add(conn: sqlite3.Connection, unit: str, direction: str, category: str, amount: float,
                user_id: int = 0, username: str = "", node_id: int = 0, order_no: str = "",
-               ref: str = "", note: str = "", ts: int | None = None) -> None:
-    """写入统一收支流水。unit=points/cash，direction=in/out（平台视角）。"""
+               ref: str = "", note: str = "", ts: int | None = None, book: str = "") -> None:
+    """写入收支流水。
+
+    book 分三本账：
+      cash   平台现金账——真钱进出，direction=in 收 / out 支。
+      points 平台积分负债账——平台欠用户的积分，direction=in 负债增加 / out 负债减少 /
+             reverse 冲正（负债回增）/ none 内部划转（负债总额不变）。
+      user   用户流水，不落库，由 user_id 从上面两本账派生。
+    """
     amount = q2(amount)
     if amount <= 0:
         return
     stamp = int(ts or now())
+    book = str(book or ("cash" if unit == "cash" else "points"))
     conn.execute(
-        "INSERT INTO ledger(ts, unit, direction, category, amount, user_id, username, node_id, order_no, ref, note, created_at)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO ledger(ts, unit, direction, category, amount, user_id, username, node_id, order_no, ref, note, created_at, book)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (stamp, str(unit), str(direction), str(category), amount, int(user_id or 0), str(username or ""),
-         int(node_id or 0), str(order_no or ""), str(ref or ""), str(note or "")[:200], stamp))
+         int(node_id or 0), str(order_no or ""), str(ref or ""), str(note or "")[:200], stamp, book))
 
 
 def create_recharge_keys(points: int, count: int, note: str, expires_days: int, created_by: int) -> tuple[bool, str, list[str]]:
@@ -5057,7 +5080,7 @@ def cancel_user_plan(user: sqlite3.Row, user_plan_id: int) -> tuple[bool, str, d
         release_plan_resources(conn, p, keep_ports=False)
         if q2(info["points"]) > 0:
             points_change(conn, int(user["id"]), q2(info["points"]), "plan_refund", p["plan_name"], "套餐退订退款")
-            ledger_add(conn, "points", "out", "refund", q2(info["points"]), int(user["id"]), user["username"],
+            ledger_add(conn, "points", "in", "refund", q2(info["points"]), int(user["id"]), user["username"],
                        int(p["node_id"] or 0), str(p["order_no"] or ""), str(p["id"]), f"退订 {p['plan_name']}")
         recalc_user_entitlements(conn, int(user["id"]))
     amount = f"{q2(info['points']):.2f}"
@@ -5093,9 +5116,10 @@ def release_plan_resources(conn: sqlite3.Connection, plan_row: sqlite3.Row, keep
         conn.execute("DELETE FROM user_plan_ports WHERE user_plan_id=?", (plan_row["id"],))
 
 
-def ledger_analysis(conn: sqlite3.Connection, days: int = 7) -> dict[str, Any]:
-    """收支分析：今天按小时，其余按天。金额统一 ¥。"""
+def ledger_analysis(conn: sqlite3.Connection, days: int = 7, book: str = "cash") -> dict[str, Any]:
+    """收支分析：今天按小时，其余按天。金额统一 ¥，默认只看平台现金账。"""
     days = max(1, min(90, int(days or 7)))
+    book = book if book in ("cash", "points") else "cash"
     points: list[dict[str, Any]] = []
     if days <= 1:
         start = int(time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1)))
@@ -5103,7 +5127,7 @@ def ledger_analysis(conn: sqlite3.Connection, days: int = 7) -> dict[str, Any]:
             """SELECT strftime('%H', ts, 'unixepoch', 'localtime') AS h,
                       COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE 0 END),0) AS inc,
                       COALESCE(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END),0) AS exp
-               FROM ledger WHERE ts>=? GROUP BY h""", (start,)).fetchall()
+               FROM ledger WHERE book=? AND ts>=? GROUP BY h""", (book, start)).fetchall()
         bucket = {str(r["h"]).zfill(2): r for r in rows}
         for hour in range(24):
             key = f"{hour:02d}"
@@ -5115,7 +5139,7 @@ def ledger_analysis(conn: sqlite3.Connection, days: int = 7) -> dict[str, Any]:
             """SELECT date(ts,'unixepoch','localtime') AS d,
                       COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE 0 END),0) AS inc,
                       COALESCE(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END),0) AS exp
-               FROM ledger WHERE ts>=? GROUP BY d""", (start,)).fetchall()
+               FROM ledger WHERE book=? AND ts>=? GROUP BY d""", (book, start)).fetchall()
         bucket = {str(r["d"]): r for r in rows}
         today = time.localtime()
         for i in range(days - 1, -1, -1):
@@ -5124,14 +5148,15 @@ def ledger_analysis(conn: sqlite3.Connection, days: int = 7) -> dict[str, Any]:
             r = bucket.get(key)
             points.append({"label": key[5:], "income": q2(r["inc"] if r else 0), "expense": q2(r["exp"] if r else 0)})
     cats = conn.execute(
-        """SELECT category, direction, COALESCE(SUM(amount),0) AS total FROM ledger WHERE ts>=?
-           GROUP BY category, direction ORDER BY total DESC LIMIT 8""", (now() - days * 86400,)).fetchall()
+        """SELECT category, direction, COALESCE(SUM(amount),0) AS total FROM ledger WHERE book=? AND ts>=?
+           GROUP BY category, direction ORDER BY total DESC LIMIT 8""", (book, now() - days * 86400,)).fetchall()
     totals = {
         "income": q2(sum(p["income"] for p in points)),
         "expense": q2(sum(p["expense"] for p in points)),
     }
     return {
         "days": days,
+        "book": book,
         "points": points,
         "totals": totals,
         "categories": [{"category": r["category"], "text": LEDGER_CATEGORIES.get(r["category"], r["category"]),
@@ -5405,6 +5430,7 @@ def mark_order_paid(order_no: str, transaction_id: str = "", provider: str = "")
             cash = q2(int(row_val(row, "amount_cents", 0) or 0) / 100.0)
             points_change(conn, row["user_id"], pts, "recharge", order_no, "在线充值")
             ledger_add(conn, "cash", "in", "recharge_cash", cash, row["user_id"], row["username"], 0, order_no, "", "在线充值")
+            ledger_add(conn, "points", "in", "recharge_points", pts, row["user_id"], row["username"], 0, order_no, "", "充值到账")
         else:
             ok, msg = provision_order(conn, row)
             if not ok:
@@ -5458,7 +5484,7 @@ def refund_plans_on_node(conn: sqlite3.Connection, node_id: int, reason: str = "
         refund = remaining + bonus
         if refund > 0:
             points_change(conn, int(p["user_id"]), refund, "plan_refund", f"node:{node_id}", reason)
-            ledger_add(conn, "points", "out", "node_refund", refund, int(p["user_id"]), p["username"],
+            ledger_add(conn, "points", "in", "node_refund", refund, int(p["user_id"]), p["username"],
                        int(node_id), str(p["order_no"] or ""), str(p["id"]), reason)
             total_refund += refund
         conn.execute("UPDATE user_plans SET status='cancelled', expires_at=?, guarantee_points=0 WHERE id=?", (now(), p["id"]))
@@ -5532,10 +5558,10 @@ def accrue_provider_income_once() -> int:
             pay = q2(delta * 90 / 100)
             keep = q2(delta - pay)
             if pay > 0:
-                ledger_add(conn, "points", "out", "provider_settle", pay, owner, "", int(up["node_id"] or 0),
+                ledger_add(conn, "points", "none", "provider_settle", pay, owner, "", int(up["node_id"] or 0),
                            str(up["order_no"] or ""), str(up["id"]), f"结算 {up['plan_name']}")
             if keep > 0:
-                ledger_add(conn, "points", "in", "guarantee", keep, owner, "", int(up["node_id"] or 0),
+                ledger_add(conn, "points", "none", "guarantee", keep, owner, "", int(up["node_id"] or 0),
                            str(up["order_no"] or ""), str(up["id"]), "保证金留存")
                 conn.execute(
                     "INSERT INTO provider_income(owner_id, points, updated_at) VALUES(?,?,?) ON CONFLICT(owner_id) DO UPDATE SET points=points+excluded.points, updated_at=excluded.updated_at",
@@ -5625,7 +5651,7 @@ def create_order(user: sqlite3.Row, plan_id: int, provider: str = "", node_id: i
         try:
             if cost:
                 points_change(conn, user["id"], -cost, "plan_purchase", order_no, plan["name"])
-                ledger_add(conn, "points", "in", "plan_sale", cost, user["id"], user["username"],
+                ledger_add(conn, "points", "out", "plan_sale", cost, user["id"], user["username"],
                            int(node_id or 0), order_no, str(plan["id"]), plan["name"])
         except ValueError:
             conn.rollback()
@@ -7031,8 +7057,9 @@ class Handler(BaseHTTPRequestHandler):
                 days = int((qs.get("days") or ["7"])[0])
             except ValueError:
                 days = 7
+            book = str((qs.get("book") or ["cash"])[0]).strip().lower()
             with db() as conn:
-                info = ledger_analysis(conn, days)
+                info = ledger_analysis(conn, days, book)
             self.send_json({"ok": True, **info})
             return
         if path == "/api/admin/ports/stats":
@@ -7053,12 +7080,32 @@ class Handler(BaseHTTPRequestHandler):
             used = int(row["used"] or 0)
             self.send_json({"ok": True, "total": total, "used": used, "free": max(0, total - used)})
             return
+        if path == "/api/admin/ledger/users":
+            if not self.require_admin():
+                return
+            with db() as conn:
+                rows = conn.execute(
+                    "SELECT user_id, MAX(username) AS username, COUNT(*) AS c FROM ledger"
+                    " WHERE user_id>0 GROUP BY user_id ORDER BY c DESC LIMIT 300").fetchall()
+            self.send_json({"ok": True, "users": [
+                {"id": int(r["user_id"]), "username": r["username"], "count": int(r["c"])} for r in rows]})
+            return
         if path == "/api/admin/ledger":
             if not self.require_admin():
                 return
             qs = urllib.parse.parse_qs(urlparse(self.path).query)
             def qv(name, default=""):
                 return (qs.get(name) or [default])[0]
+            book = qv("book", "cash").strip().lower()
+            if book not in ("cash", "points", "user"):
+                book = "cash"
+            try:
+                book_user = int(qv("user_id") or 0)
+            except ValueError:
+                book_user = 0
+            if book == "user" and not book_user:
+                self.send_json({"ok": False, "error": "请选择用户"}, 400)
+                return
             unit = qv("unit")
             direction = qv("direction")
             category = qv("category")
@@ -7077,6 +7124,12 @@ class Handler(BaseHTTPRequestHandler):
                 limit = 200
             base_where: list[str] = []
             base_args: list[Any] = []
+            if book == "user":
+                base_where.append("user_id=?")
+                base_args.append(book_user)
+            else:
+                base_where.append("book=?")
+                base_args.append(book)
             if unit in ("points", "cash"):
                 base_where.append("unit=?")
                 base_args.append(unit)
@@ -7121,7 +7174,7 @@ class Handler(BaseHTTPRequestHandler):
                 totals = conn.execute(
                     "SELECT direction, COALESCE(SUM(CASE WHEN unit='cash' THEN amount ELSE amount * 1.0 / ? END),0)"
                     " FROM ledger" + clause + " GROUP BY direction", (rate, *args)).fetchall()
-            summary = {"in": 0.0, "out": 0.0, "reverse": 0.0}
+            summary = {"in": 0.0, "out": 0.0, "reverse": 0.0, "none": 0.0}
             for d, total in totals:
                 summary[str(d)] = q2(total)
             balance = opening
@@ -7142,8 +7195,16 @@ class Handler(BaseHTTPRequestHandler):
                     "node_id": int(r["node_id"] or 0), "order_no": r["order_no"], "ref": r["ref"], "note": r["note"],
                 })
             out_rows.reverse()
-            self.send_json({"ok": True, "rows": out_rows, "summary": summary,
-                            "opening": opening, "closing": balance, "categories": LEDGER_CATEGORIES})
+            cats = {k: v for k, v in LEDGER_CATEGORIES.items()
+                    if book == "user" or (k in LEDGER_CASH_CATEGORIES) == (book == "cash")}
+            payload: dict[str, Any] = {"ok": True, "book": book, "rows": out_rows, "summary": summary,
+                                       "opening": opening, "closing": balance, "categories": cats}
+            if book == "user":
+                with db() as conn:
+                    u = conn.execute("SELECT id, username, points FROM users WHERE id=?", (book_user,)).fetchone()
+                payload["user"] = {"id": book_user, "username": u["username"] if u else "",
+                                   "points": q2(u["points"]) if u else 0.0}
+            self.send_json(payload)
             return
         if path == "/api/admin/tickets":
             if not self.require_admin():

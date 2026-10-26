@@ -2259,6 +2259,10 @@ tr.need-action td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
 .ledger-card small{font-size:11px;color:var(--muted)}
 .ledger-in{color:#16a34a}
 .ledger-out{color:#dc2626}
+.ledger-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.ledger-tab{height:34px;padding:0 16px;border:1px solid var(--border);border-radius:10px;background:var(--card);color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;transition:all .16s ease}
+.ledger-tab:hover{color:var(--text);border-color:var(--accent)}
+.ledger-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
 .ledger-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
 .ledger-toolbar select{height:34px;padding:0 10px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--text);font-size:13px}
 .ledger-unit,.ledger-dir{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600}
