@@ -2314,30 +2314,34 @@ async function loadAdminLedger(){
   const sum = data.summary || {};
   const cats = data.categories || {};
   const money = (v) => Number(v || 0).toFixed(2);
-  const opening = Number(data.opening || 0);
-  const netOut = Number(sum.out || 0) - Number(sum.reverse || 0);
-  const closing = Number(data.closing || 0);
+  const income = Number(sum.in || 0);
+  const expense = Number(sum.out || 0) - Number(sum.reverse || 0);
+  const net = income - expense;
   const catOptions = Object.entries(cats).map(([k, v]) => `<option value="${esc(k)}"${ledgerFilter.category === k ? ' selected' : ''}>${esc(v)}</option>`).join('');
+  const dirMeta = (d) => d === 'in' ? { cls: 'in', text: '收入' }
+                       : d === 'out' ? { cls: 'out', text: '支出' }
+                       : d === 'reverse' ? { cls: 'reverse', text: '冲正' }
+                       : { cls: 'none', text: '事件' };
   const rowHtml = rows.map(r => {
-    const isReverse = r.direction === 'reverse';
-    const isNone = r.direction === 'none';
-    const summaryText = [r.username, r.order_no, r.note].filter(Boolean).join(' · ') || '-';
-    return `<tr${isNone ? ' class="is-event"' : ''}>
+    const meta = dirMeta(r.direction);
+    const signed = r.direction === 'in' ? '+' : (r.direction === 'out' ? '-' : (r.direction === 'reverse' ? '-' : ''));
+    const cls = r.direction === 'in' ? 'ledger-in' : (r.direction === 'out' ? 'ledger-out' : (r.direction === 'reverse' ? 'ledger-reverse' : 'ledger-muted'));
+    return `<tr${r.direction === 'none' ? ' class="is-event"' : ''}>
       <td class="muted small">${fmtTs(r.ts)}</td>
-      <td><b>${esc(r.category_text || r.category)}</b>${isNone ? ' <span class="ledger-tag">不计收支</span>' : (isReverse ? ' <span class="ledger-tag reverse">冲正</span>' : '')}</td>
-      <td class="muted small">${esc(summaryText)}</td>
-      <td class="num ledger-in">${r.direction === 'in' ? money(r.amount) : ''}</td>
-      <td class="num ${isReverse ? 'ledger-reverse' : 'ledger-out'}">${r.direction === 'out' ? money(r.amount) : (isReverse ? '-' + money(r.amount) : '')}</td>
-      <td class="num"><b>${money(r.balance)}</b></td>
+      <td><span class="ledger-dir ${meta.cls}">${meta.text}</span></td>
+      <td>${esc(r.category_text || r.category)}</td>
+      <td><b class="${cls}">${signed}¥${money(r.amount)}</b></td>
+      <td>${esc(r.username || '-')}</td>
+      <td class="muted small">${esc(r.order_no || '-')}</td>
+      <td class="muted small">${esc(r.note || '-')}</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="6" class="muted">该条件下暂无流水</td></tr>';
+  }).join('') || '<tr><td colspan="7" class="muted">该条件下暂无流水</td></tr>';
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">LEDGER</span><h1>收支表</h1><p>平台资金流水，按时间顺序记录每笔收入与支出</p></div><button type="button" class="secondary" onclick="loadAdminLedger()">刷新</button></div>
+    <div class="ov-page-head"><div><span class="section-kicker">LEDGER</span><h1>收支表</h1><p>平台全部收支流水，金额统一以 ¥ 计</p></div><button type="button" class="secondary" onclick="loadAdminLedger()">刷新</button></div>
     <div class="ledger-cards">
-      <div class="ledger-card"><span>期初余额</span><b>¥${money(opening)}</b><small>筛选起始前累计</small></div>
-      <div class="ledger-card"><span>本期收入</span><b class="ledger-in">+¥${money(sum.in)}</b><small>充值 / 套餐 / 保证金</small></div>
-      <div class="ledger-card"><span>本期支出</span><b class="ledger-out">-¥${money(netOut)}</b><small>已扣除冲正 ¥${money(sum.reverse)}</small></div>
-      <div class="ledger-card"><span>期末余额</span><b>¥${money(closing)}</b><small>当前筛选范围</small></div>
+      <div class="ledger-card"><span>总收入</span><b class="ledger-in">+¥${money(income)}</b><small>充值 / 套餐 / 保证金</small></div>
+      <div class="ledger-card"><span>总支出</span><b class="ledger-out">-¥${money(expense)}</b><small>退款 / 结算 / 提现（已扣冲正）</small></div>
+      <div class="ledger-card"><span>净额</span><b class="${net >= 0 ? 'ledger-in' : 'ledger-out'}">${net >= 0 ? '+' : '-'}¥${money(Math.abs(net))}</b><small>当前筛选范围</small></div>
     </div>
     <section class="card">
       <div class="ledger-toolbar">
@@ -2350,8 +2354,8 @@ async function loadAdminLedger(){
         </select>
         <span class="muted small">共 ${rows.length} 条</span>
       </div>
-      <div class="table-wrap"><table class="ledger-table">
-        <thead><tr><th>交易时间</th><th>类型</th><th>摘要</th><th class="num">收入(¥)</th><th class="num">支出(¥)</th><th class="num">余额(¥)</th></tr></thead>
+      <div class="table-wrap"><table>
+        <thead><tr><th>时间</th><th>方向</th><th>类型</th><th>金额</th><th>用户</th><th>订单号</th><th>备注</th></tr></thead>
         <tbody>${rowHtml}</tbody>
       </table></div>
     </section>

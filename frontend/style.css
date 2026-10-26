@@ -2553,3 +2553,6 @@ html[data-theme="dark"] .ledger-table tbody tr:hover>td{background:rgba(90,140,2
 .ledger-tag.reverse{background:#fff4e5;color:#b45309}
 .ledger-reverse{color:#b45309}
 .ledger-table tr.is-event>td{opacity:.72}
+.ledger-dir.reverse{background:#fff4e5;color:#b45309}
+.ledger-dir.none{background:#eef2f7;color:#64748b}
+.ledger-muted{color:var(--muted)}
