@@ -1740,7 +1740,7 @@ function wecomBindCardHtml(wc){
       <div class="host-bind-icon">👥</div>
       <div class="host-bind-copy">
         <b>托管需先加入企业微信群</b>
-        <span>加入后在群里发送绑定码完成验证，再回来提交母鸡。绑定码 1 小时内有效，可随时刷新。</span>
+        <span>私聊机器人发送绑定码，机器人会拉你进群并完成绑定，再回来提交母鸡。绑定码 1 小时内有效。</span>
         <code class="host-bind-code">${esc(wc.code || '点击下方按钮获取')}</code>
       </div>
       <div class="host-bind-actions">
@@ -1755,6 +1755,36 @@ async function refreshWecomBind(){
     const el = document.querySelector('.host-bind-card');
     if(el) el.outerHTML = wecomBindCardHtml(wc);
   }catch(err){ show(err.message, true); }
+}
+
+function wecomJoinInnerHtml(wc){
+  wc = wc || {};
+  if(wc.bound){
+    return `<div class="section-kicker">WECOM GROUP</div><h3>${stIcon('chat')}企业微信群</h3>
+      <p class="muted small" style="margin:6px 0 0">已加入并完成绑定，群通知会 @你。</p>`;
+  }
+  return `<div class="section-kicker">WECOM GROUP</div><h3>${stIcon('chat')}加入企业微信群</h3>
+    <ol class="muted small" style="margin:8px 0 12px 18px;line-height:1.9">
+      <li>在企业微信里打开智能机器人</li>
+      <li>私聊发送绑定码：<code class="token">${esc(wc.code || '-')}</code></li>
+      <li>机器人会拉你进群，并自动完成账号绑定</li>
+    </ol>
+    <button type="button" class="secondary" onclick="refreshWecomJoin()">刷新绑定码</button>`;
+}
+
+async function loadWecomJoinCard(){
+  const el = document.querySelector('#wecomJoinCard');
+  if(!el) return;
+  try{
+    el.innerHTML = wecomJoinInnerHtml(await api('/api/user/wecom/bindcode'));
+  }catch(e){ el.innerHTML = ''; }
+}
+
+async function refreshWecomJoin(){
+  const el = document.querySelector('#wecomJoinCard');
+  if(!el) return;
+  el.innerHTML = '<p class="muted small">正在刷新…</p>';
+  await loadWecomJoinCard();
 }
 
 async function loadHosts(){
@@ -3977,11 +4007,13 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         </form>
         </section>
         ${userNotifyCardHtml()}
+        ${data.user.role === 'admin' ? '' : '<section class="side-info-card" id="wecomJoinCard"></section>'}
       </div>`, 'dashboard-profile', '个人中心');
     initUserEmailForm();
     initPayoutAccountForm();
     initUserNotifyForm();
     initPasswordForm();
+    loadWecomJoinCard();
     return;
   }
   const sideNav = `<aside class="app-sidebar">
@@ -4012,7 +4044,9 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
       <section class="side-info-card"><div class="section-kicker">ACCOUNT</div><h3>${stIcon('user')}账号信息</h3><div class="info-line"><span>当前账号</span><strong>${esc(data.user.username)}</strong></div><div class="info-line"><span>所在实例</span><strong>${esc(data.node?.region || '-')} / ${esc(data.node?.name || '-')}</strong></div><div class="info-line"><span>端口上限</span><strong>${esc(data.user.max_ports)}</strong></div></section>
       <section class="side-info-card dark-side"><div class="section-kicker">ACCESS POINT</div><h3>${stIcon('node')}FRPS 接入点</h3><div class="endpoint-big">${esc(data.frps.addr)}</div><code>${esc(data.frps.port)}</code><div class="side-actions"><a class="btn" href="/config/frpc.toml">下载配置</a><a class="btn secondary" href="/config/deploy-frpc.sh">部署脚本</a></div></section>
       ${userDeployScriptAddressHtml(data.user, {title:'部署地址', desc:'复制给需要安装客户端的服务器。'})}
+      ${isAdmin ? '' : '<section class="side-info-card" id="wecomJoinCard"></section>'}
     </aside></div>`, 'dashboard', '概览');
+  loadWecomJoinCard();
   const proxyTypeSelect = document.querySelector('#proxyTypeSelect');
   if(tunnelFormDraft.proxy_type) proxyTypeSelect.value = tunnelFormDraft.proxy_type;
   const tunnelForm = document.querySelector('#tunnelForm');
