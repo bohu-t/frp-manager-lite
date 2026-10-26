@@ -1280,7 +1280,7 @@ async function loadPlans(){
     const [plansRes, ordersRes, pointsRes] = await Promise.all([
       api('/api/plans'),
       api('/api/user/orders').catch(() => ({orders:[]})),
-      api('/api/user/points').catch(() => ({balance:0, payment:{}}))
+      api('/api/user/balance').catch(() => ({balance:0, payment:{}}))
     ]);
     data = {plans: plansRes.plans || [], payment: plansRes.payment || {}, orders: ordersRes.orders || [], balance: pointsRes.balance || 0, activeModes: ordersRes.active_modes || []};
   }catch(err){
@@ -1290,10 +1290,10 @@ async function loadPlans(){
   }
   window.__fmlPlans = data.plans || [];
   const cards = (data.plans || []).map(p => {
-    const enough = Number(data.balance) >= Number(p.price_points);
+    const enough = Number(data.balance) >= Number(p.price);
     return `
     <article class="plan-card">
-      <div class="plan-card-head"><h3>${esc(p.name)}</h3><span class="plan-price">${p.price_points} <small>积分</small></span></div>
+      <div class="plan-card-head"><h3>${esc(p.name)}</h3><span class="plan-price">¥${fmtPts(p.price)} <small>元</small></span></div>
       <ul class="plan-meta">
         <li><span>端口数</span><b>${p.max_ports}</b></li>
         <li><span>计费方式</span><b>${p.billing_mode === 'traffic' ? '流量' : '时间'}</b></li>
@@ -1303,7 +1303,7 @@ async function loadPlans(){
       </ul>
       ${p.note ? `<p class="plan-note">${esc(p.note)}</p>` : ''}
       ${p.fair_use_note ? `<p class="plan-note plan-fair">${esc(p.fair_use_note)}</p>` : ''}
-      <button type="button" class="plan-buy" onclick="buyPlan(${p.id})" ${enough ? '' : 'disabled'}>${enough ? '积分购买' : '积分不足'}</button>
+      <button type="button" class="plan-buy" onclick="buyPlan(${p.id})" ${enough ? '' : 'disabled'}>${enough ? '余额购买' : '余额不足'}</button>
     </article>`;
   }).join('') || '<p class="muted">管理员还没有上架套餐。</p>';
   const statusText = {pending:'待支付', paid:'已完成', cancelled:'已取消', expired:'已过期', refunded:'已退款'};
@@ -1311,15 +1311,15 @@ async function loadPlans(){
       <td>${i + 1}</td>
       <td>${esc(o.order_no)}</td>
       <td>${esc(o.plan_name)}</td>
-      <td>${o.kind === 'points' ? '+' + fmtPts(o.points) + ' 积分' : '-' + fmtPts(o.points) + ' 积分'}</td>
+      <td>${(o.kind === 'recharge' ? '+' : '-') + '¥' + fmtPts(o.amount)}</td>
       <td><span class="status-badge ${o.status === 'paid' ? 'ok' : (o.status === 'pending' ? '' : 'bad')}"><i></i>${statusText[o.status] || esc(o.status)}</span></td>
       <td>${fmtTs(o.created_at)}</td>
       <td class="actions node-actions">${o.status === 'pending' ? `<button type="button" class="node-action" onclick="resumePay('${esc(o.order_no)}')">继续支付</button>` : '<span class="muted small">—</span>'}</td>
     </tr>`).join('') || '<tr><td colspan="7" class="muted">暂无订单</td></tr>';
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">PLANS</span><h1>购买套餐</h1><p>使用积分购买套餐，购买后自动开通端口与有效期。</p></div><div class="ov-head-badge"><span>我的积分</span><b>${fmtPts(data.balance)}</b></div></div>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}可选套餐</h2><p>共 ${(data.plans || []).length} 个套餐</p></div><button type="button" class="secondary" onclick="loadPoints()">充值积分</button></div><div class="plan-grid">${cards}</div></section>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}我的订单</h2><p>最近 50 条</p></div></div><table><thead><tr><th>序号</th><th>订单号</th><th>套餐</th><th>积分</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></section>
+    <div class="ov-page-head"><div><span class="section-kicker">PLANS</span><h1>购买套餐</h1><p>使用余额购买套餐，购买后自动开通端口与有效期。</p></div><div class="ov-head-badge"><span>我的余额</span><b>¥${fmtPts(data.balance)}</b></div></div>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}可选套餐</h2><p>共 ${(data.plans || []).length} 个套餐</p></div><button type="button" class="secondary" onclick="loadPoints()">充值余额</button></div><div class="plan-grid">${cards}</div></section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('chart')}我的订单</h2><p>最近 50 条</p></div></div><table><thead><tr><th>序号</th><th>订单号</th><th>套餐</th><th>金额</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${orderRows}</tbody></table></section>
   `, 'dashboard-plans', '购买套餐');
 }
 
@@ -1336,7 +1336,7 @@ async function buyPlan(planId){
     </label>`).join('');
   const html = `<div class="modal-backdrop" id="buyPlanModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeBuyPlan()">
     <section class="modal-page card">
-      <div class="section-title modal-title"><div><h2>选择接入实例</h2><p>套餐：${esc(plan.name || '')} · ${Number(plan.price_points || 0)} 积分</p></div><button type="button" class="secondary modal-close" onclick="closeBuyPlan()">关闭 ×</button></div>
+      <div class="section-title modal-title"><div><h2>选择接入实例</h2><p>套餐：${esc(plan.name || '')} · ¥${fmtPts(plan.price)}</p></div><button type="button" class="secondary modal-close" onclick="closeBuyPlan()">关闭 ×</button></div>
       <div class="node-pick-list">${options}</div>
       <p class="muted small">购买后 10 分钟内、且套餐端口未产生流量，可全额退订；超过 10 分钟按剩余比例退款并扣除手续费。</p>
       <p class="muted small">购买后仍可在「可用实例」页更换实例（套餐有效期内，且需先清空该账号的隧道）。</p>
@@ -1364,7 +1364,7 @@ async function confirmBuyPlan(planId){
 }
 
 async function cancelPlan(id, name, refund){
-  if(!await appConfirm(`确认退订「${name}」？\n预计退回 ${fmtPts(refund)} 积分。`, {title:'退订套餐', okText:'确认退订', danger:true})) return;
+  if(!await appConfirm(`确认退订「${name}」？\n预计退回 ¥${fmtPts(refund)} 到余额。`, {title:'退订套餐', okText:'确认退订', danger:true})) return;
   try{
     const r = await api('/api/user/plans/cancel', {method:'POST', body:{id}});
     await appAlert(r.message || '退订成功', {title:'退订成功'});
@@ -1382,7 +1382,7 @@ function showTunnelForm(){
 
 async function renewInstance(upid, planId, nodeId, price, name){
   if(!planId){ show('该套餐已下架，无法延期', true); return; }
-  if(!await appConfirm(`确认延期「${name}」？\n将扣除 ${price} 积分，时长或流量会叠加到当前实例。`, {title:'延期', okText:'确认延期'})) return;
+  if(!await appConfirm(`确认延期「${name}」？\n将扣除 ¥${fmtPts(price)}，时长或流量会叠加到当前实例。`, {title:'延期', okText:'确认延期'})) return;
   try{
     const r = await api('/api/user/orders', {method:'POST', body:{plan_id:Number(planId), node_id:Number(nodeId)}});
     show(r.message || '延期成功');
@@ -1491,7 +1491,7 @@ function renderHostWizard(){
     body = `<form id="hwPlanForm" class="grid">
       <div class="span-2"><p class="muted small">母鸡「${esc(host.node_name || '')}」已创建，先配置一个套餐，审核通过后自动上架。</p></div>
       <div><label>套餐名称</label><input name="name" required placeholder="例如 入门版"></div>
-      <div><label>价格（¥）</label><input name="price_points" type="number" min="0" value="10" required></div>
+      <div><label>价格（¥）</label><input name="price" type="number" min="0" value="10" required></div>
       <div><label>计费方式</label><select name="billing_mode"><option value="time">时间模式</option><option value="traffic">流量模式</option></select></div>
       <div><label>有效期（天）</label><input name="duration_days" type="number" min="1" max="30" value="30"></div>
       <div><label>流量额度 GB</label><input name="traffic_limit_gb" type="number" min="0" step="0.1" value="0"><span class="muted small">流量模式必填</span></div>
@@ -1744,16 +1744,16 @@ async function loadHosts(){
     </section>`;
   const plansSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('license')}我的套餐</h2><p>${pNodes.length ? '上架后买家可在该节点购买' : '先有节点，才能上架套餐'}</p></div><button type="button" onclick="providerPlanForm()" ${pNodes.length ? '' : 'disabled'}>＋ 上架套餐</button></div>
       <div class="table-wrap"><table><thead><tr><th>序号</th><th>名称</th><th>节点</th><th>计费</th><th>价格</th><th>端口</th><th>时长/流量</th><th>状态</th><th>操作</th></tr></thead><tbody>
-      ${pPlans.length ? pPlans.map((pl, i) => `<tr><td>${i + 1}</td><td><b>${esc(pl.name)}</b></td><td>${esc((pNodes.find(n => Number(n.id) === Number(pl.node_id)) || {}).name || ('#' + pl.node_id))}</td><td>${pl.billing_mode === 'traffic' ? '流量' : '时间'}</td><td>${pl.price_points} 积分</td><td>${pl.max_ports}</td><td>${pl.billing_mode === 'traffic' ? pl.traffic_limit_gb + ' GB' : pl.duration_days + ' 天'}</td><td><span class="status-badge ${pl.active ? 'ok' : 'bad'}"><i></i>${pl.active ? '在售' : '下架'}</span></td><td class="actions node-actions"><button type="button" class="node-action" onclick='providerPlanForm(${pl.id})'>编辑</button><button type="button" class="node-action node-action-danger" onclick="providerPlanDelete(${pl.id})">下架</button></td></tr>`).join('') : '<tr><td colspan="9" class="muted">还没有上架套餐</td></tr>'}
+      ${pPlans.length ? pPlans.map((pl, i) => `<tr><td>${i + 1}</td><td><b>${esc(pl.name)}</b></td><td>${esc((pNodes.find(n => Number(n.id) === Number(pl.node_id)) || {}).name || ('#' + pl.node_id))}</td><td>${pl.billing_mode === 'traffic' ? '流量' : '时间'}</td><td>¥${fmtPts(pl.price)}</td><td>${pl.max_ports}</td><td>${pl.billing_mode === 'traffic' ? pl.traffic_limit_gb + ' GB' : pl.duration_days + ' 天'}</td><td><span class="status-badge ${pl.active ? 'ok' : 'bad'}"><i></i>${pl.active ? '在售' : '下架'}</span></td><td class="actions node-actions"><button type="button" class="node-action" onclick='providerPlanForm(${pl.id})'>编辑</button><button type="button" class="node-action node-action-danger" onclick="providerPlanDelete(${pl.id})">下架</button></td></tr>`).join('') : '<tr><td colspan="9" class="muted">还没有上架套餐</td></tr>'}
       </tbody></table></div>
     </section>`;
-  const earnSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('bolt')}收益</h2><p>按服务进度结算：${100 - pct}% 到账，${pct}% 留存为保证金</p></div><span class="section-count">已结算 ${pTotal} 积分 · 保证金 ${pGuarantee}</span></div>
+  const earnSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('bolt')}收益</h2><p>按服务进度结算：${100 - pct}% 到账，${pct}% 留存为保证金</p></div><span class="section-count">已结算 ¥${fmtPts(pTotal)} · 保证金 ¥${fmtPts(pGuarantee)}</span></div>
       <div class="row" style="gap:10px;align-items:center;margin:6px 0 12px">
-        <span class="muted small">可提现收益</span><b style="font-size:18px">${fmtPts(pIncome)} 积分</b>
+        <span class="muted small">可提现收益</span><b style="font-size:18px">¥${fmtPts(pIncome)}</b>
         <button type="button" onclick="loadPayoutTickets()" ${pIncome > 0 ? '' : 'disabled'}>提现</button>
       </div>
       <div class="table-wrap"><table><thead><tr><th>实例</th><th>节点</th><th>套餐价</th><th>已结算</th><th>保证金</th><th>进度</th><th>状态</th></tr></thead><tbody>
-      ${pEarn.length ? pEarn.map(e => `<tr><td><b>${esc(e.plan_name || '-')}</b></td><td>${esc(e.node_name || ('#' + e.node_id))}</td><td>${e.price_points}</td><td><b>${e.paid_points}</b></td><td>${e.guarantee_points}</td><td>${Math.round(Number(e.progress || 0) * 100)}%</td><td>${e.status === 'active' ? '服务中' : (e.status === 'expired' ? '已到期' : (e.status === 'exhausted' ? '流量用尽' : '已退订'))}</td></tr>`).join('') : '<tr><td colspan="7" class="muted">暂无收益记录</td></tr>'}
+      ${pEarn.length ? pEarn.map(e => `<tr><td><b>${esc(e.plan_name || '-')}</b></td><td>${esc(e.node_name || ('#' + e.node_id))}</td><td>¥${fmtPts(e.price)}</td><td><b>¥${fmtPts(e.paid)}</b></td><td>¥${fmtPts(e.guarantee)}</td><td>${Math.round(Number(e.progress || 0) * 100)}%</td><td>${e.status === 'active' ? '服务中' : (e.status === 'expired' ? '已到期' : (e.status === 'exhausted' ? '流量用尽' : '已退订'))}</td></tr>`).join('') : '<tr><td colspan="7" class="muted">暂无收益记录</td></tr>'}
       </tbody></table></div>
       <p class="muted small" style="margin-top:10px">保证金在服务正常到期后转为平台服务费；提前清退或节点故障时，一半补偿买家，一半归平台。</p>
     </section>`;
@@ -1967,25 +1967,25 @@ async function loadPayoutTickets(){
     income = Number(a.income || 0); payouts = a.payouts || []; acc = b.account || acc;
   }catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
   const hasAcc = !!(acc.account && acc.holder);
-  const rows = payouts.map((p, i) => `<tr class="${p.ticket_id ? 'clickable-row' : ''}"${p.ticket_id ? ` onclick="loadTicketDetail(${p.ticket_id})"` : ''}><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td><b>${fmtPts(p.points)}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${payoutBadge(p.status)}</td><td>${fmtTs(p.created_at)}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">暂无提现记录</td></tr>';
+  const rows = payouts.map((p, i) => `<tr class="${p.ticket_id ? 'clickable-row' : ''}"${p.ticket_id ? ` onclick="loadTicketDetail(${p.ticket_id})"` : ''}><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td><b>¥${fmtPts(p.amount)}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${payoutBadge(p.status)}</td><td>${fmtTs(p.created_at)}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">暂无提现记录</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">PAYOUTS</span><h1>提现工单</h1><p>把托管收益转入余额，或提现到已配置的收款账户。</p></div></div>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('key')}申请提现</h2><p>可提现收益 <b>${income}</b> 积分${hasAcc ? '' : ' · 尚未配置收款信息'}</p></div><span class="section-count">${hasAcc ? esc(acc.method + ' ' + acc.account) : '未配置'}</span></div>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('key')}申请提现</h2><p>可提现收益 <b>¥${fmtPts(income)}</b>${hasAcc ? '' : ' · 尚未配置收款信息'}</p></div><span class="section-count">${hasAcc ? esc(acc.method + ' ' + acc.account) : '未配置'}</span></div>
       <form id="withdrawForm" class="grid">
         <div><label>提现方式</label><select name="mode"><option value="balance">转入余额</option><option value="external"${hasAcc ? '' : ' disabled'}>提现到收款账户</option></select></div>
-        <div><label>积分数量</label><input name="points" type="number" min="1" max="${income}" value="${income > 0 ? income : ''}" ${income > 0 ? '' : 'disabled'}></div>
+        <div><label>提现金额（元）</label><input name="amount" type="number" min="0.01" step="0.01" max="${income}" value="${income > 0 ? fmtPts(income) : ''}" ${income > 0 ? '' : 'disabled'}></div>
         <div class="span-2 muted small">${hasAcc ? '收款信息可在「个人中心」修改。' : '提现到收款账户前，请先在「个人中心」配置收款信息。'}</div>
         <div class="form-actions span-2"><button type="submit" ${income > 0 ? '' : 'disabled'}>提交提现工单</button></div>
       </form>
     </section>
-    <section class="card"><div class="section-title"><div><h2>提现记录</h2><p>共 ${payouts.length} 条</p></div></div><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>积分</th><th>方式</th><th>账号</th><th>状态</th><th>时间</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+    <section class="card"><div class="section-title"><div><h2>提现记录</h2><p>共 ${payouts.length} 条</p></div></div><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>金额</th><th>方式</th><th>账号</th><th>状态</th><th>时间</th></tr></thead><tbody>${rows}</tbody></table></div></section>
   `, 'dashboard-payouts', '提现工单');
   const form = document.querySelector('#withdrawForm');
   form.onsubmit = async (e) => {
     e.preventDefault();
     const fd = Object.fromEntries(new FormData(form));
     try{
-      const r = await api('/api/user/withdraw', {method:'POST', body:{mode:fd.mode, points:Number(fd.points)}});
+      const r = await api('/api/user/withdraw', {method:'POST', body:{mode:fd.mode, amount:Number(fd.amount)}});
       show(r.message || '已提交'); await loadPayoutTickets();
     }catch(err){ show(err.message || '提现失败', true); }
   };
@@ -2028,7 +2028,7 @@ async function loadTicketDetail(id, scope){
         <div class="section-title"><div><h2>${stIcon('key')}提现单 ${esc(payout.payout_no)}</h2><p>${payoutStatusMeta(payout.status).text}</p></div>
           ${payoutBadge(payout.status)}</div>
         <div class="payout-panel-grid">
-          <div><span>金额</span><b>¥${fmtPts(payout.points)}</b></div>
+          <div><span>金额</span><b>¥${fmtPts(payout.amount)}</b></div>
           <div><span>方式</span><b>${esc(payout.method)}</b></div>
           <div><span>账号</span><b>${esc(payout.account)}</b></div>
           <div><span>姓名</span><b>${esc(payout.holder)}</b></div>
@@ -2181,9 +2181,9 @@ async function loadAdminOps(){
     anns = a.announcements || []; keys = b.recharge_keys || [];
   }catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
   const annRows = anns.map((a, i) => `<tr><td>${i + 1}</td><td><b>${esc(a.title)}</b><br><span class="muted small">${esc(String(a.content || '').replace(/<[^>]+>/g, '').slice(0, 40))}</span></td><td><span class="status-badge ${a.active ? 'ok' : 'bad'}"><i></i>${a.active ? '展示中' : '已下架'}</span></td><td>${fmtTs(a.created_at)}</td><td class="actions node-actions">${a.active ? `<button class="node-action node-action-danger" onclick="deleteAnnouncement(${a.id})">下架</button>` : '—'}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">暂无公告</td></tr>';
-  const keyRows = keys.map((k, i) => `<tr><td>${i + 1}</td><td><code class="token">${esc(k.key)}</code></td><td>${k.points}</td><td><span class="status-badge ${k.used_by ? 'bad' : (k.active ? 'ok' : '')}"><i></i>${k.used_by ? '已使用' : (k.active ? '可用' : '停用')}</span></td><td>${fmtTs(k.created_at)}</td><td class="actions node-actions">${k.used_by ? '—' : `<button type="button" class="node-action" onclick="rechargeKeyToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button type="button" class="node-action node-action-danger" onclick="rechargeKeyDelete(${k.id})">删除</button>`}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">还没有充值密钥</td></tr>';
+  const keyRows = keys.map((k, i) => `<tr><td>${i + 1}</td><td><code class="token">${esc(k.key)}</code></td><td>¥${fmtPts(k.amount)}</td><td><span class="status-badge ${k.used_by ? 'bad' : (k.active ? 'ok' : '')}"><i></i>${k.used_by ? '已使用' : (k.active ? '可用' : '停用')}</span></td><td>${fmtTs(k.created_at)}</td><td class="actions node-actions">${k.used_by ? '—' : `<button type="button" class="node-action" onclick="rechargeKeyToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button type="button" class="node-action node-action-danger" onclick="rechargeKeyDelete(${k.id})">删除</button>`}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">还没有充值密钥</td></tr>';
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">MAINTENANCE</span><h1>平台维护</h1><p>运维工具、系统公告与积分充值密钥</p></div></div>
+    <div class="ov-page-head"><div><span class="section-kicker">MAINTENANCE</span><h1>平台维护</h1><p>运维工具、系统公告与充值密钥</p></div></div>
 
     
 
@@ -2200,17 +2200,17 @@ async function loadAdminOps(){
       </section>
 
       <section class="card maint-panel">
-        <div class="section-title"><div><h2>${stIcon('key')}积分充值密钥</h2><p>生成后发给用户兑换积分</p></div><span class="section-count">可用 ${keys.filter(k => !k.used_by && k.active).length}</span></div>
+        <div class="section-title"><div><h2>${stIcon('key')}充值密钥</h2><p>生成后发给用户充值余额</p></div><span class="section-count">可用 ${keys.filter(k => !k.used_by && k.active).length}</span></div>
         <form id="rechargeKeyForm" class="maint-form">
           <div class="maint-form-row">
-            <label><span>每枚积分</span><input name="points" type="number" min="1" value="100"></label>
+            <label><span>每枚金额（元）</span><input name="amount" type="number" min="0.01" step="0.01" value="100"></label>
             <label><span>生成数量</span><input name="count" type="number" min="1" max="500" value="1"></label>
             <label><span>有效期（天）</span><input name="duration_days" type="number" min="0" max="3650" value="0"></label>
           </div>
           <input name="note" placeholder="备注（订单号 / 客户名）">
           <div class="maint-form-actions"><button type="submit">生成密钥</button></div>
         </form>
-        <div class="maint-table"><table><thead><tr><th>#</th><th>密钥</th><th>积分</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table></div>
+        <div class="maint-table"><table><thead><tr><th>#</th><th>密钥</th><th>金额</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${keyRows}</tbody></table></div>
       </section>
     </div>
   `, 'admin-ops', '平台维护');
@@ -2226,7 +2226,7 @@ async function loadAdminOps(){
   keyForm.onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(keyForm);
-    const body = {points: fd.get('points'), count: fd.get('count'), note: fd.get('note'), expires_days: fd.get('duration_days')};
+    const body = {amount: fd.get('amount'), count: fd.get('count'), note: fd.get('note'), expires_days: fd.get('duration_days')};
     try{
       const r = await api('/api/admin/recharge-keys/create', {method:'POST', body});
       const list = r.keys || [];
@@ -2246,30 +2246,30 @@ async function loadAdminRecharge(){
   const rows = keys.map((k, i) => `<tr>
       <td>${i + 1}</td>
       <td><code class="token">${esc(k.key)}</code></td>
-      <td>${k.points}</td>
+      <td>¥${fmtPts(k.amount)}</td>
       <td>${esc(k.note || '—')}</td>
       <td>${k.used_by ? '<span class="bad">已使用</span>' : (k.active ? '<span class="ok">可用</span>' : '<span class="bad">停用</span>')}</td>
       <td>${fmtTs(k.created_at)}</td>
       <td class="actions node-actions">${k.used_by ? '<span class="muted small">已使用</span>' : `<button type="button" class="node-action" onclick="rechargeKeyToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button type="button" class="node-action node-action-danger" onclick="rechargeKeyDelete(${k.id})">删除</button>`}</td>
     </tr>`).join('') || '<tr><td colspan="7" class="muted">还没有充值密钥</td></tr>';
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">RECHARGE KEYS</span><h1>积分充值密钥</h1><p>生成后发给用户，用户在「积分充值」页兑换；每枚只能使用一次</p></div><span class="section-count">可用 ${keys.filter(k => !k.used_by && k.active).length}</span></div>
+    <div class="ov-page-head"><div><span class="section-kicker">RECHARGE KEYS</span><h1>充值密钥</h1><p>生成后发给用户，用户在「账单与充值」页兑换；每枚只能使用一次</p></div><span class="section-count">可用 ${keys.filter(k => !k.used_by && k.active).length}</span></div>
     <section class="card"><div class="section-title"><div><h2>${stIcon('key')}生成密钥</h2></div></div>
       <form id="rechargeKeyForm" class="grid">
-        <div><label>每枚积分</label><input name="points" type="number" value="100" min="1" step="1"></div>
+        <div><label>每枚金额（元）</label><input name="amount" type="number" value="100" min="0.01" step="0.01"></div>
         <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
         <div><label>有效期（天）</label><input name="duration_days" type="number" value="0" min="0" max="3650"><span class="muted small">0 表示长期有效</span></div>
         <div><label>备注</label><input name="note" placeholder="订单号/客户名"></div>
         <div class="form-actions" style="grid-column:1/-1;justify-content:flex-end"><button>生成充值密钥</button></div>
       </form>
     </section>
-    <section class="card"><div class="section-title"><div><h2>密钥列表</h2><p>共 ${keys.length} 条</p></div></div><div class="table-wrap"><table><thead><tr><th>序号</th><th>密钥</th><th>积分</th><th>备注</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
-  `, 'admin-recharge', '积分充值密钥');
+    <section class="card"><div class="section-title"><div><h2>密钥列表</h2><p>共 ${keys.length} 条</p></div></div><div class="table-wrap"><table><thead><tr><th>序号</th><th>密钥</th><th>金额</th><th>备注</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+  `, 'admin-recharge', '充值密钥');
   const form = document.querySelector('#rechargeKeyForm');
   form.onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
-    const body = {points: fd.get('points'), count: fd.get('count'), note: fd.get('note'), expires_days: fd.get('duration_days')};
+    const body = {amount: fd.get('amount'), count: fd.get('count'), note: fd.get('note'), expires_days: fd.get('duration_days')};
     try{
       const r = await api('/api/admin/recharge-keys/create', {method:'POST', body});
       const list = r.keys || [];
@@ -2283,7 +2283,7 @@ async function loadAdminRecharge(){
 let ledgerFilter = { book: 'cash', category: '', range: '30', q: '', userId: 0 };
 let ledgerUsers = null;
 
-const LEDGER_BOOK_TABS = [['cash', '平台现金账'], ['points', '平台积分账'], ['user', '用户流水']];
+const LEDGER_BOOK_TABS = [['cash', '平台现金账'], ['balance', '用户资金账'], ['user', '用户流水']];
 
 function ledgerRangeTs(range){
   const now = Math.floor(Date.now() / 1000);
@@ -2336,8 +2336,8 @@ async function loadAdminLedger(){
   const sum = data.summary || {};
   const cats = data.categories || {};
   const money = (v) => Number(v || 0).toFixed(2);
-  const unitText = (u) => u === 'cash' ? '¥' : '积分';
-  const unit = book === 'cash' ? '¥' : '积分';
+  const unitText = () => '¥';
+  const unit = '¥';
   const raise = Number(sum.in || 0) + Number(sum.reverse || 0);
   const cut = Number(sum.out || 0);
   const cashNet = Number(sum.in || 0) - cut + Number(sum.reverse || 0);
@@ -2351,9 +2351,9 @@ async function loadAdminLedger(){
     ? `<div class="ledger-card"><span>现金收入</span><b class="ledger-in">+¥${money(sum.in)}</b><small>在线充值到账</small></div>
        <div class="ledger-card"><span>现金支出</span><b class="ledger-out">-¥${money(cut - Number(sum.reverse || 0))}</b><small>提现打款（已扣冲正）</small></div>
        <div class="ledger-card"><span>现金净额</span><b class="${cashNet >= 0 ? 'ledger-in' : 'ledger-out'}">${cashNet >= 0 ? '+' : '-'}¥${money(Math.abs(cashNet))}</b><small>当前筛选范围</small></div>`
-    : `<div class="ledger-card"><span>${book === 'user' ? '积分增加' : '负债增加'}</span><b class="ledger-in">+${money(raise)} 积分</b><small>充值到账 / 退款 / 冲正</small></div>
-       <div class="ledger-card"><span>${book === 'user' ? '积分减少' : '负债减少'}</span><b class="ledger-out">-${money(cut)} 积分</b><small>套餐消费 / 提现转出</small></div>
-       <div class="ledger-card"><span>净变动</span><b class="${(raise - cut) >= 0 ? 'ledger-in' : 'ledger-out'}">${(raise - cut) >= 0 ? '+' : '-'}${money(Math.abs(raise - cut))} 积分</b><small>${book === 'user' ? `当前积分 ${money(data.user ? data.user.points : 0)}` : '当前筛选范围'}</small></div>`;
+    : `<div class="ledger-card"><span>${book === 'user' ? '余额增加' : '资金增加'}</span><b class="ledger-in">+¥${money(raise)}</b><small>充值到账 / 退款 / 冲正</small></div>
+       <div class="ledger-card"><span>${book === 'user' ? '余额减少' : '资金减少'}</span><b class="ledger-out">-¥${money(cut)}</b><small>套餐消费 / 提现转出</small></div>
+       <div class="ledger-card"><span>净变动</span><b class="${(raise - cut) >= 0 ? 'ledger-in' : 'ledger-out'}">${(raise - cut) >= 0 ? '+' : '-'}¥${money(Math.abs(raise - cut))}</b><small>${book === 'user' ? `当前余额 ¥${money(data.user ? data.user.balance : 0)}` : '当前筛选范围'}</small></div>`;
   const rowHtml = rows.map(r => {
     const meta = dirMeta(r.direction);
     const signed = dirSign(r.direction);
@@ -2372,8 +2372,8 @@ async function loadAdminLedger(){
   const tabs = LEDGER_BOOK_TABS.map(([k, t]) => `<button type="button" class="ledger-tab${book === k ? ' active' : ''}" onclick="ledgerSetFilter('book','${k}')">${t}</button>`).join('');
   const subtitles = {
     cash: '真金白银的进出：在线充值入账、提现打款出账',
-    points: '平台欠用户的积分（负债）：充值到账增加，消费与提现减少，结算与保证金属内部划转',
-    user: '单个用户的积分与现金流水，从两本账按用户派生'
+    balance: '用户余额与收益池的增减：充值到账增加，消费与提现减少，结算与保证金属内部划转',
+    user: '单个用户的余额明细，从两本账按用户派生'
   };
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">LEDGER</span><h1>收支表</h1><p>${esc(subtitles[book] || '')}</p></div><button type="button" class="secondary" onclick="loadAdminLedger()">刷新</button></div>
@@ -2404,10 +2404,10 @@ async function loadAdminPayouts(){
   let payouts = [];
   try{ payouts = (await api('/api/admin/payouts')).payouts || []; }
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
-  const rows = payouts.map((p, i) => `<tr class="${p.ticket_id ? 'clickable-row' : ''}"${p.ticket_id ? ` onclick="loadTicketDetail(${p.ticket_id}, 'admin')"` : ''}><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td>${esc(p.username)}</td><td><b>${fmtPts(p.points)}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${esc(p.holder)}</td><td>${p.qr_token ? `<img class="qr-thumb" src="/api/upload/${encodeURIComponent(p.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(p.qr_token)}')">` : '-'}</td><td>${payoutBadge(p.status)}</td><td>${fmtTs(p.created_at)}</td></tr>`).join('') || '<tr><td colspan="10" class="muted">暂无提现申请</td></tr>';
+  const rows = payouts.map((p, i) => `<tr class="${p.ticket_id ? 'clickable-row' : ''}"${p.ticket_id ? ` onclick="loadTicketDetail(${p.ticket_id}, 'admin')"` : ''}><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td>${esc(p.username)}</td><td><b>¥${fmtPts(p.amount)}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${esc(p.holder)}</td><td>${p.qr_token ? `<img class="qr-thumb" src="/api/upload/${encodeURIComponent(p.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(p.qr_token)}')">` : '-'}</td><td>${payoutBadge(p.status)}</td><td>${fmtTs(p.created_at)}</td></tr>`).join('') || '<tr><td colspan="10" class="muted">暂无提现申请</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">PAYOUTS</span><h1>提现工单</h1><p>处理供给方的收款提现申请</p></div><button type="button" class="secondary" onclick="loadAdminPayouts()">刷新</button></div>
-    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>用户</th><th>积分</th><th>方式</th><th>账号</th><th>姓名</th><th>收款码</th><th>状态</th><th>时间</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>用户</th><th>金额</th><th>方式</th><th>账号</th><th>姓名</th><th>收款码</th><th>状态</th><th>时间</th></tr></thead><tbody>${rows}</tbody></table></div></section>
   `, 'admin-payouts', '提现');
 }
 
@@ -2420,14 +2420,14 @@ async function reviewPayout(id, action){
 async function providerWithdraw(mode){
   const income = Number(window.__providerIncome || 0);
   if(income <= 0){ show('暂无可提现收益', true); return; }
-  const label = mode === 'balance' ? '转入余额的积分数量' : '提现积分数量';
+  const label = mode === 'balance' ? '转入余额的金额（元）' : '提现金额（元）';
   const val = await appPrompt(label, String(income), {title: mode === 'balance' ? '收益转入余额' : '提现申请'});
   if(val === null) return;
   const points = Number(val);
-  if(!Number.isFinite(points) || points <= 0){ show('请输入正确的积分数量', true); return; }
-  if(points > income){ show(`最多可提现 ${income} 积分`, true); return; }
+  if(!Number.isFinite(points) || points <= 0){ show('请输入正确的金额', true); return; }
+  if(points > income){ show(`最多可提现 ¥${fmtPts(income)}`, true); return; }
   try{
-    const r = await api('/api/user/withdraw', {method:'POST', body:{mode, points}});
+    const r = await api('/api/user/withdraw', {method:'POST', body:{mode, amount:points}});
     show(r.message || '已提交');
     await loadHosts();
   }catch(err){ show(err.message || '提现失败', true); }
@@ -2437,7 +2437,7 @@ async function providerPlanForm(id){
   let nodes = [];
   try{ nodes = (await api('/api/user/provider/nodes')).nodes || []; }catch(e){ show(e.message, true); return; }
   if(!nodes.length){ show('还没有已接入的节点', true); return; }
-  let plan = { id: 0, name: '', node_id: nodes[0].id, price_points: 10, max_ports: 1, billing_mode: 'time', duration_days: 30, traffic_limit_gb: 0, bandwidth_limit_mbps: 0, active: 1 };
+  let plan = { id: 0, name: '', node_id: nodes[0].id, price: 10, max_ports: 1, billing_mode: 'time', duration_days: 30, traffic_limit_gb: 0, bandwidth_limit_mbps: 0, active: 1 };
   if(id){
     const all = (await api('/api/user/provider/plans')).plans || [];
     plan = all.find(p => Number(p.id) === Number(id)) || plan;
@@ -2449,7 +2449,7 @@ async function providerPlanForm(id){
       <form id="providerPlanForm" class="grid">
         <div><label>节点</label><select name="node_id">${nodeOpts}</select></div>
         <div><label>名称</label><input name="name" value="${esc(plan.name || '')}" maxlength="40" required></div>
-        <div><label>价格（积分）</label><input name="price_points" type="number" min="0" value="${Number(plan.price_points || 0)}" required></div>
+        <div><label>价格（元）</label><input name="price" type="number" min="0" value="${Number(plan.price || 0)}" required></div>
         <div><label>端口数</label><input name="max_ports" type="number" min="1" max="100" value="${Number(plan.max_ports || 1)}" required></div>
         <div><label>计费方式</label><select name="billing_mode" id="ppMode"><option value="time"${plan.billing_mode !== 'traffic' ? ' selected' : ''}>时间</option><option value="traffic"${plan.billing_mode === 'traffic' ? ' selected' : ''}>流量</option></select></div>
         <div id="ppDays"><label>时长（天，≤30）</label><input name="duration_days" type="number" min="1" max="30" value="${Number(plan.duration_days || 30)}"></div>
@@ -2596,13 +2596,13 @@ function renderNewNode(){
   const nodeMatch = (n) => !nnKw || [n.name, n.note, n.region].some(x => String(x || '').toLowerCase().includes(nnKw));
   const nodePrice = (n) => {
     const list = plans.filter(p => Number(p.node_id || 0) === 0 || Number(p.node_id) === Number(n.id));
-    return list.length ? Math.min(...list.map(p => Number(p.price_points || 0))) : null;
+    return list.length ? Math.min(...list.map(p => Number(p.price || 0))) : null;
   };
   const regionPrice = (name) => {
     const ids = regions[name].map(n => Number(n.id));
     const list = plans.filter(p => Number(p.node_id || 0) === 0 || ids.includes(Number(p.node_id)));
     if(!list.length) return null;
-    return Math.min(...list.map(p => Number(p.price_points || 0)));
+    return Math.min(...list.map(p => Number(p.price || 0)));
   };
   const CN_REGION = /中国|河南|河北|山东|山西|陕西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|湖北|湖南|广东|广西|海南|四川|贵州|云南|甘肃|青海|宁夏|新疆|西藏|内蒙古|北京|上海|天津|重庆|香港|澳门|台湾/;
   const regionFlag = (name) => {
@@ -2692,7 +2692,7 @@ function renderNewNode(){
   }).join('') || emptyHint('该地区暂无可用实例')}</div>`;
 
   const nodePlans = (nnState.nodeId ? nnPlansFor(nnState.nodeId) : []).filter(p => {
-    const price = Number(p.price_points || 0);
+    const price = Number(p.price || 0);
     if(nnMin && price < nnMin) return false;
     if(nnMax && price > nnMax) return false;
     return true;
@@ -2719,7 +2719,7 @@ function renderNewNode(){
       <span class="nn-plan-title">${main}</span>
       <span class="nn-plan-sub">${sub}</span>
       <span class="nn-plan-stock ${soldOut ? 'out' : ''}">${esc(p.stock_text || '')}</span>
-      <span class="nn-plan-price"><b>¥${Number(p.price_points)}</b></span>
+      <span class="nn-plan-price"><b>¥${Number(p.price)}</b></span>
       <span class="nn-plan-foot">${hasQuota && !isTraffic ? '含流量额度' : (isTraffic ? '用完即止' : '不限流量')}</span>
     </button>`;
   }).join('') || emptyHint('该实例暂无可购买套餐');
@@ -2753,7 +2753,7 @@ function renderNewNode(){
         <div><span>节点</span><b>${chosenNode ? esc(chosenNode.name) : '未选择'}</b></div>
         <div><span>套餐</span><b>${chosenPlan ? esc(chosenPlan.name) : '未选择'}</b></div>
         <div><span>隧道</span><b>${tunnelSummary || '暂未配置'}</b></div>
-        <div><span>应付</span><b class="nn-pay-amount">¥${chosenPlan ? Number(chosenPlan.price_points) : 0}</b></div>
+        <div><span>应付</span><b class="nn-pay-amount">¥${chosenPlan ? Number(chosenPlan.price) : 0}</b></div>
       </div>
       <button type="button" class="nn-pay${ready ? ' ready' : ''}" ${ready ? '' : 'disabled'} onclick="nnPay()">${ready ? '立即支付并开通' : '请完成上方步骤'}</button>
     </div>`;
@@ -2789,7 +2789,7 @@ function renderNewNode(){
           <span><i>📊</i>流量<b>${sumGb ? sumGb + ' GB' : '不限'}</b></span>
           <span><i>🧩</i>隧道<b>${sumTunnels} 条</b></span>
         </div>
-        <div class="nn-sum-price"><small>应付金额</small><b>¥${chosenPlan ? Number(chosenPlan.price_points) : 0}</b></div>
+        <div class="nn-sum-price"><small>应付金额</small><b>¥${chosenPlan ? Number(chosenPlan.price) : 0}</b></div>
         <button type="button" class="nn-sum-pay${ready ? ' ready' : ''}" ${ready ? '' : 'disabled'} onclick="nnPay()">${ready ? '立即创建' : '请完成左侧步骤'}</button>
         <div class="nn-sum-note">
           <p class="nn-sum-note-title">💡 购买须知</p>
@@ -2912,7 +2912,7 @@ async function nnPay(){
         <div><span>实例</span><b>${esc(node.name || '')}</b></div>
         <div><span>套餐</span><b>${esc(plan.name || '')}</b></div>
         <div><span>隧道</span><b>${(nnState.tunnels || []).filter(t => t.name).map(t => esc(t.name) + ' ' + t.proxy_type.toUpperCase() + ' ' + esc(t.local_ip || '127.0.0.1') + ':' + Number(t.local_port || 0) + ' → ' + (t.remote_port || '-')).join('、') || '暂未配置'}</b></div>
-        <div><span>应付</span><b class="nn-pay-amount">¥${Number(plan.price_points || 0)}</b></div>
+        <div><span>应付</span><b class="nn-pay-amount">¥${Number(plan.price || 0)}</b></div>
       </div>
       <p class="muted small" id="nnPayHint">10 分钟内且端口未产生流量，可全额退订。</p>
       <div class="form-actions app-dialog-actions">
@@ -2996,7 +2996,7 @@ async function loadMyPlans(){
         <div><span>frps 版本</span><b>${esc(n.frps_version || '-')}</b></div>
       </div>
       <div class="my-node-foot">
-        <div class="my-node-foot-row"><span>续费价格</span><b class="my-node-price-val">${(() => { const v = (planById[Number(p.plan_id)] || {}).price_points ?? p.renew_price_points; return v === null || v === undefined ? '已下架' : Number(v) + ' 积分'; })()}</b></div>
+        <div class="my-node-foot-row"><span>续费价格</span><b class="my-node-price-val">${(() => { const v = (planById[Number(p.plan_id)] || {}).price ?? p.renew_price; return v === null || v === undefined ? '已下架' : '¥' + fmtPts(v); })()}</b></div>
         <div class="my-node-foot-row"><span>自动延期</span><span class="my-node-auto">${p.auto_renew ? '已开启' : '未开启'}</span></div>
         <div class="my-node-foot-row"><span>到期时间</span><b>${esc(p.billing_mode === 'traffic' ? '按流量计费' : (p.expires_at ? p.expires_text : '不限期'))}</b></div>
       </div>
@@ -3094,23 +3094,22 @@ function initPayoutAccountForm(){
 }
 
 function initProfilePoints(){
-  const rate = Number(window.__pointsRate || 1);
   const rf = document.querySelector('#profileRechargeForm');
   if(rf){
-    const inp = rf.querySelector('input[name="points"]');
+    const inp = rf.querySelector('input[name="amount"]');
     const hint = document.querySelector('#profileAmountHint');
     const refresh = () => {
-      const pts = Number(inp && inp.value || 0);
-      if(hint) hint.textContent = pts > 0 ? `应付 ¥${(pts / rate).toFixed(2)}` : '请输入充值积分';
+      const amt = Number(inp && inp.value || 0);
+      if(hint) hint.textContent = amt > 0 ? `应付 ¥${amt.toFixed(2)}` : '请输入充值金额';
     };
     if(inp) inp.addEventListener('input', refresh);
     refresh();
     rf.onsubmit = async (e) => {
       e.preventDefault();
-      const pts = Number(new FormData(e.target).get('points') || 0);
-      if(!pts || pts < 1){ await appAlert('请输入有效的充值积分', {title:'提示'}); return; }
+      const amt = Number(new FormData(e.target).get('amount') || 0);
+      if(!amt || amt < 0.01){ await appAlert('请输入有效的充值金额', {title:'提示'}); return; }
       try{
-        const r = await api('/api/user/points/orders', {method:'POST', body:{points:pts}});
+        const r = await api('/api/user/recharge/orders', {method:'POST', body:{amount:amt}});
         const order = r.order || {};
         if(!order.pay_url){ await appAlert('下单失败：没有支付链接', {title:'提示'}); return; }
         window.location.href = order.pay_url;
@@ -3124,7 +3123,7 @@ function initProfilePoints(){
       const key = String(new FormData(e.target).get('key') || '').trim();
       if(!key){ await appAlert('请输入充值密钥', {title:'提示'}); return; }
       try{
-        const r = await api('/api/user/points/redeem', {method:'POST', body:{key}});
+        const r = await api('/api/user/redeem', {method:'POST', body:{key}});
         await appAlert(r.message || '充值成功', {title:'充值成功'});
         await loadDashboard('profile');
       }catch(err){ await appAlert(err.message, {title:'充值失败'}); }
@@ -3135,7 +3134,7 @@ function initProfilePoints(){
 async function loadPoints(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
   let data;
-  try{ data = await api('/api/user/points'); }
+  try{ data = await api('/api/user/balance'); }
   catch(err){
     if(err.message === 'unauthorized') return renderLogin();
     show(err.message, true);
@@ -3152,8 +3151,8 @@ async function loadPoints(){
       <td>${i + 1}</td>
       <td>${fmtTs(l.created_at)}</td>
       <td>${kindText[l.kind] || esc(l.kind)}</td>
-      <td>${l.delta > 0 ? '+' : ''}${l.delta}</td>
-      <td>${l.balance_after}</td>
+      <td>${l.delta > 0 ? '+' : '-'}¥${fmtPts(Math.abs(Number(l.delta || 0)))}</td>
+      <td>¥${fmtPts(l.balance_after)}</td>
       <td>${esc(l.note || l.ref || '-')}</td>
     </tr>`).join('') || '<tr><td colspan="6" class="muted">暂无交易记录</td></tr>';
   app.innerHTML = appLayoutHtml(`
@@ -3162,13 +3161,13 @@ async function loadPoints(){
       <div class="billing-left">
         <section class="card billing-balance">
           <div class="billing-balance-head"><span>当前余额</span><span class="status-badge ok"><i></i>可用</span></div>
-          <div class="billing-balance-value">${fmtPts(data.balance)} <small>积分</small></div>
-          <div class="billing-balance-meta"><span>充值比例 1 元 = ${rate} 积分</span><span>可用于购买套餐</span></div>
+          <div class="billing-balance-value">¥${fmtPts(data.balance)} <small>元</small></div>
+          <div class="billing-balance-meta"><span>余额仅用于购买套餐，不可提现</span><span>收益提现请到提现工单</span></div>
         </section>
         <section class="card">
-          <div class="section-title"><div><h2>${stIcon('license')}在线充值</h2><p>选择金额并完成支付，积分立即到账</p></div></div>
+          <div class="section-title"><div><h2>${stIcon('license')}在线充值</h2><p>选择金额并完成支付，余额立即到账</p></div></div>
           <form id="pointsRechargeForm" class="grid">
-            <div><label>充值积分</label><input name="points" type="number" min="1" step="1" value="${rate * 10}" required><span class="muted small" id="pointsAmountHint">应付 ¥${(10).toFixed(2)}</span></div>
+            <div><label>充值金额（元）</label><input name="amount" type="number" min="0.01" step="0.01" value="10" required><span class="muted small" id="pointsAmountHint">应付 ¥10.00</span></div>
             ${channelHtml}
             <div class="form-actions" style="grid-column:1/-1"><button>去支付</button></div>
           </form>
@@ -3176,7 +3175,7 @@ async function loadPoints(){
           <div class="section-title"><div><h2>${stIcon('key')}充值密钥</h2><p>输入管理员发放的密钥，立即到账</p></div></div>
           <form id="pointsKeyForm" class="grid">
             <div><label>充值密钥</label><input name="key" placeholder="PT-..." required></div>
-            <div class="form-actions" style="grid-column:1/-1"><button>兑换积分</button></div>
+            <div class="form-actions" style="grid-column:1/-1"><button>兑换</button></div>
           </form>
         </section>
       </div>
@@ -3189,23 +3188,23 @@ async function loadPoints(){
 
   const rf = document.querySelector('#pointsRechargeForm');
   if(rf){
-    const pointsInput = rf.querySelector('input[name="points"]');
+    const pointsInput = rf.querySelector('input[name="amount"]');
     const amountHint = document.querySelector('#pointsAmountHint');
     const refreshAmount = () => {
-      const pts = Number(pointsInput && pointsInput.value || 0);
-      if(amountHint) amountHint.textContent = pts > 0 ? `应付 ¥${(pts / rate).toFixed(2)}` : '请输入充值积分';
+      const amt = Number(pointsInput && pointsInput.value || 0);
+      if(amountHint) amountHint.textContent = amt > 0 ? `应付 ¥${amt.toFixed(2)}` : '请输入充值金额';
     };
     if(pointsInput) pointsInput.addEventListener('input', refreshAmount);
     refreshAmount();
     rf.onsubmit = async (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
-      const pts = Number(fd.get('points') || 0);
+      const amt = Number(fd.get('amount') || 0);
       const provider = String(fd.get('provider') || '');
       if(!usableChannels.length){ show('管理员未配置在线支付，请使用密钥充值', true); return; }
-      if(!pts || pts < 1){ show('请输入有效的充值积分', true); return; }
+      if(!amt || amt < 0.01){ show('请输入有效的充值金额', true); return; }
       try{
-        const r = await api('/api/user/points/orders', {method:'POST', body:{points:pts, provider}});
+        const r = await api('/api/user/recharge/orders', {method:'POST', body:{amount:amt, provider}});
         const order = r.order || {};
         if(!order.pay_url){ show('下单失败：没有支付链接', true); return; }
         window.location.href = order.pay_url;
@@ -3219,7 +3218,7 @@ async function loadPoints(){
       const key = String(new FormData(e.target).get('key') || '').trim();
       if(!key){ show('请输入充值密钥', true); return; }
       try{
-        const r = await api('/api/user/points/redeem', {method:'POST', body:{key}});
+        const r = await api('/api/user/redeem', {method:'POST', body:{key}});
         await appAlert(r.message || '充值成功', {title:'充值成功'});
         await loadPoints();
       }catch(err){ show(err.message, true); }
@@ -3631,7 +3630,7 @@ async function loadDashboard(view='overview'){
 ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label"><span>${trafficUsageLabel}</span><b>${trafficUsagePercent}%</b></div><div class="tunnel-usage-track" role="progressbar" aria-label="今日流量使用情况" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${trafficUsagePercent}"><span style="width:${trafficUsagePercent}%"></span></div></div>` : ''}
         </section>
         <section class="workspace-stat ov-stat" style="--ov-accent:#f59e0b;--ov-tint:#fff8ec">
-          <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v9M9.6 10.2h4.2a2.1 2.1 0 0 1 0 4.2H9.6"/></svg></span><div class="ov-stat-copy"><span class="ov-stat-label">积分余额</span><strong class="ov-stat-value">${fmtPts(data.user.points)}</strong><span class="ov-stat-sub">可用于购买套餐</span></div></div>
+          <div class="ov-stat-main"><span class="ov-stat-badge" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v9M9.6 10.2h4.2a2.1 2.1 0 0 1 0 4.2H9.6"/></svg></span><div class="ov-stat-copy"><span class="ov-stat-label">账户余额</span><strong class="ov-stat-value">¥${fmtPts(data.user.balance)}</strong><span class="ov-stat-sub">可用于购买套餐</span></div></div>
           <div class="ov-points-action"><button type="button" class="secondary" onclick="loadPoints()">账单充值</button></div>
         </section>
         <section class="workspace-stat ov-stat" style="--ov-accent:#2c6dd2;--ov-tint:#eef4ff">
@@ -3712,7 +3711,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
     const instanceTunnelRows = visibleTunnels.map(tunnelRowHtml).join('') || '<div class="empty-state"><strong>还没有隧道</strong><p class="muted small">点击右侧「新建隧道」创建第一条映射。</p></div>';
     const planValue = plan ? (plan.billing_mode === 'traffic' ? `${plan.used_gb} / ${plan.quota_gb} GB` : (plan.expires_at ? plan.expires_text : '不限期')) : '-';
     const nodeIdForCfg = Number(selNode ? selNode.id : plan.node_id || 0);
-    const renewPrice = (plan.renew_price_points === null || plan.renew_price_points === undefined) ? '已下架' : (Number(plan.renew_price_points) + ' 积分');
+    const renewPrice = (plan.renew_price === null || plan.renew_price === undefined) ? '已下架' : ('¥' + fmtPts(plan.renew_price));
     const expiryText = plan.billing_mode === 'traffic' ? '按流量计费' : (plan.expires_at ? plan.expires_text : '不限期');
     const actionCard = plan ? `<section class="card ia-card">
         <div class="ia-head">
@@ -3720,7 +3719,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2.5 5.8 13.1h5.2l-1.2 8.4 7.6-10.8h-5.2z" fill="currentColor"/></svg>
           </span>
           <div class="ia-head-copy"><h2>操作</h2><p>管理您的套餐和服务</p></div>
-          <button type="button" class="ia-renew" onclick="renewInstance(${Number(plan.id)}, ${Number(plan.plan_id || 0)}, ${nodeIdForCfg}, ${Number(plan.renew_price_points ?? 0)}, '${esc(plan.plan_name || '')}')">
+          <button type="button" class="ia-renew" onclick="renewInstance(${Number(plan.id)}, ${Number(plan.plan_id || 0)}, ${nodeIdForCfg}, ${Number(plan.renew_price ?? 0)}, '${esc(plan.plan_name || '')}')">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7M20 4.5V10h-5.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span>延期</span>
           </button>
@@ -3775,7 +3774,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
           </label>
         </div>
 
-        <button type="button" class="ia-danger" onclick="cancelPlan(${Number(plan.id)}, '${esc(plan.plan_name || '')}', ${Number(plan.refund_points || 0)})">
+        <button type="button" class="ia-danger" onclick="cancelPlan(${Number(plan.id)}, '${esc(plan.plan_name || '')}', ${Number(plan.refund_amount || 0)})">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M6.2 17.8 17.8 6.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
           <span>退订</span>
         </button>
@@ -3878,8 +3877,6 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
     const myPlans = data.my_plans || [];
     const activePlans = myPlans.filter(p => !p.expired);
     const payment = data.payment || {};
-    const rate = 1;
-    window.__pointsRate = rate;
     const planRows = myPlans.map((p, i) => `<tr>
         <td>${i + 1}</td>
         <td>${esc(p.plan_name || '-')}</td>
@@ -3887,7 +3884,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
         <td>${p.billing_mode === 'traffic' ? '流量' : '时间'}</td>
         <td>${p.quota_gb > 0 ? `${p.used_gb} / ${p.quota_gb} GB` : '不限量'}${p.billing_mode !== 'traffic' && p.expires_at ? `<br><span class="muted small">到期 ${esc(p.expires_text)}</span>` : ''}</td>
         <td>${p.status === 'exhausted' ? '<span class="bad">流量用尽</span>' : (p.status === 'cancelled' ? '<span class="muted">已退订</span>' : (p.expired ? '<span class="bad">已到期</span>' : (p.paused ? '<span class="muted">已暂停</span>' : '<span class="ok">生效中</span>')))}${p.grace_until && p.status !== 'active' ? `<br><span class="muted small">端口保留至 ${fmtTs(p.grace_until)}</span>` : ''}</td>
-        <td class="actions node-actions">${p.status === 'active' ? `<button type="button" class="node-action node-action-danger" onclick="cancelPlan(${p.id}, '${esc(p.plan_name)}', ${Number(p.refund_points || 0)})">退订</button>` : '<span class="muted small">—</span>'}</td>
+        <td class="actions node-actions">${p.status === 'active' ? `<button type="button" class="node-action node-action-danger" onclick="cancelPlan(${p.id}, '${esc(p.plan_name)}', ${Number(p.refund_amount || 0)})">退订</button>` : '<span class="muted small">—</span>'}</td>
       </tr>`).join('') || '<tr><td colspan="7" class="muted">还没有购买过套餐</td></tr>';
     let payoutAcc = { method: 'alipay', account: '', holder: '' };
     try{ payoutAcc = (await api('/api/user/payout-account')).account || payoutAcc; }catch(e){}
@@ -4130,10 +4127,10 @@ function orderRowHtml(o, i){
       <td>${i + 1}</td>
       <td>${esc(o.order_no)}</td>
       <td>${esc(o.username)}</td>
-      <td>${o.kind === 'points' ? '积分充值' : '套餐购买'}</td>
+      <td>${o.kind === 'recharge' ? '余额充值' : '套餐购买'}</td>
       <td>${esc(o.plan_name)}</td>
-      <td>${o.points ? (o.kind === 'points' ? '+' : '-') + o.points : '-'}</td>
-      <td>${o.kind === 'points' ? '¥' + o.amount_text : '-'}</td>
+      <td>${o.amount ? (o.kind === 'recharge' ? '+' : '-') + '¥' + fmtPts(o.amount) : '-'}</td>
+      <td>¥${fmtPts(o.amount)}</td>
       <td><span class="status-badge ${o.status === 'paid' ? 'ok' : (o.status === 'pending' ? '' : 'bad')}"><i></i>${st[o.status] || esc(o.status)}</span></td>
       <td>${esc(o.provider || '-')}</td>
       <td>${fmtTs(o.created_at)}</td>
@@ -4203,7 +4200,7 @@ async function loadAdmin(section=currentAdminSection){
   const logsSlice = pageItems(data.logs || [], riskPage, ADMIN_PAGE_SIZE);
   const rows = usersSlice.map((u, i) => `
     <tr>
-      <td>${(usersPage - 1) * ADMIN_PAGE_SIZE + i + 1}</td><td>${esc(u.username)}</td><td>${u.email ? esc(u.email) : '—'}</td><td>${esc(u.role)}</td><td><b>${Number(u.points || 0)}</b></td><td>${esc(u.node_region || '-')} / ${esc(u.node_name || '-')}</td><td>${u.port_count}/${u.max_ports}</td><td>${u.tunnel_count}</td>
+      <td>${(usersPage - 1) * ADMIN_PAGE_SIZE + i + 1}</td><td>${esc(u.username)}</td><td>${u.email ? esc(u.email) : '—'}</td><td>${esc(u.role)}</td><td><b>¥${fmtPts(u.balance)}</b></td><td>${esc(u.node_region || '-')} / ${esc(u.node_name || '-')}</td><td>${u.port_count}/${u.max_ports}</td><td>${u.tunnel_count}</td>
       <td>${fmtBytes(u.traffic_limit_bytes)} / ${u.bandwidth_limit_kbps ? `${(Number(u.bandwidth_limit_kbps) / 1024).toFixed(1)} MB/s` : '不限'}</td>
       <td>${u.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
       <td class="actions node-actions user-actions">
@@ -4211,7 +4208,7 @@ async function loadAdmin(section=currentAdminSection){
         <button class="node-action" onclick="openAdminLimits(${u.id}, ${Number(u.traffic_limit_bytes || 0)}, ${Number(u.bandwidth_limit_kbps || 0)}, '${esc(u.username)}')">流量限制</button>
         <button class="node-action" onclick="openAdminCred('password', ${u.id}, '${esc(u.username)}')">重置密码</button>
         <button class="node-action" onclick="openAdminCred('token', ${u.id}, '${esc(u.username)}')">重置令牌</button>
-        <button class="node-action" onclick="adminAdjustPoints(${u.id}, '${esc(u.username)}')">调积分</button>
+        <button class="node-action" onclick="adminAdjustPoints(${u.id}, '${esc(u.username)}')">调余额</button>
         <button class="node-action" onclick="openAdminEmail(${u.id}, '${esc(u.email || '')}', '${esc(u.username)}')">设邮箱</button>
         <button class="node-action node-action-danger" onclick="adminDelete(${u.id})">删除</button>
       </td>
@@ -4298,7 +4295,7 @@ async function loadAdmin(section=currentAdminSection){
   const planRows = plansList.map((p, i) => `<tr>
       <td>${i + 1}</td>
       <td>${esc(p.name)}</td>
-      <td><b>${p.price_points}</b> 积分</td>
+      <td><b>¥${fmtPts(p.price)}</b></td>
       <td>${p.max_ports}</td>
       <td>${p.billing_mode === 'traffic' ? '流量' : '时间'}</td>
       <td>${p.billing_mode === 'traffic' ? (p.traffic_limit_gb ? p.traffic_limit_gb + ' GB' : '未设置') : `${p.duration_days ? p.duration_days + ' 天' : '不限期'}${p.traffic_limit_gb ? ' · ' + p.traffic_limit_gb + ' GB 上限' : ' · 不限量'}`}</td>
@@ -4322,19 +4319,19 @@ async function loadAdmin(section=currentAdminSection){
         <select id="ofKind" onchange="applyOrderFilter()">
           <option value="">全部类型</option>
           <option value="plan">套餐购买</option>
-          <option value="points">积分充值</option>
+          <option value="recharge">余额充值</option>
         </select>
         <input id="ofQ" placeholder="订单号 / 用户 / 套餐" oninput="applyOrderFilter()">
         <button type="button" class="secondary" onclick="resetOrderFilter()">重置</button>
       </div>
-      <table><thead><tr><th>序号</th><th>订单号</th><th>用户</th><th>类型</th><th>套餐 / 内容</th><th>积分</th><th>金额</th><th>状态</th><th>支付方式</th><th>创建时间</th><th>操作</th></tr></thead><tbody id="adminOrderBody">${orderList.map((o, i) => orderRowHtml(o, i)).join('') || '<tr><td colspan="11" class="muted">暂无订单</td></tr>'}</tbody></table>
+      <table><thead><tr><th>序号</th><th>订单号</th><th>用户</th><th>类型</th><th>套餐 / 内容</th><th>金额</th><th>实付</th><th>状态</th><th>支付方式</th><th>创建时间</th><th>操作</th></tr></thead><tbody id="adminOrderBody">${orderList.map((o, i) => orderRowHtml(o, i)).join('') || '<tr><td colspan="11" class="muted">暂无订单</td></tr>'}</tbody></table>
     </section>`;
   const plansHtml = `
     <section class="card" id="plans"><div class="section-title"><h2>${stIcon('license')}套餐模板</h2><p>用户按套餐在线购买，支付成功后自动分配端口与有效期</p></div>
     <form id="planForm" class="grid">
       <input type="hidden" name="id" value="">
       <div><label>套餐名称</label><input name="name" placeholder="例如 入门版 / 专业版" required></div>
-      <div><label>积分价格</label><input name="price_points" type="number" value="100" min="0" step="1"><span class="muted small">用户购买时扣除的积分</span></div>
+      <div><label>价格（元）</label><input name="price" type="number" value="100" min="0" step="0.01"><span class="muted small">用户购买时从余额扣除的金额</span></div>
       <div><label>适用节点</label><select name="node_id"><option value="0">全部节点（通用）</option>${nodeOptions(data.nodes || [])}</select><span class="muted small">绑定后用户只能在该节点购买此套餐</span></div>
       <div><label>计费方式</label><select name="billing_mode"><option value="time">时间模式（按天）</option><option value="traffic">流量模式（按 GB）</option></select></div>
       <div><label>有效期（天）</label><input name="duration_days" type="number" value="30" min="0" max="30"><span class="muted small">仅时间套餐需要；流量套餐用完为止，不用填</span></div>
@@ -4346,7 +4343,7 @@ async function loadAdmin(section=currentAdminSection){
       <div style="grid-column:1/-1"><label>公平使用说明</label><textarea name="fair_use_note" rows="2" placeholder="例如：标称不限量，月流量超过 1TB 将限速"></textarea></div>
       <div class="form-actions" style="grid-column:1/-1"><button>保存套餐</button><button type="button" class="secondary" onclick="resetPlanForm()">清空</button></div>
     </form></section>
-    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>序号</th><th>名称</th><th>积分价格</th><th>端口</th><th>计费</th><th>有效期 / 额度</th><th>速率</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
+    <section class="card"><div class="section-title"><div><h2>${stIcon('license')}套餐列表</h2><p>共 ${plansList.length} 个套餐</p></div></div><table><thead><tr><th>序号</th><th>名称</th><th>价格</th><th>端口</th><th>计费</th><th>有效期 / 额度</th><th>速率</th><th>状态</th><th>操作</th></tr></thead><tbody>${planRows}</tbody></table></section>
     
     ${data.software_license_authority ? `<section class="card" id="software-licenses"><div class="section-title"><h2>${stIcon('license')}服务器软件授权码</h2><p>卖家后台使用：先批量生成授权码发给客户；客户输入授权码后自动绑定他的部署服务器。</p></div><form id="softwareLicenseForm" class="grid">
       <div><label>生成数量</label><input name="count" type="number" value="1" min="1" max="500"></div>
@@ -4375,7 +4372,7 @@ async function loadAdmin(section=currentAdminSection){
         <div><label for="adminUserStatus">账号状态</label><select id="adminUserStatus" name="status"><option value="all" ${adminUserStatus==='all'?'selected':''}>全部状态</option><option value="active" ${adminUserStatus==='active'?'selected':''}>正常启用</option><option value="disabled" ${adminUserStatus==='disabled'?'selected':''}>已停用</option><option value="expired" ${adminUserStatus==='expired'?'selected':''}>已到期</option></select></div>
         <div class="form-actions"><button type="submit">筛选</button><button type="button" class="secondary" id="adminUserFilterReset">重置</button></div>
       </form>
-      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>序号</th><th>用户</th><th>邮箱</th><th>角色</th><th>积分</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>
+      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>序号</th><th>用户</th><th>邮箱</th><th>角色</th><th>余额</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>
     <div id="adminLimitsModal" class="modal-backdrop modal-center hidden" role="dialog" aria-modal="true" aria-labelledby="adminLimitsTitle" onclick="if(event.target===this)closeAdminLimits()">
       <section class="modal-page card admin-limits-modal">
         <div class="section-title modal-title">
@@ -4729,7 +4726,7 @@ function resetPlanForm(){
   if(!f) return;
   f.reset();
   f.elements.id.value = '';
-  f.elements.price_points.value = '100';
+  f.elements.price.value = '100';
   f.elements.max_ports.value = '5';
   f.elements.duration_days.value = '30';
   f.elements.billing_mode.value = 'time';
@@ -4746,7 +4743,7 @@ function editPlan(id){
   if(!f || !p) return;
   f.elements.id.value = p.id;
   f.elements.name.value = p.name;
-  f.elements.price_points.value = p.price_points;
+  f.elements.price.value = p.price;
   f.elements.max_ports.value = p.max_ports;
   f.elements.duration_days.value = p.duration_days;
   f.elements.billing_mode.value = p.billing_mode || 'time';
@@ -4760,14 +4757,14 @@ function editPlan(id){
   f.scrollIntoView({behavior:'smooth', block:'center'});
 }
 async function adminAdjustPoints(id, username){
-  const raw = await appPrompt(`调整 ${username} 的积分（正数增加，负数扣减）`, '100', {title:'调整积分'});
+  const raw = await appPrompt(`调整 ${username} 的余额（正数增加，负数扣减，单位元）`, '100.00', {title:'调整余额'});
   if(raw === null) return;
   const delta = Number(raw);
-  if(!Number.isInteger(delta) || delta === 0){ show('请输入非零整数', true); return; }
+  if(!Number.isFinite(delta) || delta === 0){ show('请输入非零金额', true); return; }
   try{
-    const r = await api('/api/admin/users/points', {method:'POST', body:{id, delta, note:'管理员调整'}});
+    const r = await api('/api/admin/users/balance', {method:'POST', body:{id, delta, note:'管理员调整'}});
     await loadAdmin();
-    await appAlert(r.message || '积分已调整', {title:'积分已调整'});
+    await appAlert(r.message || '余额已调整', {title:'余额已调整'});
   }catch(err){ show(err.message, true); }
 }
 
@@ -5081,7 +5078,7 @@ async function setFinRange(days){
     <div><span>现金收入</span><b class="ledger-in">+¥${money(income)}</b></div>
     <div><span>现金支出</span><b class="ledger-out">-¥${money(expense)}</b></div>
     <div><span>现金净额</span><b class="${net >= 0 ? 'ledger-in' : 'ledger-out'}">${net >= 0 ? '+' : '-'}¥${money(Math.abs(net))}</b></div>`);
-  setHtml('#finChart', financeChartSvg(info.points || []));
+  setHtml('#finChart', financeChartSvg(info.series || []));
   setHtml('#finCats', (info.categories || []).map(c => `<span class="fin-cat ${c.direction}">${esc(c.text)} <b>${c.direction === 'in' ? '+' : '-'}¥${money(c.amount)}</b></span>`).join(''));
   document.querySelectorAll('.fin-range-btn').forEach(b => b.classList.toggle('active', Number(b.dataset.days) === finRange));
 }
