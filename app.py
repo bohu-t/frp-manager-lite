@@ -7061,6 +7061,7 @@ class Handler(BaseHTTPRequestHandler):
             unit = qv("unit")
             direction = qv("direction")
             category = qv("category")
+            keyword = qv("q").strip()
             try:
                 start_ts = int(qv("from") or 0)
             except ValueError:
@@ -7073,41 +7074,70 @@ class Handler(BaseHTTPRequestHandler):
                 limit = max(1, min(500, int(qv("limit") or 200)))
             except ValueError:
                 limit = 200
-            where = []
-            args: list[Any] = []
+            base_where: list[str] = []
+            base_args: list[Any] = []
             if unit in ("points", "cash"):
-                where.append("unit=?")
-                args.append(unit)
+                base_where.append("unit=?")
+                base_args.append(unit)
             if direction in ("in", "out"):
-                where.append("direction=?")
-                args.append(direction)
+                base_where.append("direction=?")
+                base_args.append(direction)
             if category:
-                where.append("category=?")
-                args.append(category)
+                base_where.append("category=?")
+                base_args.append(category)
+            if keyword:
+                base_where.append("(order_no LIKE ? OR username LIKE ? OR note LIKE ? OR ref LIKE ?)")
+                like = f"%{keyword}%"
+                base_args.extend([like, like, like, like])
+            where = list(base_where)
+            args = list(base_args)
             if start_ts:
                 where.append("ts>=?")
                 args.append(start_ts)
             if end_ts:
                 where.append("ts<=?")
                 args.append(end_ts)
+            base_clause = (" WHERE " + " AND ".join(base_where)) if base_where else ""
             clause = (" WHERE " + " AND ".join(where)) if where else ""
             with db() as conn:
                 rate = 1
+                # 期初余额：起始时间之前（同筛选条件）的累计
+                open_clause = base_clause
+                open_args = list(base_args)
+                if start_ts:
+                    open_clause = (open_clause + (" AND " if open_clause else " WHERE ") + "ts<?")
+                    open_args = open_args + [start_ts]
+                if start_ts:
+                    row = conn.execute(
+                        "SELECT COALESCE(SUM(CASE WHEN direction='in' THEN amt ELSE -amt END),0) FROM ("
+                        " SELECT CASE WHEN unit='cash' THEN amount ELSE amount * 1.0 / ? END AS amt, direction FROM ledger"
+                        + open_clause + ")", (rate, *open_args)).fetchone()
+                    opening = q2(row[0] if row else 0)
+                else:
+                    opening = 0.0
                 rows = conn.execute(
-                    "SELECT * FROM ledger" + clause + " ORDER BY ts DESC, id DESC LIMIT ?", (*args, limit)).fetchall()
+                    "SELECT * FROM ledger" + clause + " ORDER BY ts ASC, id ASC LIMIT ?", (*args, limit)).fetchall()
                 totals = conn.execute(
                     "SELECT direction, COALESCE(SUM(CASE WHEN unit='cash' THEN amount ELSE amount * 1.0 / ? END),0)"
                     " FROM ledger" + clause + " GROUP BY direction", (rate, *args)).fetchall()
             summary = {"in": 0.0, "out": 0.0}
             for d, total in totals:
                 summary[str(d)] = q2(total)
-            self.send_json({"ok": True, "rows": [{
-                "id": int(r["id"]), "ts": int(r["ts"]), "unit": r["unit"], "direction": r["direction"],
-                "category": r["category"], "category_text": LEDGER_CATEGORIES.get(r["category"], r["category"]),
-                "amount": q2(r["amount"] if r["unit"] == "cash" else r["amount"] / rate),
-                "user_id": int(r["user_id"] or 0), "username": r["username"],
-                "node_id": int(r["node_id"] or 0), "order_no": r["order_no"], "ref": r["ref"], "note": r["note"],
-            } for r in rows], "summary": summary, "categories": LEDGER_CATEGORIES})
+            balance = opening
+            out_rows = []
+            for r in rows:
+                amt = q2(r["amount"] if r["unit"] == "cash" else r["amount"] / rate)
+                balance = q2(balance + (amt if r["direction"] == "in" else -amt))
+                out_rows.append({
+                    "id": int(r["id"]), "ts": int(r["ts"]), "unit": r["unit"], "direction": r["direction"],
+                    "category": r["category"], "category_text": LEDGER_CATEGORIES.get(r["category"], r["category"]),
+                    "amount": amt, "balance": balance,
+                    "user_id": int(r["user_id"] or 0), "username": r["username"],
+                    "node_id": int(r["node_id"] or 0), "order_no": r["order_no"], "ref": r["ref"], "note": r["note"],
+                })
+            out_rows.reverse()
+            self.send_json({"ok": True, "rows": out_rows, "summary": summary,
+                            "opening": opening, "closing": balance, "categories": LEDGER_CATEGORIES})
             return
         if path == "/api/admin/tickets":
             if not self.require_admin():

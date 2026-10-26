@@ -2280,7 +2280,7 @@ async function loadAdminRecharge(){
   };
 }
 
-let ledgerFilter = { category: '', range: '30' };
+let ledgerFilter = { category: '', range: '30', q: '' };
 
 function ledgerRangeTs(range){
   const now = Math.floor(Date.now() / 1000);
@@ -2293,12 +2293,17 @@ function ledgerRangeTs(range){
 function ledgerSetFilter(key, value){
   ledgerFilter[key] = value;
   loadAdminLedger();
+  if(key === 'q'){
+    const el = document.getElementById('ledgerSearch');
+    if(el){ el.focus(); if(el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length); }
+  }
 }
 
 async function loadAdminLedger(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
   const qs = new URLSearchParams();
   if(ledgerFilter.category) qs.set('category', ledgerFilter.category);
+  if(ledgerFilter.q) qs.set('q', ledgerFilter.q);
   const from = ledgerRangeTs(ledgerFilter.range);
   if(from) qs.set('from', String(from));
   qs.set('limit', '300');
@@ -2309,26 +2314,28 @@ async function loadAdminLedger(){
   const sum = data.summary || {};
   const cats = data.categories || {};
   const money = (v) => Number(v || 0).toFixed(2);
+  const opening = Number(data.opening || 0);
+  const closing = Number(data.closing || 0);
   const catOptions = Object.entries(cats).map(([k, v]) => `<option value="${esc(k)}"${ledgerFilter.category === k ? ' selected' : ''}>${esc(v)}</option>`).join('');
   const rowHtml = rows.map(r => `<tr>
       <td class="muted small">${fmtTs(r.ts)}</td>
-      <td><span class="ledger-dir ${r.direction}">${r.direction === 'in' ? '收入' : '支出'}</span></td>
-      <td>${esc(r.category_text || r.category)}</td>
-      <td><b class="${r.direction === 'in' ? 'ledger-in' : 'ledger-out'}">${r.direction === 'in' ? '+' : '-'}¥${money(r.amount)}</b></td>
-      <td>${esc(r.username || '-')}</td>
-      <td class="muted small">${esc(r.order_no || '-')}</td>
-      <td class="muted small">${esc(r.note || '-')}</td>
-    </tr>`).join('') || '<tr><td colspan="7" class="muted">该条件下暂无流水</td></tr>';
-  const net = Number(sum.in || 0) - Number(sum.out || 0);
+      <td><b>${esc(r.category_text || r.category)}</b></td>
+      <td class="muted small">${esc([r.username, r.order_no, r.note].filter(Boolean).join(' · ') || '-')}</td>
+      <td class="num ledger-in">${r.direction === 'in' ? money(r.amount) : ''}</td>
+      <td class="num ledger-out">${r.direction === 'out' ? money(r.amount) : ''}</td>
+      <td class="num"><b>${money(r.balance)}</b></td>
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">该条件下暂无流水</td></tr>';
   app.innerHTML = appLayoutHtml(`
-    <div class="ov-page-head"><div><span class="section-kicker">LEDGER</span><h1>收支表</h1><p>平台全部收支流水，金额统一以 ¥ 计</p></div><button type="button" class="secondary" onclick="loadAdminLedger()">刷新</button></div>
+    <div class="ov-page-head"><div><span class="section-kicker">LEDGER</span><h1>收支表</h1><p>平台资金流水，按时间顺序记录每笔收入与支出</p></div><button type="button" class="secondary" onclick="loadAdminLedger()">刷新</button></div>
     <div class="ledger-cards">
-      <div class="ledger-card"><span>总收入</span><b class="ledger-in">+¥${money(sum.in)}</b><small>充值 / 套餐 / 保证金</small></div>
-      <div class="ledger-card"><span>总支出</span><b class="ledger-out">-¥${money(sum.out)}</b><small>退款 / 结算 / 提现</small></div>
-      <div class="ledger-card"><span>净额</span><b class="${net >= 0 ? 'ledger-in' : 'ledger-out'}">${net >= 0 ? '+' : '-'}¥${money(Math.abs(net))}</b><small>当前筛选范围</small></div>
+      <div class="ledger-card"><span>期初余额</span><b>¥${money(opening)}</b><small>筛选起始前累计</small></div>
+      <div class="ledger-card"><span>本期收入</span><b class="ledger-in">+¥${money(sum.in)}</b><small>充值 / 套餐 / 保证金</small></div>
+      <div class="ledger-card"><span>本期支出</span><b class="ledger-out">-¥${money(sum.out)}</b><small>退款 / 结算 / 提现</small></div>
+      <div class="ledger-card"><span>期末余额</span><b>¥${money(closing)}</b><small>当前筛选范围</small></div>
     </div>
     <section class="card">
       <div class="ledger-toolbar">
+        <label class="ledger-search"><span>⌕</span><input id="ledgerSearch" placeholder="搜索单号 / 用户 / 备注" value="${esc(ledgerFilter.q || '')}" oninput="ledgerSetFilter('q', this.value)"></label>
         <select onchange="ledgerSetFilter('range', this.value)">
           ${[['7','近 7 天'],['30','近 30 天'],['90','近 90 天'],['all','全部']].map(([v, t]) => `<option value="${v}"${ledgerFilter.range === v ? ' selected' : ''}>${t}</option>`).join('')}
         </select>
@@ -2337,8 +2344,8 @@ async function loadAdminLedger(){
         </select>
         <span class="muted small">共 ${rows.length} 条</span>
       </div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>时间</th><th>方向</th><th>类型</th><th>金额</th><th>用户</th><th>订单号</th><th>备注</th></tr></thead>
+      <div class="table-wrap"><table class="ledger-table">
+        <thead><tr><th>交易时间</th><th>类型</th><th>摘要</th><th class="num">收入(¥)</th><th class="num">支出(¥)</th><th class="num">余额(¥)</th></tr></thead>
         <tbody>${rowHtml}</tbody>
       </table></div>
     </section>

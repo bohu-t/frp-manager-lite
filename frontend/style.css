@@ -2542,3 +2542,10 @@ html[data-theme="dark"] .status-badge.warn{background:rgba(245,158,11,.18);color
 .img-viewer-close:hover{background:rgba(255,255,255,.28)}
 .ticket-side-actions{display:flex;flex-direction:column;gap:8px;margin-top:14px}
 .ticket-side-actions>button{width:100%}
+/* 收支表：银行流水样式 */
+.ledger-search{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 10px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--muted)}
+.ledger-search input{border:0;outline:0;background:transparent;color:var(--text);font-size:13px;width:190px}
+.ledger-table th.num,.ledger-table td.num{text-align:right;font-variant-numeric:tabular-nums}
+.ledger-table td.num{white-space:nowrap}
+.ledger-table tbody tr:hover>td{background:#f8fafc}
+html[data-theme="dark"] .ledger-table tbody tr:hover>td{background:rgba(90,140,220,.08)}
