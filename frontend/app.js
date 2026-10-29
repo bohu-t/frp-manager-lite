@@ -1728,45 +1728,15 @@ async function testUserNotify(){
   }catch(err){ show(err.message || '发送失败', true); }
 }
 
-function wecomBindCardHtml(wc){
-  wc = wc || {};
-  if(wc.bound){
-    return `<section class="card host-bind-card ok">
-      <div class="host-bind-icon">✓</div>
-      <div class="host-bind-copy"><b>企微群已绑定</b><span>你的企业微信已与账号关联，可正常提交托管申请，群通知会 @你。</span></div>
-    </section>`;
-  }
-  return `<section class="card host-bind-card">
-      <div class="host-bind-icon">👥</div>
-      <div class="host-bind-copy">
-        <b>托管需先加入企业微信群</b>
-        <span>私聊机器人发送绑定码，机器人会拉你进群并完成绑定，再回来提交母鸡。绑定码 1 小时内有效。</span>
-        <code class="host-bind-code">${esc(wc.code || '点击下方按钮获取')}</code>
-      </div>
-      <div class="host-bind-actions">
-        <button type="button" class="secondary" onclick="refreshWecomBind()">刷新绑定码</button>
-      </div>
-    </section>`;
-}
-
-async function refreshWecomBind(){
-  try{
-    const wc = await api('/api/user/wecom/bindcode');
-    const el = document.querySelector('.host-bind-card');
-    if(el) el.outerHTML = wecomBindCardHtml(wc);
-  }catch(err){ show(err.message, true); }
-}
-
 async function loadHosts(){
   hideFlash(); clearAdminDashboardTimer(); setNav();
-  let data, pdata, plData, eData, wc;
+  let data, pdata, plData, eData;
   try{
-    [data, pdata, plData, eData, wc] = await Promise.all([
+    [data, pdata, plData, eData] = await Promise.all([
       api('/api/user/hosts'),
       api('/api/user/provider/nodes').catch(() => ({nodes: []})),
       api('/api/user/provider/plans').catch(() => ({plans: []})),
-      api('/api/user/provider/earnings').catch(() => ({earnings: [], total_net: 0, commission_pct: 10})),
-      api('/api/user/wecom/bindcode').catch(() => ({code: '', bound: false}))
+      api('/api/user/provider/earnings').catch(() => ({earnings: [], total_net: 0, commission_pct: 10}))
     ]);
   }
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
@@ -1807,7 +1777,6 @@ async function loadHosts(){
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">HOSTING</span><h1>托管申请</h1><p>提交母鸡、上架套餐、查看收益与申请记录。</p></div>
       <div class="row" style="gap:10px"><button type="button" class="secondary" onclick="loadHosts()">刷新</button><button type="button" onclick="hostFormModal()">＋ 添加母鸡</button></div></div>
-    ${wecomBindCardHtml(wc)}
     <nav class="seg-tabs">
       <button type="button" class="seg-tab${tab === 'nodes' ? ' active' : ''}" onclick="switchHostsTab('nodes')">我的节点${pNodes.length ? `<span>${pNodes.length}</span>` : ''}</button>
       <button type="button" class="seg-tab${tab === 'plans' ? ' active' : ''}" onclick="switchHostsTab('plans')">我的套餐${pPlans.length ? `<span>${pPlans.length}</span>` : ''}</button>

@@ -6142,9 +6142,6 @@ def create_host_application(user: sqlite3.Row, data: dict[str, Any]) -> tuple[bo
     if monthly <= 0:
         return False, "请填写月流量（GB，必须大于 0）", {}
     with db() as conn:
-        wecom_id = str(row_val(conn.execute("SELECT wecom_userid FROM users WHERE id=?", (user["id"],)).fetchone(), "wecom_userid", "") or "").strip()
-        if not wecom_id:
-            return False, "请先在企微群内发送绑定码完成入群验证，再提交托管申请", {}
         pending = conn.execute("SELECT COUNT(*) FROM hosts WHERE user_id=? AND status IN ('pending','pending_node')", (user["id"],)).fetchone()[0]
         if pending >= 5:
             return False, "待审核的托管申请过多，请等待处理", {}
