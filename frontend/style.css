@@ -2598,3 +2598,18 @@ html[data-theme="dark"] .user-notify .notify-chip{background:#0f172a;border-colo
 .user-notify .settings-card-icon .st-icon{display:grid;place-items:center;width:40px;height:40px;border-radius:11px}
 .user-notify .settings-card-icon .st-icon svg{width:20px;height:20px}
 .user-notify .settings-card-icon.icon-blue .st-icon{background:var(--blue-icon-bg);color:var(--primary)}
+/* 移动端导航抽屉 */
+.mobile-nav-toggle{display:none}
+.mobile-nav-mask{display:none}
+@media(max-width:760px){
+  .mobile-nav-toggle{display:grid;place-items:center;position:fixed;left:14px;bottom:18px;z-index:80;width:48px;height:48px;border:0;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#1d4ed8);color:#fff;box-shadow:0 10px 24px rgba(29,78,216,.35);cursor:pointer}
+  .mobile-nav-toggle svg{width:22px;height:22px}
+  .app-sidebar{position:fixed;left:0;top:0;bottom:0;width:262px;height:100vh;padding:0 8px;border-right:1px solid #1e293b;border-bottom:0;transform:translateX(-100%);transition:transform .22s ease;z-index:75;overflow-y:auto;background:var(--sidebar)}
+  body.mobile-nav-open .app-sidebar{transform:none}
+  .app-sidebar .side-link{display:flex}
+  .sidebar-section-label,.sidebar-spacer,.sidebar-user{display:flex}
+  .sidebar-spacer{display:block;flex:1}
+  .mobile-nav-mask{display:none;position:fixed;inset:0;z-index:70;background:rgba(8,15,30,.5)}
+  body.mobile-nav-open .mobile-nav-mask{display:block}
+  body.mobile-nav-open{overflow:hidden}
+}
