@@ -2640,3 +2640,8 @@ html[data-theme="dark"] .user-notify .notify-chip{background:#0f172a;border-colo
 .nn-chip-name{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
 .nn-chip-self{display:inline-block;padding:1px 6px;border-radius:999px;background:#e0f2fe;color:#0369a1;font-size:10px;font-style:normal;font-weight:700;line-height:1.6}
 .nn-chip.active .nn-chip-self{background:rgba(255,255,255,.24);color:#fff}
+/* 地区卡片：自营角标移到右上角 */
+.nn-chip-self{position:absolute;top:8px;right:8px;z-index:3;padding:2px 9px;border-radius:8px;background:linear-gradient(135deg,#ff8a3d,#f4511e);color:#fff;font-size:10px;font-style:normal;font-weight:800;letter-spacing:.4px;line-height:1.7;box-shadow:0 3px 9px rgba(244,81,30,.38);white-space:nowrap}
+.nn-chip{padding-right:52px}
+.nn-chip-name{display:inline-flex;align-items:center;gap:6px}
+.nn-chip.active .nn-chip-self{background:linear-gradient(135deg,#ffb066,#ff7a3d);box-shadow:0 3px 9px rgba(0,0,0,.25)}

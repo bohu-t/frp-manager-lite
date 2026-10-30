@@ -2710,7 +2710,8 @@ function renderNewNode(){
     const selfCount = matched.filter(n => n.self_operated).length;
     return `<button type="button" class="nn-chip${active ? ' active' : ''}" onclick="nnPickRegion('${esc(name)}')">
       <span class="nn-chip-flag">${regionFlag(name)}</span>
-      <span class="nn-chip-name">${esc(regionLabel(name))}${selfCount ? `<i class="nn-chip-self">自营 ${selfCount}</i>` : ''}</span>
+      ${selfCount ? `<i class="nn-chip-self">自营 ${selfCount}</i>` : ''}
+      <span class="nn-chip-name">${esc(regionLabel(name))}</span>
       <span class="nn-chip-line"></span>
       <span class="nn-chip-foot"><span>${count} 个节点</span><b>${min === null ? '暂无套餐' : '¥' + min + ' 起'}</b></span>
     </button>`;
