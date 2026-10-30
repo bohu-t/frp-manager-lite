@@ -2705,10 +2705,12 @@ function renderNewNode(){
   const step1 = `<div class="nn-region-chips">${visibleRegions.map(name => {
     const active = nnState.region === name;
     const min = regionPrice(name);
-    const count = (regions[name] || []).filter(nodeMatch).length;
+    const matched = (regions[name] || []).filter(nodeMatch);
+    const count = matched.length;
+    const selfCount = matched.filter(n => n.self_operated).length;
     return `<button type="button" class="nn-chip${active ? ' active' : ''}" onclick="nnPickRegion('${esc(name)}')">
       <span class="nn-chip-flag">${regionFlag(name)}</span>
-      <span class="nn-chip-name">${esc(regionLabel(name))}</span>
+      <span class="nn-chip-name">${esc(regionLabel(name))}${selfCount ? `<i class="nn-chip-self">自营 ${selfCount}</i>` : ''}</span>
       <span class="nn-chip-line"></span>
       <span class="nn-chip-foot"><span>${count} 个节点</span><b>${min === null ? '暂无套餐' : '¥' + min + ' 起'}</b></span>
     </button>`;
