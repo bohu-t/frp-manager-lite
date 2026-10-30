@@ -1799,7 +1799,7 @@ async function loadHosts(){
       ${pPlans.length ? pPlans.map((pl, i) => `<tr><td>${i + 1}</td><td><b>${esc(pl.name)}</b></td><td>${esc((pNodes.find(n => Number(n.id) === Number(pl.node_id)) || {}).name || ('#' + pl.node_id))}</td><td>${pl.billing_mode === 'traffic' ? '流量' : '时间'}</td><td>¥${fmtPts(pl.price)}</td><td>${pl.max_ports}</td><td>${pl.billing_mode === 'traffic' ? pl.traffic_limit_gb + ' GB' : pl.duration_days + ' 天'}</td><td><span class="status-badge ${pl.active ? 'ok' : 'bad'}"><i></i>${pl.active ? '在售' : '下架'}</span></td><td class="actions node-actions"><button type="button" class="node-action" onclick='providerPlanForm(${pl.id})'>编辑</button><button type="button" class="node-action node-action-danger" onclick="providerPlanDelete(${pl.id})">下架</button></td></tr>`).join('') : '<tr><td colspan="9" class="muted">还没有上架套餐</td></tr>'}
       </tbody></table></div>
     </section>`;
-  const earnSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('bolt')}收益</h2><p>按服务进度结算：${100 - pct}% 到账，${pct}% 留存为保证金</p></div><span class="section-count">已结算 ¥${fmtPts(pTotal)} · 保证金 ¥${fmtPts(pGuarantee)}</span></div>
+  const earnSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('bolt')}收益</h2><p>托管收益与结算记录</p></div><span class="section-count">已结算 ¥${fmtPts(pTotal)} · 保证金 ¥${fmtPts(pGuarantee)}</span></div>
       <div class="row" style="gap:10px;align-items:center;margin:6px 0 12px">
         <span class="muted small">可提现收益</span><b style="font-size:18px">¥${fmtPts(pIncome)}</b>
         <button type="button" onclick="loadPayoutTickets()" ${pIncome > 0 ? '' : 'disabled'}>提现</button>
@@ -1807,7 +1807,6 @@ async function loadHosts(){
       <div class="table-wrap"><table><thead><tr><th>实例</th><th>节点</th><th>套餐价</th><th>已结算</th><th>保证金</th><th>进度</th><th>状态</th></tr></thead><tbody>
       ${pEarn.length ? pEarn.map(e => `<tr><td><b>${esc(e.plan_name || '-')}</b></td><td>${esc(e.node_name || ('#' + e.node_id))}</td><td>¥${fmtPts(e.price)}</td><td><b>¥${fmtPts(e.paid)}</b></td><td>¥${fmtPts(e.guarantee)}</td><td>${Math.round(Number(e.progress || 0) * 100)}%</td><td>${e.status === 'active' ? '服务中' : (e.status === 'expired' ? '已到期' : (e.status === 'exhausted' ? '流量用尽' : '已退订'))}</td></tr>`).join('') : '<tr><td colspan="7" class="muted">暂无收益记录</td></tr>'}
       </tbody></table></div>
-      <p class="muted small" style="margin-top:10px">保证金在服务正常到期后转为平台服务费；提前清退或节点故障时，一半补偿买家，一半归平台。</p>
     </section>`;
   const hostsSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('cloud')}申请记录</h2><p>共 ${hosts.length} 条，包含待审核与被拒绝的母鸡</p></div></div>
       <div class="table-wrap"><table><thead><tr><th>序号</th><th>名称</th><th>地区</th><th>接入地址</th><th>到期时间</th><th>带宽 / 流量</th><th>状态</th><th>提交时间</th></tr></thead><tbody>${hostRowsHtml(hosts, false)}</tbody></table></div>
