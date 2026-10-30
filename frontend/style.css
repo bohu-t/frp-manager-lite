@@ -2613,3 +2613,12 @@ html[data-theme="dark"] .user-notify .notify-chip{background:#0f172a;border-colo
   body.mobile-nav-open .mobile-nav-mask{display:block}
   body.mobile-nav-open{overflow:hidden}
 }
+/* 表格横向滚动，避免撑破页面 */
+.table-wrap{overflow-x:auto;max-width:100%;-webkit-overflow-scrolling:touch}
+.table-wrap>table{min-width:640px}
+.card{min-width:0}
+.maint-table{overflow-x:auto;max-width:100%}
+@media(max-width:760px){
+  table{min-width:640px}
+  th,td{padding:9px 10px;font-size:12px}
+}
