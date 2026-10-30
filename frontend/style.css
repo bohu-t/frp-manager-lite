@@ -2622,3 +2622,13 @@ html[data-theme="dark"] .user-notify .notify-chip{background:#0f172a;border-colo
   table{min-width:640px}
   th,td{padding:9px 10px;font-size:12px}
 }
+/* 公告发布表单 */
+.ann-form{display:grid;grid-template-columns:minmax(190px,1fr) minmax(0,2fr);gap:14px 16px;align-items:start}
+.ann-field{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
+.ann-field>span{font-size:12px;font-weight:600;color:var(--text)}
+.ann-field>input,.ann-field>select,.ann-field>textarea{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--text);font-size:13px;font-family:inherit;outline:0}
+.ann-field>textarea{resize:vertical;min-height:96px;line-height:1.6}
+.ann-field>input:focus,.ann-field>select:focus,.ann-field>textarea:focus{border-color:#1677FF;box-shadow:0 0 0 3px rgba(22,119,255,.12)}
+.ann-content{grid-column:1/-1}
+.ann-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:10px}
+@media(max-width:760px){.ann-form{grid-template-columns:1fr}}

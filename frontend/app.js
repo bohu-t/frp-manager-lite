@@ -2199,11 +2199,11 @@ async function loadAdminAnnouncements(){
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">ANNOUNCEMENTS</span><h1>系统公告</h1><p>发布后会显示在用户的「通知中心 › 系统公告」</p></div></div>
     <section class="card"><div class="section-title"><div><h2>${stIcon('bell')}发布公告</h2></div></div>
-      <form id="annForm" class="grid">
-        <div class="span-2"><label>发布类型</label><select name="kind"><option value="announcement">系统公告（展示在公告页签）</option><option value="notice">通知（推送到用户通知列表）</option></select></div>
-        <div class="span-2"><label>标题</label><input name="title" maxlength="120" required></div>
-        <div class="span-2"><label>内容</label><textarea name="content" rows="4" required placeholder="支持简单格式文本"></textarea></div>
-        <div class="form-actions span-2"><button type="submit">发布</button></div>
+      <form id="annForm" class="ann-form">
+        <label class="ann-field"><span>发布类型</span><select name="kind"><option value="announcement">系统公告（展示在公告页签）</option><option value="notice">通知（推送到用户通知列表）</option></select></label>
+        <label class="ann-field"><span>标题</span><input name="title" maxlength="120" placeholder="例如：平台维护通知" required></label>
+        <label class="ann-field ann-content"><span>内容</span><textarea name="content" rows="4" required placeholder="支持简单格式文本"></textarea></label>
+        <div class="ann-actions"><button type="submit">发布</button></div>
       </form>
     </section>
     <section class="card"><div class="section-title"><div><h2>公告列表</h2><p>共 ${list.length} 条</p></div></div><div class="table-wrap"><table><thead><tr><th>序号</th><th>标题</th><th>内容</th><th>类型</th><th>状态</th><th>时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>
@@ -2213,14 +2213,23 @@ async function loadAdminAnnouncements(){
     e.preventDefault();
     try{
       const r = await api('/api/admin/announcements/save', {method:'POST', body:Object.fromEntries(new FormData(form))});
-      show(r.message || '已发布'); await loadAdminAnnouncements();
+      show(r.message || '已发布');
+      const y = window.scrollY;
+      await loadAdminAnnouncements();
+      window.scrollTo(0, y);
     }catch(err){ show(err.message || '发布失败', true); }
   };
 }
 
 async function deleteAnnouncement(id){
   if(!await appConfirm('下架后用户将看不到这条公告，确认？', {title:'下架公告', okText:'确认下架', danger:true})) return;
-  try{ await api('/api/admin/announcements/delete', {method:'POST', body:{id:Number(id)}}); show('已下架'); await loadAdminAnnouncements(); }catch(err){ show(err.message, true); }
+  try{
+    await api('/api/admin/announcements/delete', {method:'POST', body:{id:Number(id)}});
+    show('已下架');
+    const y = window.scrollY;
+    await loadAdminAnnouncements();
+    window.scrollTo(0, y);
+  }catch(err){ show(err.message, true); }
 }
 
 async function loadAdminOps(){
