@@ -1674,6 +1674,9 @@ def node_public(row: sqlite3.Row) -> dict[str, Any]:
         "active": bool(row["active"]),
         "note": row["note"],
         "created_at": row["created_at"],
+        "owner_id": int(row_val(row, "owner_id", 0) or 0),
+        "owner_name": row_val(row, "owner_name", "") or "",
+        "self_operated": int(row_val(row, "owner_id", 0) or 0) == 0,
     }
 
 
@@ -1878,9 +1881,10 @@ def list_public_nodes(conn: sqlite3.Connection, active_only: bool = True) -> lis
     where = "WHERE n.active=1" if active_only else ""
     rows = conn.execute(
         f"""
-        SELECT n.*, COUNT(p.id) AS port_count,
+        SELECT n.*, u.username AS owner_name, COUNT(p.id) AS port_count,
                SUM(CASE WHEN p.user_id IS NULL THEN 1 ELSE 0 END) AS free_count
         FROM nodes n LEFT JOIN ports p ON p.node_id=n.id
+        LEFT JOIN users u ON u.id=n.owner_id
         {where}
         GROUP BY n.id ORDER BY n.active DESC, free_count DESC, n.region, n.id
         """

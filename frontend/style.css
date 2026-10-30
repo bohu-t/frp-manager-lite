@@ -2632,3 +2632,7 @@ html[data-theme="dark"] .user-notify .notify-chip{background:#0f172a;border-colo
 .ann-content{grid-column:1/-1}
 .ann-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:10px}
 @media(max-width:760px){.ann-form{grid-template-columns:1fr}}
+.owner-badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap}
+.owner-badge.self{background:#e0f2fe;color:#0369a1}
+.owner-badge.hosted{background:#f1f5f9;color:#475569}
+.nn-self-tag{display:inline-block;padding:1px 7px;border-radius:999px;background:rgba(255,255,255,.22);color:#fff;font-size:10px;font-weight:700;letter-spacing:.5px}
