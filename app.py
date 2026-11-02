@@ -9209,6 +9209,7 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 raise ValueError("月流量不合法")
             monthly_traffic_bytes = int(monthly_gb * 1024 ** 3)
+            expires_at = parse_date_epoch(str(data.get("expires_at", "")).strip())
             if len(region) > 40:
                 raise ValueError("地区名称太长")
             if not name or len(name) > 40 or not name.replace("_", "").replace("-", "").isalnum():
@@ -9227,8 +9228,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("单节点端口池不要超过 20000 个")
             with db() as conn:
                 cur = conn.execute(
-                    "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, monthly_traffic_bytes, active, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, monthly_traffic_bytes, 1, note, now()),
+                    "INSERT INTO nodes(region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, monthly_traffic_bytes, active, note, created_at, expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (region, name, server_addr, server_port, auth_token, port_start, port_end, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, monthly_traffic_bytes, 1, note, now(), expires_at),
                 )
                 node_id = int(cur.lastrowid)
                 conn.executemany("INSERT OR IGNORE INTO ports(node_id, port, created_at) VALUES(?,?,?)", [(node_id, p, now()) for p in range(port_start, port_end + 1)])
@@ -9261,6 +9262,7 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 raise ValueError("月流量不合法")
             monthly_traffic_bytes = int(monthly_gb * 1024 ** 3)
+            expires_at = parse_date_epoch(str(data.get("expires_at", "")).strip())
             active = 1 if str(data.get("active", "1")) in ("1", "true", "True", "on", "yes") else 0
             if len(region) > 40:
                 raise ValueError("地区名称太长")
@@ -9280,8 +9282,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"ok": False, "error": "节点不存在"}, 404)
                     return
                 conn.execute(
-                    "UPDATE nodes SET region=?, name=?, server_addr=?, server_port=?, auth_token=?, web_port=?, dashboard_url=?, dashboard_user=?, dashboard_password=?, bandwidth_mbps=?, monthly_traffic_bytes=?, active=?, note=? WHERE id=?",
-                    (region, name, server_addr, server_port, auth_token, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, monthly_traffic_bytes, active, note, node_id),
+                    "UPDATE nodes SET region=?, name=?, server_addr=?, server_port=?, auth_token=?, web_port=?, dashboard_url=?, dashboard_user=?, dashboard_password=?, bandwidth_mbps=?, monthly_traffic_bytes=?, active=?, note=?, expires_at=? WHERE id=?",
+                    (region, name, server_addr, server_port, auth_token, web_port, dashboard_url, dashboard_user, dashboard_password, bandwidth_mbps, monthly_traffic_bytes, active, note, expires_at, node_id),
                 )
             self.send_json({"ok": True, "message": f"节点 {region} / {name} 已更新"})
         except sqlite3.IntegrityError:

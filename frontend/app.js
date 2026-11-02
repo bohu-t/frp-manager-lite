@@ -4341,6 +4341,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>frps token</label><input name="auth_token" required></div>
       <div><label>带宽（Mbps）</label><input name="bandwidth_mbps" type="number" min="0" step="1" placeholder="例如 100"><span class="muted small">填写节点带宽，0 表示不限</span></div>
       <div><label>月流量上限（GB）</label><input name="monthly_traffic_gb" type="number" min="0" step="0.1" placeholder="例如 1000"><span class="muted small">0 表示不限；用完后该节点停止服务</span></div>
+      <div><label>服务器到期时间</label><input name="expires_at" type="date"><span class="muted small">留空表示不限期</span></div>
       <div><label>状态</label><select name="active"><option value="1">启用</option><option value="0">停用</option></select></div>
       <div><label>备注</label><input name="note"></div>
       <div style="align-self:end"><button>保存修改</button><button type="button" class="secondary" onclick="document.querySelector('#editNodeCard').classList.add('hidden')">取消</button></div>
@@ -4353,6 +4354,7 @@ async function loadAdmin(section=currentAdminSection){
       <div><label>frps token</label><input name="auth_token" id="nodeAuthToken" value="${esc(genRandomToken())}" required><span class="muted small">已随机生成，可直接使用；<button type="button" class="link-btn" onclick="document.querySelector('#nodeAuthToken').value=genRandomToken()">重新生成</button></span></div>
       <div><label>带宽（Mbps）</label><input name="bandwidth_mbps" type="number" value="0" min="0" step="1"><span class="muted small">0 表示不限</span></div>
       <div><label>月流量上限（GB）</label><input name="monthly_traffic_gb" type="number" value="0" min="0" step="0.1"><span class="muted small">0 表示不限；用完后该节点停止服务</span></div>
+      <div><label>服务器到期时间</label><input name="expires_at" type="date"><span class="muted small">留空表示不限期</span></div>
       <div><label>端口起始</label><input name="port_start" type="number" value="20000" min="1" max="65535"></div>
       <div><label>端口结束</label><input name="port_end" type="number" value="20199" min="1" max="65535"></div>
       <div><label>frp 版本</label><select name="frp_channel" id="nodeFrpChannel"><option value="stable">稳定版（推荐）</option><option value="latest">最新版</option><option value="custom">自定义版本</option></select></div>
@@ -4828,7 +4830,8 @@ function editPlan(id){
   f.elements.bandwidth_limit_mbs.value = p.bandwidth_limit_mbs;
   f.elements.node_id.value = p.node_id || 0;
   f.elements.sort_order.value = p.sort_order;
-  f.elements.note.value = p.note;
+  f.elements.note.value = p.note || '';
+  if(f.elements.expires_at) f.elements.expires_at.value = p.expires_at ? new Date(Number(p.expires_at) * 1000).toISOString().slice(0, 10) : '';
   f.elements.fair_use_note.value = p.fair_use_note || '';
   f.elements.node_id.value = p.node_id || 0;
   f.scrollIntoView({behavior:'smooth', block:'center'});
