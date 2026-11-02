@@ -2085,13 +2085,16 @@ def apply_node_offline_policy(rows: list[dict[str, Any]]) -> None:
                             [str(owner["wecom_userid"] or "")])
 
 
-def fetch_node_frps_version(node: sqlite3.Row | dict[str, Any]) -> str:
+def fetch_node_frps_version(node: sqlite3.Row | dict[str, Any], creds: tuple[str, str] | None = None) -> str:
     """从节点 frps dashboard 的 /api/serverinfo 读取真实版本。"""
     url = node_dashboard_url(node)
     if not url:
         return ""
-    user = str(row_val(node, "dashboard_user", "") or "")
-    pwd = str(row_val(node, "dashboard_password", "") or "")
+    if creds is not None:
+        user, pwd = creds
+    else:
+        user = str(row_val(node, "dashboard_user", "") or "")
+        pwd = str(row_val(node, "dashboard_password", "") or "")
     try:
         req = urllib.request.Request(url.rstrip("/") + "/api/serverinfo")
         if user or pwd:
@@ -2112,8 +2115,15 @@ def refresh_node_health_snapshot() -> None:
         probe_node_auth_ports(rows)
     # 从 frps dashboard 同步真实版本（插件协议里的 version 是 0.1.0，不可用）
     version_updates: list[tuple[str, int]] = []
+    cred_map: dict[int, tuple[str, str]] = {}
+    try:
+        with db() as conn:
+            for r in conn.execute("SELECT id, dashboard_user, dashboard_password FROM nodes"):
+                cred_map[int(r["id"])] = (str(r["dashboard_user"] or ""), str(r["dashboard_password"] or ""))
+    except Exception:
+        cred_map = {}
     for n in rows:
-        ver = fetch_node_frps_version(n)
+        ver = fetch_node_frps_version(n, cred_map.get(int(n["id"])))
         if ver and ver != str(n.get("frps_version") or ""):
             version_updates.append((ver, int(n["id"])))
     if version_updates:
