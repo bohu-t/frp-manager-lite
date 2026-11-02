@@ -2085,12 +2085,47 @@ def apply_node_offline_policy(rows: list[dict[str, Any]]) -> None:
                             [str(owner["wecom_userid"] or "")])
 
 
+def fetch_node_frps_version(node: sqlite3.Row | dict[str, Any]) -> str:
+    """从节点 frps dashboard 的 /api/serverinfo 读取真实版本。"""
+    url = node_dashboard_url(node)
+    if not url:
+        return ""
+    user = str(row_val(node, "dashboard_user", "") or "")
+    pwd = str(row_val(node, "dashboard_password", "") or "")
+    try:
+        req = urllib.request.Request(url.rstrip("/") + "/api/serverinfo")
+        if user or pwd:
+            token = base64.b64encode(f"{user}:{pwd}".encode("utf-8")).decode()
+            req.add_header("Authorization", "Basic " + token)
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+        return str(data.get("version") or "")[:32]
+    except Exception:
+        return ""
+
+
 def refresh_node_health_snapshot() -> None:
     global _node_health_ts
     with db() as conn:
         rows = [node_public(r) for r in conn.execute("SELECT * FROM nodes ORDER BY id")]
     if rows:
         probe_node_auth_ports(rows)
+    # 从 frps dashboard 同步真实版本（插件协议里的 version 是 0.1.0，不可用）
+    version_updates: list[tuple[str, int]] = []
+    for n in rows:
+        ver = fetch_node_frps_version(n)
+        if ver and ver != str(n.get("frps_version") or ""):
+            version_updates.append((ver, int(n["id"])))
+    if version_updates:
+        try:
+            with db() as conn:
+                conn.executemany("UPDATE nodes SET frps_version=? WHERE id=?", version_updates)
+            for ver, nid in version_updates:
+                for n in rows:
+                    if int(n["id"]) == nid:
+                        n["frps_version"] = ver
+        except Exception:
+            pass
     try:
         apply_node_offline_policy(rows)
     except Exception:
@@ -9440,8 +9475,7 @@ class Handler(BaseHTTPRequestHandler):
             reason = ""
 
             with db() as conn:
-                if frp_version and callback_node_id and op.lower() == "login":
-                    conn.execute("UPDATE nodes SET frps_version=? WHERE id=?", (frp_version, int(callback_node_id)))
+                # frp 插件协议里的 version 恒为 0.1.0，不是 frps 版本，这里不再写入
                 user = conn.execute("SELECT * FROM users WHERE username=? AND active=1", (user_name,)).fetchone()
                 if not user:
                     reject, reason = True, "unknown, disabled or expired user"
