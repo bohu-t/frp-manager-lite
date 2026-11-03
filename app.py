@@ -1571,7 +1571,6 @@ def public_user(user: sqlite3.Row) -> dict[str, Any]:
         "username": user["username"],
         "role": user["role"],
         "token": user["token"],
-        "invite_key_used": row_val(user, "invite_key_used"),
         "email": row_val(user, "email", "") or "",
         "max_ports": user["max_ports"],
         "balance": q2(row_val(user, "balance", 0)),
@@ -1585,7 +1584,7 @@ def public_user(user: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def insert_user_record(conn: sqlite3.Connection, username: str, password_hash_value: str, role: str, token: str, max_ports: int, expires_at: int, node_id: int | None, invite_key_used: str = "", traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0, email: str = "") -> sqlite3.Cursor:
+def insert_user_record(conn: sqlite3.Connection, username: str, password_hash_value: str, role: str, token: str, max_ports: int, expires_at: int, node_id: int | None, traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0, email: str = "") -> sqlite3.Cursor:
     """Insert a user without any user-facing license binding.
 
     Older deployments may still have legacy users.license_key/machine_id columns with
@@ -1604,9 +1603,6 @@ def insert_user_record(conn: sqlite3.Connection, username: str, password_hash_va
     if "email" in table_cols:
         cols.insert(-1, "email")
         vals.insert(-1, str(email or ""))
-    if "invite_key_used" in table_cols:
-        cols.insert(4, "invite_key_used")
-        vals.insert(4, invite_key_used)
     if "license_key" in table_cols:
         cols.insert(4, "license_key")
         vals.insert(4, make_license_key())
@@ -1727,8 +1723,6 @@ def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int | None) 
         conn.execute("ALTER TABLE users ADD COLUMN node_id INTEGER REFERENCES nodes(id) ON DELETE SET NULL")
         if default_node_id is not None:
             conn.execute("UPDATE users SET node_id=? WHERE node_id IS NULL", (default_node_id,))
-    if "invite_key_used" not in user_cols:
-        conn.execute("ALTER TABLE users ADD COLUMN invite_key_used TEXT NOT NULL DEFAULT ''")
     if "email" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
     if "traffic_limit_bytes" not in user_cols:
@@ -1739,13 +1733,6 @@ def migrate_region_nodes(conn: sqlite3.Connection, default_node_id: int | None) 
     if "bandwidth_limit_kbps" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0")
 
-    invite_cols = {r["name"] for r in conn.execute("PRAGMA table_info(invite_keys)").fetchall()}
-    if "traffic_limit_bytes" not in invite_cols:
-        conn.execute("ALTER TABLE invite_keys ADD COLUMN traffic_limit_bytes INTEGER NOT NULL DEFAULT 0")
-    if "bandwidth_limit_kbps" not in invite_cols:
-        conn.execute("ALTER TABLE invite_keys ADD COLUMN bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0")
-    if "kind" not in invite_cols:
-        conn.execute("ALTER TABLE invite_keys ADD COLUMN kind TEXT NOT NULL DEFAULT 'register'")
 
     port_cols = [r["name"] for r in conn.execute("PRAGMA table_info(ports)").fetchall()]
     if "node_id" not in port_cols or "id" not in port_cols:
@@ -2858,7 +2845,6 @@ def init_db() -> None:
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'user',
                 token TEXT NOT NULL UNIQUE,
-                invite_key_used TEXT NOT NULL DEFAULT '',
                 email TEXT NOT NULL DEFAULT '',
                 max_ports INTEGER NOT NULL DEFAULT 5,
                 traffic_limit_bytes INTEGER NOT NULL DEFAULT 0,
@@ -2934,24 +2920,6 @@ def init_db() -> None:
                 username TEXT NOT NULL DEFAULT '',
                 reason TEXT NOT NULL DEFAULT '',
                 banned_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-                created_at INTEGER NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS invite_keys (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                seq_no INTEGER NOT NULL DEFAULT 0,
-                deleted INTEGER NOT NULL DEFAULT 0,
-                key TEXT NOT NULL UNIQUE,
-                kind TEXT NOT NULL DEFAULT 'register',
-                note TEXT NOT NULL DEFAULT '',
-                max_uses INTEGER NOT NULL DEFAULT 1,
-                used_count INTEGER NOT NULL DEFAULT 0,
-                max_ports INTEGER NOT NULL DEFAULT 5,
-                traffic_limit_bytes INTEGER NOT NULL DEFAULT 0,
-                bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0,
-                user_expires_days INTEGER NOT NULL DEFAULT 30,
-                active INTEGER NOT NULL DEFAULT 1,
-                expires_at INTEGER NOT NULL DEFAULT 0,
-                created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
                 created_at INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS email_codes (
@@ -3293,8 +3261,6 @@ def init_db() -> None:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
         if "expires_at" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0")
-        if "invite_key_used" not in cols:
-            conn.execute("ALTER TABLE users ADD COLUMN invite_key_used TEXT NOT NULL DEFAULT ''")
         if "email" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
         if "traffic_limit_bytes" not in cols:
@@ -3404,7 +3370,7 @@ def init_db() -> None:
             conn.execute("ALTER TABLE traffic_samples ADD COLUMN node_id INTEGER NOT NULL DEFAULT 0")
         if "remote_port" not in ts_cols:
             conn.execute("ALTER TABLE traffic_samples ADD COLUMN remote_port INTEGER NOT NULL DEFAULT 0")
-        for table in ("invite_keys", "recharge_keys", "software_license_keys"):
+        for table in ("recharge_keys", "software_license_keys"):
             tcols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
             if "seq_no" not in tcols:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN seq_no INTEGER NOT NULL DEFAULT 0")
@@ -3450,13 +3416,6 @@ def init_db() -> None:
         )
         if "bandwidth_mbps" not in node_cols:
             conn.execute("ALTER TABLE nodes ADD COLUMN bandwidth_mbps INTEGER NOT NULL DEFAULT 0")
-        invite_cols = {r["name"] for r in conn.execute("PRAGMA table_info(invite_keys)").fetchall()}
-        if "traffic_limit_bytes" not in invite_cols:
-            conn.execute("ALTER TABLE invite_keys ADD COLUMN traffic_limit_bytes INTEGER NOT NULL DEFAULT 0")
-        if "bandwidth_limit_kbps" not in invite_cols:
-            conn.execute("ALTER TABLE invite_keys ADD COLUMN bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0")
-        if "kind" not in invite_cols:
-            conn.execute("ALTER TABLE invite_keys ADD COLUMN kind TEXT NOT NULL DEFAULT 'register'")
         # software_license.server_url migration
         sw_cols = {r["name"] for r in conn.execute("PRAGMA table_info(software_license)").fetchall()}
         if "server_url" not in sw_cols:
@@ -3534,7 +3493,7 @@ def create_user(username: str, password: str, max_ports: int, expires_days: int,
         if len(free_ports) < max_ports:
             return False, f"端口池不足，只剩 {len(free_ports)} 个可用端口"
         try:
-            cur = insert_user_record(conn, username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, expires_at, node_id, "", traffic_limit_bytes, bandwidth_limit_kbps, email)
+            cur = insert_user_record(conn, username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, expires_at, node_id, traffic_limit_bytes, bandwidth_limit_kbps, email)
         except sqlite3.IntegrityError:
             return False, "用户名已存在"
         user_id = cur.lastrowid
@@ -3655,111 +3614,35 @@ def create_software_license_keys_batch(note: str, plan: str, expires_days: int, 
     return True, f"已生成 {len(keys)} 个软件授权码", keys
 
 
-def create_invite_key(note: str, max_uses: int, max_ports: int, user_expires_days: int, key_expires_days: int, created_by: int, traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0) -> tuple[bool, str, str | None]:
-    note = note.strip()[:120]
-    max_uses = 1  # 注册密钥按业务规则只能使用一次
-    if max_ports < 1 or max_ports > 100:
-        return False, "端口数量必须在 1-100 之间", None
-    if user_expires_days < 0 or user_expires_days > 3650:
-        return False, "用户有效期必须在 0-3650 天之间", None
-    if key_expires_days < 0 or key_expires_days > 3650:
-        return False, "密钥有效期必须在 0-3650 天之间", None
-    if traffic_limit_bytes < 0 or bandwidth_limit_kbps < 0:
-        return False, "流量/网速限制不能小于 0", None
-    key = "FML-" + secrets.token_urlsafe(18).replace("-", "").replace("_", "")[:24].upper()
-    key_expires_at = 0 if key_expires_days == 0 else now() + key_expires_days * 86400
-    with db() as conn:
-        conn.execute(
-            "INSERT INTO invite_keys(seq_no, key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, expires_at, created_by, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-            (int(conn.execute("SELECT COALESCE(MAX(seq_no),0) FROM invite_keys").fetchone()[0]) + 1,
-             key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, key_expires_at, created_by, now()),
-        )
-    return True, "密钥已生成", key
-
-
-def create_invite_keys_batch(note: str, max_uses: int, max_ports: int, user_expires_days: int, key_expires_days: int, created_by: int, count: int, traffic_limit_bytes: int = 0, bandwidth_limit_kbps: int = 0, kind: str = "register") -> tuple[bool, str, list[str]]:
-    note = note.strip()[:120]
-    max_uses = 1  # 注册/续期密钥按业务规则只能使用一次
-    kind = str(kind).lower()
-    if kind not in ("register", "renew", "reset"):
-        kind = "register"
-    if count < 1 or count > 500:
-        return False, "单次生成数量必须在 1-500 之间", []
-    if kind == "register" and (max_ports < 1 or max_ports > 100):
-        return False, "端口数量必须在 1-100 之间", []
-    if user_expires_days < 0 or user_expires_days > 3650:
-        return False, ("续期天数" if kind == "renew" else "用户有效期") + "必须在 0-3650 天之间", []
-    if key_expires_days < 0 or key_expires_days > 3650:
-        return False, "密钥有效期必须在 0-3650 天之间", []
-    if traffic_limit_bytes < 0 or bandwidth_limit_kbps < 0:
-        return False, "流量/网速限制不能小于 0", []
-    keys: list[str] = []
-    key_expires_at = 0 if key_expires_days == 0 else now() + key_expires_days * 86400
-    prefix = {"renew": "RNW-", "reset": "RST-"}.get(kind, "FML-")
-    with db() as conn:
-        for _ in range(count):
-            key = prefix + secrets.token_urlsafe(18).replace("-", "").replace("_", "")[:24].upper()
-            conn.execute(
-                "INSERT INTO invite_keys(seq_no, key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, expires_at, created_by, created_at, kind) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                (int(conn.execute("SELECT COALESCE(MAX(seq_no),0) FROM invite_keys").fetchone()[0]) + 1,
-                 key, note, max_uses, max_ports, traffic_limit_bytes, bandwidth_limit_kbps, user_expires_days, key_expires_at, created_by, now(), kind),
-            )
-            keys.append(key)
-    return True, f"已生成 {len(keys)} 枚密钥", keys
-
-
-def register_with_invite(username: str, password: str, invite_key: str, node_id: int, email: str = "", code: str = "") -> tuple[bool, str]:
+def register_open_account(username: str, password: str, node_id: int, email: str = "", code: str = "") -> tuple[bool, str]:
     username = username.strip()
-    invite_key = invite_key.strip().upper()
     email = str(email or "").strip()
+    if not OPEN_REGISTRATION:
+        return False, "当前未开放注册，请联系管理员开通账号"
     if not username or len(username) > 32 or not username.replace("_", "").replace("-", "").isalnum():
         return False, "用户名只能包含字母、数字、下划线、短横线，长度 1-32"
     if len(password) < 6:
         return False, "密码至少 6 位"
-    if not OPEN_REGISTRATION and not invite_key:
-        return False, "请输入注册密钥"
-    if OPEN_REGISTRATION and not invite_key:
-        # 开放注册：必须填写邮箱并通过邮箱验证码校验
-        if not email or "@" not in email or len(email) < 5 or len(email) > 120:
-            return False, "请填写正确的邮箱地址"
-        if not str(code or "").strip():
-            return False, "请填写邮箱验证码"
-        ok_code, msg_code = verify_registration_code(username, email, code)
-        if not ok_code:
-            return False, msg_code
-        with db() as conn:
-            if conn.execute("SELECT id FROM users WHERE lower(email)=lower(?) AND email!=''", (email,)).fetchone():
-                return False, "该邮箱已被注册"
+    if not email or "@" not in email or len(email) < 5 or len(email) > 120:
+        return False, "请填写正确的邮箱地址"
+    if not str(code or "").strip():
+        return False, "请填写邮箱验证码"
+    ok_code, msg_code = verify_registration_code(username, email, code)
+    if not ok_code:
+        return False, msg_code
     with db() as conn:
-        key_row = None
-        if invite_key:
-            key_row = conn.execute("SELECT * FROM invite_keys WHERE key=? AND deleted=0", (invite_key,)).fetchone()
-            if not key_row:
-                if not OPEN_REGISTRATION:
-                    return False, "注册密钥无效"
-                key_row = None
-            elif (row_val(key_row, "kind", "register") or "register") != "register":
-                return False, "注册密钥无效"
-            elif key_row["used_count"] >= 1:
-                return False, "注册密钥已使用"
-            elif not key_row["active"]:
-                return False, "注册密钥已停用"
-            elif key_row["expires_at"] and key_row["expires_at"] <= now():
-                return False, "注册密钥已过期"
+        if conn.execute("SELECT id FROM users WHERE lower(email)=lower(?) AND email!=''", (email,)).fetchone():
+            return False, "该邮箱已被注册"
         node = conn.execute("SELECT * FROM nodes WHERE id=? AND active=1", (node_id,)).fetchone() if node_id else None
-        if key_row and not node:
-            return False, "请选择有效的地区节点"
         if not node:
             node_id = None
-        max_ports = int(key_row["max_ports"]) if key_row else OPEN_REGISTRATION_MAX_PORTS
-        traffic_limit_bytes = int(row_val(key_row, "traffic_limit_bytes", 0) or 0) if key_row else 0
-        bandwidth_limit_kbps = int(row_val(key_row, "bandwidth_limit_kbps", 0) or 0) if key_row else 0
+        max_ports = OPEN_REGISTRATION_MAX_PORTS or DEFAULT_MAX_PORTS
         free_ports = available_ports_for_assignment(conn, node_id, max_ports) if node and max_ports else []
         if node and len(free_ports) < max_ports:
             return False, f"端口池不足，只剩 {len(free_ports)} 个可用端口"
-        user_expires_at = 0
+        user_expires_at = now() + OPEN_REGISTRATION_EXPIRES_DAYS * 86400 if OPEN_REGISTRATION_EXPIRES_DAYS > 0 else 0
         try:
-            cur = insert_user_record(conn, username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, user_expires_at, node_id, invite_key if key_row else ("OPEN-" + secrets.token_urlsafe(10)), traffic_limit_bytes, bandwidth_limit_kbps, email)
+            cur = insert_user_record(conn, username, password_hash(password), "user", secrets.token_urlsafe(24), max_ports, user_expires_at, node_id, 0, 0, email)
         except sqlite3.IntegrityError as exc:
             if "users.username" in str(exc) or "username" in str(exc).lower():
                 return False, "用户名已存在"
@@ -3768,73 +3651,8 @@ def register_with_invite(username: str, password: str, invite_key: str, node_id:
         user_id = cur.lastrowid
         if free_ports:
             conn.executemany("UPDATE ports SET user_id=? WHERE node_id=? AND port=?", [(user_id, node_id, r["port"]) for r in free_ports])
-        if key_row:
-            claimed = conn.execute("UPDATE invite_keys SET used_count=used_count+1, active=0 WHERE id=? AND used_count=0 AND active=1", (key_row["id"],)).rowcount
-            if claimed != 1:
-                conn.rollback()
-                return False, "注册密钥已使用"
     detail = f"地区节点：{node['region']} / {node['name']}，已分配 {max_ports} 个端口" if node else "暂未绑定节点和端口"
     return True, f"注册成功，{detail}，到期时间：{fmt_time(user_expires_at)}"
-
-def reset_password_with_key(username: str, new_password: str, raw_key: str) -> tuple[bool, str]:
-    username = str(username or "").strip()
-    key = str(raw_key or "").strip().upper()
-    if not username:
-        return False, "请输入用户名"
-    if len(new_password) < 6:
-        return False, "新密码至少 6 位"
-    if not key:
-        return False, "请输入重置密钥"
-    with db() as conn:
-        row = conn.execute("SELECT * FROM invite_keys WHERE key=? AND deleted=0", (key,)).fetchone()
-        if not row or (row_val(row, "kind", "register") or "register") != "reset":
-            return False, "重置密钥无效"
-        if row["used_count"] >= 1:
-            return False, "重置密钥已使用"
-        if not row["active"]:
-            return False, "重置密钥已停用"
-        if row["expires_at"] and row["expires_at"] <= now():
-            return False, "重置密钥已过期"
-        urow = conn.execute("SELECT id FROM users WHERE username=? AND role!='admin'", (username,)).fetchone()
-        if not urow:
-            return False, "用户不存在或不允许重置管理员密码"
-        claimed = conn.execute("UPDATE invite_keys SET used_count=used_count+1, active=0 WHERE id=? AND used_count=0 AND active=1", (row["id"],)).rowcount
-        if claimed != 1:
-            conn.rollback()
-            return False, "重置密钥已使用"
-        conn.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash(new_password), urow["id"]))
-        conn.execute("DELETE FROM sessions WHERE user_id=?", (urow["id"],))
-    audit("password_reset", None, None, None, "", f"用户 {username} 通过重置密钥修改密码")
-    return True, "密码已重置，请用新密码登录"
-
-
-def renew_user_with_key(user: sqlite3.Row, raw_key: str) -> tuple[bool, str]:
-    key = raw_key.strip().upper()
-    if not key:
-        return False, "请输入续期密钥"
-    with db() as conn:
-        row = conn.execute("SELECT * FROM invite_keys WHERE key=? AND deleted=0", (key,)).fetchone()
-        if not row or (row_val(row, "kind", "register") or "register") != "renew":
-            return False, "续期密钥无效"
-        if row["used_count"] >= 1:
-            return False, "续期密钥已使用"
-        if not row["active"]:
-            return False, "续期密钥已停用"
-        if row["expires_at"] and row["expires_at"] <= now():
-            return False, "续期密钥已过期"
-        days = int(row["user_expires_days"])
-        if days <= 0:
-            return False, "续期密钥未设置有效天数"
-        urow = conn.execute("SELECT expires_at FROM users WHERE id=?", (user["id"],)).fetchone()
-        base = int(urow["expires_at"] or 0) if urow else 0
-        new_expires_at = max(now(), base) + days * 86400
-        claimed = conn.execute("UPDATE invite_keys SET used_count=used_count+1, active=0 WHERE id=? AND used_count=0 AND active=1", (row["id"],)).rowcount
-        if claimed != 1:
-            conn.rollback()
-            return False, "续期密钥已使用"
-        conn.execute("UPDATE users SET expires_at=?, active=1 WHERE id=?", (new_expires_at, user["id"]))
-    audit("user_renew", user, None, None, "", f"使用续期密钥 +{days} 天")
-    return True, f"续期成功，已延长 {days} 天，到期时间：{fmt_time(new_expires_at)}"
 
 
 def audit(event: str, user: sqlite3.Row | None = None, node_id: int | None = None, remote_port: int | None = None, proxy_type: str = "", detail: str = "") -> None:
@@ -4475,7 +4293,7 @@ def make_full_backup_zip(admin_username: str) -> tuple[str, bytes]:
             "created_by": admin_username,
             "db_path": str(DB_PATH),
             "files": ["data.sqlite3", "dump.sql", "metadata.json", "RESTORE.md"],
-            "note": "Full backup contains users, nodes, ports, tunnels, sessions, invite keys, bans, and audit logs. Keep it private.",
+            "note": "Full backup contains users, nodes, ports, tunnels, sessions, bans, and audit logs. Keep it private.",
         }
         restore = f"""# frp-manager-lite 恢复说明
 
@@ -4516,8 +4334,8 @@ sudo systemctl start frp-manager-lite
 
 ## 注意
 
-- 这个备份包含用户 token、注册密钥、会话、审计日志等敏感数据，请勿公开。
-- 恢复后，用户、端口、节点、密钥都会回到备份时状态。
+- 这个备份包含用户 token、会话、审计日志等敏感数据，请勿公开。
+- 恢复后，用户、端口、节点都会回到备份时状态。
 - 如果新服务器路径不同，只要 `FML_DB` 指向恢复后的数据库即可。
 """
         buf = io.BytesIO()
@@ -4562,7 +4380,7 @@ def restore_full_backup_zip(admin_username: str, filename: str, content_base64: 
             ok = chk.execute("PRAGMA integrity_check").fetchone()[0]
             if ok != "ok":
                 return False, f"SQLite 完整性检查失败：{ok}", {}
-            required = {"users", "nodes", "ports", "tunnels", "invite_keys"}
+            required = {"users", "nodes", "ports", "tunnels"}
             tables = {r[0] for r in chk.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             missing = sorted(required - tables)
             if missing:
@@ -6396,8 +6214,6 @@ class Handler(BaseHTTPRequestHandler):
             self.download_frpc_deploy_script()
         elif path == "/config/frps.example.toml":
             self.download_frps_example()
-        elif path == "/admin/export/invite-keys.csv":
-            self.export_invite_keys_csv()
         elif path == "/admin/backup/full.zip":
             self.download_full_backup()
         else:
@@ -6721,34 +6537,6 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json({"ok": False, "error": str(e)}, 400)
 
-    def export_invite_keys_csv(self) -> None:
-        if not self.require_admin() or not self.require_software_license():
-            return
-        import csv
-        buf = io.StringIO()
-        w = csv.writer(buf)
-        w.writerow(["密钥", "类型", "备注", "已用次数", "可用次数", "端口数", "每日流量上限(GB)", "速率上限(MB/s)", "有效期或续期天数", "状态", "密钥到期", "创建时间"])
-        with db() as conn:
-            for k in conn.execute("SELECT * FROM invite_keys WHERE deleted=0 AND active=1 AND used_count=0 AND used_count < max_uses AND (expires_at=0 OR expires_at>?) ORDER BY id DESC", (now(),)):
-                kind = row_val(k, "kind", "register") or "register"
-                is_register = kind == "register"
-                kind_label = {"register": "注册", "renew": "续期", "reset": "重置"}.get(kind, "注册")
-                w.writerow([
-                    k["key"],
-                    kind_label,
-                    k["note"],
-                    k["used_count"],
-                    k["max_uses"],
-                    k["max_ports"] if is_register else "-",
-                    round(int(row_val(k, "traffic_limit_bytes", 0) or 0) / 1024 / 1024 / 1024, 2) if is_register else "-",
-                    round(int(row_val(k, "bandwidth_limit_kbps", 0) or 0) / 1024, 2) if is_register else "-",
-                    k["user_expires_days"],
-                    "启用" if k["active"] else "停用",
-                    fmt_time(k["expires_at"]),
-                    fmt_time(k["created_at"]),
-                ])
-        self.send_body(buf.getvalue().encode("utf-8-sig"), 200, "text/csv; charset=utf-8", {"Content-Disposition": 'attachment; filename="invite-keys.csv"'})
-
     def serve_static(self, path: str) -> None:
         if path in {"", "/"}:
             path = "/index.html"
@@ -6879,7 +6667,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         if path == "/api/registration-status":
-            self.send_json({"ok": True, "open_registration": OPEN_REGISTRATION, "max_ports": OPEN_REGISTRATION_MAX_PORTS, "expires_days": OPEN_REGISTRATION_EXPIRES_DAYS})
+            self.send_json({"ok": True, "open_registration": OPEN_REGISTRATION, "max_ports": OPEN_REGISTRATION_MAX_PORTS or DEFAULT_MAX_PORTS, "expires_days": OPEN_REGISTRATION_EXPIRES_DAYS})
             return
         if path == "/api/nodes":
             with db() as conn:
@@ -7465,27 +7253,6 @@ class Handler(BaseHTTPRequestHandler):
                     item["node_region"] = r["node_region"]
                     users.append(item)
                 nodes = list_public_nodes(conn, active_only=False)
-                invite_keys = []
-                for k in conn.execute("SELECT * FROM invite_keys WHERE deleted=0 ORDER BY id DESC LIMIT 200"):
-                    invite_keys.append({
-                        "id": k["id"],
-                        "seq_no": row_val(k, "seq_no", 0),
-                        "key": k["key"],
-                        "kind": row_val(k, "kind", "register") or "register",
-                        "note": k["note"],
-                        "max_uses": k["max_uses"],
-                        "used_count": k["used_count"],
-                        "remaining": max(0, k["max_uses"] - k["used_count"]),
-                        "max_ports": k["max_ports"],
-                        "traffic_limit_bytes": int(row_val(k, "traffic_limit_bytes", 0) or 0),
-                        "bandwidth_limit_kbps": int(row_val(k, "bandwidth_limit_kbps", 0) or 0),
-                        "user_expires_days": k["user_expires_days"],
-                        "active": bool(k["active"]),
-                        "expires_at": k["expires_at"],
-                        "expires_text": fmt_time(k["expires_at"]),
-                        "expired": bool(k["expires_at"] and k["expires_at"] <= now()),
-                        "created_at": k["created_at"],
-                    })
                 logs = [row_dict(r) for r in conn.execute("SELECT * FROM audit_logs ORDER BY id DESC LIMIT 80")]
                 stats = {
                     "port_start": PORT_START,
@@ -7493,7 +7260,6 @@ class Handler(BaseHTTPRequestHandler):
                     "total_ports": conn.execute("SELECT COUNT(*) c FROM ports").fetchone()["c"],
                     "free_ports": conn.execute("SELECT COUNT(*) c FROM ports WHERE user_id IS NULL").fetchone()["c"],
                     "tunnel_count": conn.execute("SELECT COUNT(*) c FROM tunnels").fetchone()["c"],
-                    "invite_key_count": conn.execute("SELECT COUNT(*) c FROM invite_keys WHERE deleted=0").fetchone()["c"],
                     "ban_count": conn.execute("SELECT COUNT(*) c FROM user_bans").fetchone()["c"],
                     "plan_count": conn.execute("SELECT COUNT(*) c FROM plans WHERE active=1").fetchone()["c"],
                     "order_count": conn.execute("SELECT COUNT(*) c FROM orders WHERE status='paid'").fetchone()["c"],
@@ -7508,7 +7274,7 @@ class Handler(BaseHTTPRequestHandler):
                             "active": bool(k["active"]), "expires_at": k["expires_at"], "expires_text": fmt_time(k["expires_at"]),
                             "expired": bool(k["expires_at"] and k["expires_at"] <= now()), "activated_at": k["activated_at"], "last_check_at": k["last_check_at"], "created_at": k["created_at"],
                         })
-            self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "invite_keys": invite_keys, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": effective_setup_key(), "has_setup_key": bool(effective_setup_key()), "setup_key_source": setup_key_source(), "smtp": smtp_public(smtp_config(conn)), "payment": payment_public(payment_config(conn)), "plans": list_plans(conn, active_only=False), "orders": [order_public(r) for r in conn.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 100")], "recharge_keys": [{"id": r["id"], "seq_no": r["seq_no"], "key": r["key"], "amount": q2(r["amount"] or 0), "note": r["note"], "active": bool(r["active"]), "expires_at": r["expires_at"], "used_by": r["used_by"], "used_at": r["used_at"], "created_at": r["created_at"]} for r in conn.execute("SELECT * FROM recharge_keys WHERE deleted=0 ORDER BY id DESC LIMIT 200")]})
+            self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": effective_setup_key(), "has_setup_key": bool(effective_setup_key()), "setup_key_source": setup_key_source(), "smtp": smtp_public(smtp_config(conn)), "payment": payment_public(payment_config(conn)), "plans": list_plans(conn, active_only=False), "orders": [order_public(r) for r in conn.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 100")], "recharge_keys": [{"id": r["id"], "seq_no": r["seq_no"], "key": r["key"], "amount": q2(r["amount"] or 0), "note": r["note"], "active": bool(r["active"]), "expires_at": r["expires_at"], "used_by": r["used_by"], "used_at": r["used_at"], "created_at": r["created_at"]} for r in conn.execute("SELECT * FROM recharge_keys WHERE deleted=0 ORDER BY id DESC LIMIT 200")]})
             return
         if path == "/api/admin/frps-proxies":
             if not self.require_admin():
@@ -7549,7 +7315,6 @@ class Handler(BaseHTTPRequestHandler):
                     "active": int(user_row["active"] or 0),
                 }
                 tunnel_count = conn.execute("SELECT COUNT(*) c FROM tunnels").fetchone()["c"]
-                invite_key_count = conn.execute("SELECT COUNT(*) c FROM invite_keys WHERE deleted=0").fetchone()["c"]
                 ban_count = conn.execute("SELECT COUNT(*) c FROM user_bans").fetchone()["c"]
                 traffic_row = conn.execute(
                     "SELECT COALESCE(SUM(mx), 0) AS total FROM (SELECT MAX(bytes) AS mx FROM traffic_samples WHERE day=? GROUP BY user_id, proxy_type)",
@@ -7618,7 +7383,6 @@ class Handler(BaseHTTPRequestHandler):
                 "port_stats": port_stats,
                 "user_stats": user_stats,
                 "tunnel_count": int(tunnel_count),
-                "invite_key_count": int(invite_key_count),
                 "ban_count": int(ban_count),
                 "traffic_today": traffic_today,
                 "host": host_stats_with_history(),
@@ -7742,7 +7506,7 @@ class Handler(BaseHTTPRequestHandler):
             if not ok_rate:
                 self.send_json({"ok": False, "error": f"注册尝试过多，请 {retry_after} 秒后再试", "retry_after": retry_after}, 429)
                 return
-            ok, msg = register_with_invite(str(data.get("username", "")), str(data.get("password", "")), str(data.get("invite_key", "")), int(data.get("node_id", 0)), str(data.get("email", "")), str(data.get("code", "")))
+            ok, msg = register_open_account(str(data.get("username", "")), str(data.get("password", "")), int(data.get("node_id", 0)), str(data.get("email", "")), str(data.get("code", "")))
             self.send_json({"ok": ok, "message": msg, "error": None if ok else msg}, 200 if ok else 400)
             return
 
@@ -8259,15 +8023,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True}, headers={"Set-Cookie": f"fml_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{self.secure_cookie_suffix()}"})
             return
 
-        if path == "/api/password/reset":
-            ok_rate, retry_after = rate_limit_check(f"pwreset:{client_ip(self)}", REGISTER_RATE_LIMIT)
-            if not ok_rate:
-                self.send_json({"ok": False, "error": f"操作过于频繁，请 {retry_after} 秒后再试", "retry_after": retry_after}, 429)
-                return
-            ok, msg = reset_password_with_key(str(data.get("username", "")), str(data.get("password", "")), str(data.get("reset_key", "")))
-            self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg}, 200 if ok else 400)
-            return
-
         if path == "/api/password/request-code":
             ok_rate, retry_after = rate_limit_check(f"pwcode:{client_ip(self)}", REGISTER_RATE_LIMIT)
             if not ok_rate:
@@ -8329,14 +8084,6 @@ class Handler(BaseHTTPRequestHandler):
             with db() as conn:
                 sw_license = current_software_license(conn)
             self.send_json({"ok": False, "error": "software_license_required", "license": sw_license}, 402)
-            return
-
-        if path == "/api/user/renew":
-            if user["role"] == "admin":
-                self.send_json({"ok": False, "error": "管理员账号无需续期"}, 403)
-                return
-            ok, msg = renew_user_with_key(user, str(data.get("key", "")))
-            self.send_json({"ok": ok, "message": msg if ok else None, "error": None if ok else msg}, 200 if ok else 400)
             return
 
         if path == "/api/user/email":
@@ -8485,12 +8232,6 @@ class Handler(BaseHTTPRequestHandler):
             self.admin_software_license_toggle(data)
         elif path == "/api/admin/software-licenses/unbind":
             self.admin_software_license_unbind(data)
-        elif path == "/api/admin/invite-keys/create":
-            self.admin_invite_create(user, data)
-        elif path == "/api/admin/invite-keys/toggle":
-            self.admin_invite_toggle(data)
-        elif path == "/api/admin/invite-keys/delete":
-            self.admin_invite_delete(data)
         elif path == "/api/admin/nodes/create":
             self.admin_node_create(data)
         elif path == "/api/admin/nodes/update":
@@ -9198,39 +8939,6 @@ class Handler(BaseHTTPRequestHandler):
                 return
             conn.execute("UPDATE users SET email=? WHERE id=?", (email, user_id))
         self.send_json({"ok": True, "message": f"已更新 {row['username']} 的邮箱"})
-
-    def admin_invite_create(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
-        if not self.require_admin():
-            return
-        ok, msg, keys = create_invite_keys_batch(
-            str(data.get("note", "")),
-            1,
-            int(data.get("max_ports", DEFAULT_MAX_PORTS)),
-            int(data.get("user_expires_days", 30)),
-            0,
-            admin["id"],
-            int(data.get("count", 1)),
-            traffic_gb_to_bytes(data.get("traffic_limit_gb", 0)),
-            speed_mbs_to_kbps(data.get("bandwidth_limit_mbs", 0)),
-            str(data.get("kind", "register")),
-        )
-        self.send_json({"ok": ok, "message": msg if ok else None, "key": keys[0] if keys else None, "keys": keys, "error": None if ok else msg}, 200 if ok else 400)
-
-    def admin_invite_toggle(self, data: dict[str, Any]) -> None:
-        if not self.require_admin():
-            return
-        key_id = int(data.get("id", 0))
-        with db() as conn:
-            conn.execute("UPDATE invite_keys SET active=CASE active WHEN 1 THEN 0 ELSE 1 END WHERE id=?", (key_id,))
-        self.send_json({"ok": True})
-
-    def admin_invite_delete(self, data: dict[str, Any]) -> None:
-        if not self.require_admin():
-            return
-        key_id = int(data.get("id", 0))
-        with db() as conn:
-            conn.execute("UPDATE invite_keys SET deleted=1, active=0 WHERE id=?", (key_id,))
-        self.send_json({"ok": True, "message": "密钥已删除"})
 
     def admin_node_create(self, data: dict[str, Any]) -> None:
         if not self.require_admin():

@@ -15,7 +15,7 @@ let clientNodeProbeUrl = '';
 let colorMode = localStorage.getItem('fml_color_mode') || 'light';
 let trafficRange = '30d';
 const trafficChartCache = {};
-let adminPages = {users:1, keys:1, nodes:1, risk:1};
+let adminPages = {users:1, nodes:1, risk:1};
 let adminUserSearch = '';
 let adminUserStatus = 'all';
 let adminUserNode = '';
@@ -1251,15 +1251,19 @@ async function fillNodeLatencies(){
 async function renderLogin(){
   clearAdminDashboardTimer();
   currentUser = null; setNav(); hideFlash();
-  let nodes = [];
+  let nodes = [], registration = { open_registration: false };
+  try { registration = await api('/api/registration-status'); } catch(e) {}
   try { nodes = await loadNodes(); } catch(e) {}
+  const registerLink = registration.open_registration
+    ? '<a class="auth-link" href="#" onclick="renderRegister();return false;">没有账号？</a>'
+    : '';
   app.innerHTML = authShell('登录', '登录后管理隧道和下载配置', `
       <form id="loginForm" class="stack-form auth-login-form">
         <div class="input-group"><label class="input-label" for="loginUsername">用户名</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('user')}</span><input id="loginUsername" class="input-ios" name="username" autocomplete="username" placeholder="请输入用户名" required></div></div>
         <div class="input-group"><label class="input-label" for="loginPassword">密码</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('lock')}</span><input id="loginPassword" class="input-ios auth-password-input" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required><button type="button" class="auth-password-toggle" onclick="togglePasswordVisibility('loginPassword', this)" aria-label="显示密码" title="显示密码">${iconSvg('eye')}</button></div></div>
         <p><button class="wide auth-submit">登录</button></p>
       </form>`,
-      `<div class="auth-switch"><a class="auth-link" href="#" onclick="renderRegister();return false;">没有账号？</a><a class="auth-link" href="#" onclick="renderForgotPassword();return false;">忘记密码？</a></div>`, nodes);
+      `<div class="auth-switch">${registerLink}<a class="auth-link" href="#" onclick="renderForgotPassword();return false;">忘记密码？</a></div>`, nodes);
   document.querySelector('#loginForm').onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -1281,19 +1285,25 @@ async function renderLogin(){
 async function renderRegister(){
   clearAdminDashboardTimer();
   currentUser = null; setNav(); hideFlash();
-  let nodes = [], registration = {open_registration: false};
-  try { nodes = await loadNodes(); registration = await api('/api/registration-status'); } catch(e) { show('加载注册信息失败：' + e.message, true); }
-  const openRegistration = !!registration.open_registration;
-  const registerIntro = openRegistration ? '填写邮箱并通过验证码完成注册' : '输入密钥并选择适合你的地区';
-  app.innerHTML = authShell(openRegistration ? '开放注册' : '密钥注册', registerIntro, `
+  let registration = { open_registration: false };
+  try { registration = await api('/api/registration-status'); } catch(e) { show('加载注册信息失败：' + e.message, true); }
+  if(!registration.open_registration){
+    app.innerHTML = authShell('注册已关闭', '当前未开放自助注册', `
+      <div class="stack-form auth-login-form">
+        <p class="muted small">请联系管理员开通账号；开通后使用管理员提供的用户名和密码登录。</p>
+        <p class="row"><button type="button" onclick="renderLogin()">返回登录</button></p>
+      </div>`, '');
+    return;
+  }
+  app.innerHTML = authShell('开放注册', '填写邮箱并通过验证码完成注册', `
       <form id="registerForm" class="stack-form auth-login-form">
         <div class="input-group"><label class="input-label" for="registerUsername">用户名</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('user')}</span><input id="registerUsername" class="input-ios" name="username" autocomplete="username" placeholder="请输入用户名" required></div></div>
         <div class="input-group"><label class="input-label" for="registerPassword">密码</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('lock')}</span><input id="registerPassword" class="input-ios auth-password-input" name="password" type="password" autocomplete="new-password" minlength="6" placeholder="请输入密码（至少 6 位）" required><button type="button" class="auth-password-toggle" onclick="togglePasswordVisibility('registerPassword', this)" aria-label="显示密码" title="显示密码">${iconSvg('eye')}</button></div></div>
         <div class="input-group"><label class="input-label" for="registerPassword2">确认密码</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('lock')}</span><input id="registerPassword2" class="input-ios auth-password-input" name="password2" type="password" autocomplete="new-password" minlength="6" placeholder="请再次输入密码" required><button type="button" class="auth-password-toggle" onclick="togglePasswordVisibility('registerPassword2', this)" aria-label="显示密码" title="显示密码">${iconSvg('eye')}</button></div></div>
-        ${openRegistration ? `<div class="input-group"><label class="input-label" for="registerEmail">邮箱</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('mail')}</span><input id="registerEmail" class="input-ios" name="email" type="email" autocomplete="email" placeholder="请输入邮箱，用于接收验证码" required></div></div>
-        <div class="input-group"><label class="input-label" for="registerCode">邮箱验证码</label><div class="row" style="gap:8px"><input id="registerCode" class="input-ios" name="code" inputmode="numeric" maxlength="6" placeholder="6 位验证码" required style="flex:1;min-width:0"><button type="button" class="secondary" id="registerCodeBtn" onclick="sendRegisterCode()">获取验证码</button></div></div><input type="hidden" name="node_id" value="0"><input type="hidden" name="invite_key" value="">` : '<div class="input-group"><label class="input-label" for="registerNode">接入节点</label><select id="registerNode" class="input-ios" name="node_id" required>${nodeOptions(nodes)}</select></div><div class="input-group"><label class="input-label" for="registerKey">注册密钥</label><input id="registerKey" class="input-ios" name="invite_key" placeholder="FML-..." required></div>'}
+        <div class="input-group"><label class="input-label" for="registerEmail">邮箱</label><div class="auth-input-wrap"><span class="auth-input-icon">${iconSvg('mail')}</span><input id="registerEmail" class="input-ios" name="email" type="email" autocomplete="email" placeholder="请输入邮箱，用于接收验证码" required></div></div>
+        <div class="input-group"><label class="input-label" for="registerCode">邮箱验证码</label><div class="row" style="gap:8px"><input id="registerCode" class="input-ios" name="code" inputmode="numeric" maxlength="6" placeholder="6 位验证码" required style="flex:1;min-width:0"><button type="button" class="secondary" id="registerCodeBtn" onclick="sendRegisterCode()">获取验证码</button></div></div>
         <p class="row"><button>注册</button><button type="button" class="secondary" onclick="renderLogin()">返回登录</button></p>
-      </form>`, '', nodes);
+      </form>`, '');
   document.querySelector('#registerForm').onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -4267,12 +4277,10 @@ async function loadAdmin(section=currentAdminSection){
     return true;
   });
   const usersPage = clampPage(adminPages.users, filteredUsers.length, ADMIN_PAGE_SIZE);
-  const keysPage = clampPage(adminPages.keys, (data.invite_keys || []).length, ADMIN_PAGE_SIZE);
   const nodesPage = clampPage(adminPages.nodes, (data.nodes || []).length, ADMIN_PAGE_SIZE);
   const riskPage = clampPage(adminPages.risk, (data.logs || []).length, ADMIN_PAGE_SIZE);
-  adminPages.users = usersPage; adminPages.keys = keysPage; adminPages.nodes = nodesPage; adminPages.risk = riskPage;
+  adminPages.users = usersPage; adminPages.nodes = nodesPage; adminPages.risk = riskPage;
   const usersSlice = pageItems(filteredUsers, usersPage, ADMIN_PAGE_SIZE);
-  const keysSlice = pageItems(data.invite_keys || [], keysPage, ADMIN_PAGE_SIZE);
   const nodesSlice = pageItems(data.nodes || [], nodesPage, ADMIN_PAGE_SIZE);
   const logsSlice = pageItems(data.logs || [], riskPage, ADMIN_PAGE_SIZE);
   const rows = usersSlice.map((u, i) => `
@@ -4300,25 +4308,6 @@ async function loadAdmin(section=currentAdminSection){
       <td>${esc(n.note)}</td>
       <td class="actions node-actions"><button class="node-action" onclick='editNode(${JSON.stringify(n)})'>编辑</button><button class="node-action" onclick="nodeToggle(${n.id})">${n.active ? '停用' : '启用'}</button><a class="btn node-action" href="/config/frps.example.toml?node_id=${n.id}">frps配置</a><button class="node-action node-action-danger" onclick="nodeDelete(${n.id})">删除</button></td>
     </tr>`).join('') || emptyRow(10, '还没有节点');
-  const KEY_KIND_LABEL = {register: '注册', renew: '续期', reset: '重置'};
-  const keyRows = keysSlice.map(k => {
-    const kind = ['register', 'renew', 'reset'].includes(k.kind) ? k.kind : 'register';
-    const isRegister = kind === 'register';
-    return `
-    <tr>
-      <td>${k.id}</td>
-      <td><span class="key-kind ${kind}">${KEY_KIND_LABEL[kind]}</span></td>
-      <td><code class="token" title="${esc(k.key)}">${esc(k.key)}</code></td>
-      <td>${esc(k.note)}</td>
-      <td>${k.used_count}/${k.max_uses}</td>
-      <td>${isRegister ? k.max_ports : '-'}</td>
-      <td>${isRegister ? `${fmtBytes(k.traffic_limit_bytes)} / ${k.bandwidth_limit_kbps ? `${(Number(k.bandwidth_limit_kbps) / 1024).toFixed(1)} MB/s` : '不限'}` : '-'}</td>
-      <td>${kind === 'renew' ? `+${k.user_expires_days} 天` : (isRegister ? (k.user_expires_days === 0 ? '永不过期' : `${k.user_expires_days} 天`) : '-')}</td>
-      <td>${esc(k.expires_text)} ${k.expired ? '<span class="bad">已过期</span>' : ''}</td>
-      <td>${k.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
-      <td class="actions node-actions"><button class="node-action" onclick="copyText('${k.key}')">复制</button><button class="node-action" onclick="inviteToggle(${k.id})">${k.active ? '停用' : '启用'}</button><button class="node-action node-action-danger" onclick="inviteDelete(${k.id})">删除</button></td>
-    </tr>`;
-  }).join('') || emptyRow(11, '还没有密钥');
   const logRows = logsSlice.map((l, i) => `
     <tr><td>${(riskPage - 1) * ADMIN_PAGE_SIZE + i + 1}</td><td>${esc(l.event)}</td><td>${esc(l.username || '-')}</td><td>${esc(l.remote_port || '-')}</td><td>${esc(l.proxy_type || '-')}</td><td>${esc(l.detail || '')}</td><td>${fmtTs(l.created_at)}</td></tr>
   `).join('') || emptyRow(7, '暂无审计日志');
@@ -4577,37 +4566,6 @@ async function loadAdmin(section=currentAdminSection){
       }catch(err){ show(err.message, true); }
     };
   }
-  const inviteForm = document.querySelector('#inviteForm');
-  if(inviteForm){
-    inviteForm.onsubmit = async (e) => {
-      e.preventDefault();
-      const fd = new FormData(e.target);
-      try{
-        const r = await api('/api/admin/invite-keys/create', {method:'POST', body:Object.fromEntries(fd)});
-        const keys = r.keys || (r.key ? [r.key] : []);
-        if(keys.length){
-          const text = keys.join('\n');
-          await copyText(text);
-        }
-        await loadAdmin();
-        show(r.message || '密钥已生成');
-      }catch(err){ show(err.message, true); }
-    };
-  }
-  const renewKeyForm = document.querySelector('#renewKeyForm');
-  if(renewKeyForm){
-    renewKeyForm.onsubmit = async (e) => {
-      e.preventDefault();
-      const fd = new FormData(e.target);
-      try{
-        const r = await api('/api/admin/invite-keys/create', {method:'POST', body:Object.fromEntries(fd)});
-        const keys = r.keys || (r.key ? [r.key] : []);
-        if(keys.length){ await copyText(keys.join('\n')); }
-        await loadAdmin();
-        show(r.message || '续期密钥已生成');
-      }catch(err){ show(err.message, true); }
-    };
-  }
   const planForm = document.querySelector('#planForm');
   if(planForm){
     planForm.onsubmit = async (e) => {
@@ -4857,8 +4815,6 @@ async function planToggle(id){ await api('/api/admin/plans/toggle', {method:'POS
 async function planDelete(id){ if(await appConfirm('删除这个套餐？删除后不再展示，历史订单和套餐数据仍保留。', {title:'删除套餐', okText:'删除', danger:true})) await api('/api/admin/plans/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('套餐已删除'))).catch(e=>show(e.message,true)); }
 async function orderComplete(orderNo){ if(await appConfirm('确认手动开通该订单？将立即分配端口并延长有效期。', {title:'手动开通'})) await api('/api/admin/orders/complete', {method:'POST', body:{order_no:orderNo}}).then(r=>loadAdmin().then(()=>appAlert(r.message || '已开通', {title:'开通完成'}))).catch(e=>show(e.message,true)); }
 
-async function inviteToggle(id){ await api('/api/admin/invite-keys/toggle', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥状态已更新'))).catch(e=>show(e.message,true)); }
-async function inviteDelete(id){ if(await appConfirm('删除这个注册密钥？', {title:'删除注册密钥', okText:'删除', danger:true})) await api('/api/admin/invite-keys/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('密钥已删除'))).catch(e=>show(e.message,true)); }
 async function softwareLicenseToggle(id){ await api('/api/admin/software-licenses/toggle', {method:'POST', body:{id}}).then(loadAdmin).catch(e=>show(e.message,true)); }
 async function softwareLicenseUnbind(id){ if(await appConfirm('解绑后该授权码可被下一台客户服务器重新激活，确定？', {title:'解绑授权码'})) await api('/api/admin/software-licenses/unbind', {method:'POST', body:{id}}).then(r=>{loadAdmin().then(()=>show(r.message || '已解绑'));}).catch(e=>show(e.message,true)); }
 function editNode(n){
@@ -5785,28 +5741,6 @@ function initUserEmailForm(){
   };
 }
 
-function initRenewForm(){
-  const form = document.querySelector('#renewForm');
-  if(!form) return;
-  form.onsubmit = async (e) => {
-    e.preventDefault();
-    const box = document.querySelector('#renewResult');
-    const key = String(new FormData(form).get('key') || '').trim();
-    if(!key){ if(box){ box.className = 'renew-result error'; box.textContent = '请输入续期密钥'; } return; }
-    const btn = form.querySelector('button');
-    if(btn) btn.disabled = true;
-    try{
-      const r = await api('/api/user/renew', {method:'POST', body:{key}});
-      if(box){ box.className = 'renew-result ok'; box.textContent = r.message || '续期成功'; }
-      await loadDashboard('profile');
-      show(r.message || '续期成功');
-    }catch(err){
-      if(box){ box.className = 'renew-result error'; box.textContent = err.message || '续期失败'; }
-    }finally{
-      if(btn) btn.disabled = false;
-    }
-  };
-}
 let currentDashboardNodeId=null;
 async function switchDashboardNode(nodeId, backView){
   if(!nodeId||String(nodeId)===String(currentDashboardNodeId)){closeNodeSwitch();return;}
