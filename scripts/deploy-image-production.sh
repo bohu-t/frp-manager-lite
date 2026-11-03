@@ -423,7 +423,7 @@ services:
       FML_HOST: 0.0.0.0
       FML_PORT: 8080
       FML_DB: /data/data.sqlite3
-      FML_PANEL_VERSION: ${FML_PANEL_VERSION:-2.1.6}
+      FML_PANEL_VERSION: ${FML_PANEL_VERSION:-2.1.7}
     ports:
       - "${FML_PUBLISH_BIND:-127.0.0.1}:${FML_PUBLISH_PORT:-18081}:8080"
     volumes:

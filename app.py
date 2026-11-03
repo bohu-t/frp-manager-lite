@@ -35,7 +35,7 @@ import urllib.parse
 import threading
 
 APP_NAME = "frp-manager-lite"
-APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.6")  # 面板版本，不是 frp 版本
+APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.7")  # 面板版本，不是 frp 版本
 SERVER_START_TS = time.time()  # 进程启动时间，用于计算面板运行时间
 FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0.66.0"))
 BASE_DIR = Path(__file__).resolve().parent
@@ -567,6 +567,7 @@ def notify_config(conn: sqlite3.Connection) -> dict[str, Any]:
         "enabled": setting_get(conn, "notify_enabled", "0") == "1",
         "on_down": setting_get(conn, "notify_on_down", "1") == "1",
         "on_up": setting_get(conn, "notify_on_up", "1") == "1",
+        "on_ticket": setting_get(conn, "notify_on_ticket", "1") == "1",
         "type": setting_get(conn, "notify_type", ""),
         "params": params,
         "cooldown_minutes": max(0, int(setting_get(conn, "notify_cooldown_minutes", "30") or "30")),
@@ -578,6 +579,7 @@ def notify_public(cfg: dict[str, Any]) -> dict[str, Any]:
         "enabled": bool(cfg.get("enabled")),
         "on_down": bool(cfg.get("on_down")),
         "on_up": bool(cfg.get("on_up")),
+        "on_ticket": bool(cfg.get("on_ticket", True)),
         "type": cfg.get("type", ""),
         "params": cfg.get("params", {}),
         "cooldown_minutes": int(cfg.get("cooldown_minutes", 30)),
@@ -3707,6 +3709,13 @@ def notify(conn: sqlite3.Connection, user_id: int, kind: str, link: str = "", **
 def notify_admins_tpl(conn: sqlite3.Connection, kind: str, link: str = "", **params: Any) -> None:
     title, content = render_notification(kind, **params)
     notify_admins(conn, kind, title, content, link)
+    # 工单/提现/托管等管理员事件：按「通知设置 → 工单提醒」额外推送外部渠道
+    try:
+        cfg = notify_config(conn)
+        if cfg.get("enabled") and cfg.get("on_ticket"):
+            threading.Thread(target=send_notification, args=(title, content), daemon=True).start()
+    except Exception:
+        pass
 
 
 def notify_user(conn: sqlite3.Connection, user_id: int, kind: str, title: str, content: str = "", link: str = "") -> None:
@@ -8761,6 +8770,7 @@ class Handler(BaseHTTPRequestHandler):
             setting_set(conn, "notify_enabled", _flag(data.get("enabled")))
             setting_set(conn, "notify_on_down", _flag(data.get("on_down"), "1"))
             setting_set(conn, "notify_on_up", _flag(data.get("on_up"), "1"))
+            setting_set(conn, "notify_on_ticket", _flag(data.get("on_ticket"), "1"))
             setting_set(conn, "notify_type", ctype)
             setting_set(conn, "notify_params", json.dumps(clean, ensure_ascii=False))
             setting_set(conn, "notify_cooldown_minutes", str(cooldown))

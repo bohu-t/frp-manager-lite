@@ -5242,7 +5242,7 @@ function adminNotifyCardHtml(notify){
       </div>
       <div class="notify-row">
         <div class="notify-row-label"><label>通知场景</label></div>
-        <div class="notify-row-control"><label class="check"><input type="checkbox" name="on_down" value="1"${yn(n.on_down, true) ? ' checked' : ''}> 节点异常</label><label class="check"><input type="checkbox" name="on_up" value="1"${yn(n.on_up, true) ? ' checked' : ''}> 节点恢复</label></div>
+        <div class="notify-row-control"><label class="check"><input type="checkbox" name="on_down" value="1"${yn(n.on_down, true) ? ' checked' : ''}> 节点异常</label><label class="check"><input type="checkbox" name="on_up" value="1"${yn(n.on_up, true) ? ' checked' : ''}> 节点恢复</label><label class="check"><input type="checkbox" name="on_ticket" value="1"${yn(n.on_ticket, true) ? ' checked' : ''}> 工单提醒</label></div>
       </div>
       <div class="notify-row notify-row-block">
         <div class="notify-row-label"><label>通知渠道</label></div>
