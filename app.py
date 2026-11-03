@@ -7,7 +7,6 @@ behind Nginx/Caddy HTTPS in production.
 from __future__ import annotations
 
 import base64
-import collections
 import hashlib
 import gzip
 import hmac
@@ -36,7 +35,7 @@ import urllib.parse
 import threading
 
 APP_NAME = "frp-manager-lite"
-APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.5")  # 面板版本，不是 frp 版本
+APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.6")  # 面板版本，不是 frp 版本
 SERVER_START_TS = time.time()  # 进程启动时间，用于计算面板运行时间
 FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0.66.0"))
 BASE_DIR = Path(__file__).resolve().parent
@@ -1107,7 +1106,6 @@ UPDATE_CHECK_HOURS = float(os.getenv("FML_UPDATE_CHECK_HOURS", "8") or "8")
 PANEL_UPDATE_REPO = os.getenv("FML_UPDATE_REPO", "bohu-t/frp-manager-lite")
 PANEL_UPDATE_TOKEN = os.getenv("FML_UPDATE_TOKEN", "")  # 私有仓库时需要（GitHub PAT）
 PANEL_UPDATE_URL = os.getenv("FML_UPDATE_URL", "")  # 自定义纯文本版本地址（优先）
-PANEL_VERSION_REPO = os.getenv("FML_UPDATE_VERSION_REPO", "bohu-t/lite-install")  # 公开仓库的 VERSION 文件
 PANEL_UPDATE_LINK = os.getenv("FML_UPDATE_LINK", "https://github.com/bohu-t/lite-install#readme")
 _update_check_started = False
 
@@ -1155,7 +1153,7 @@ def _fetch_json(url: str) -> Any:
 
 
 def fetch_latest_panel_version() -> str:
-    """依次尝试：自定义地址 → GitHub Release → GitHub tag → 公开仓库 VERSION 文件。"""
+    """依次尝试：自定义地址 → GitHub Release → GitHub tag。"""
     if PANEL_UPDATE_URL:
         try:
             v = _normalize_version(_fetch_text(PANEL_UPDATE_URL))
@@ -1183,15 +1181,6 @@ def fetch_latest_panel_version() -> str:
         v = _normalize_version(best)
         if v:
             return v
-    except Exception:
-        pass
-    try:
-        data = _fetch_json(f"https://api.github.com/repos/{PANEL_VERSION_REPO}/contents/VERSION")
-        raw = str((data or {}).get("content") or "").replace("\n", "")
-        if raw:
-            v = _normalize_version(base64.b64decode(raw).decode("utf-8", "replace"))
-            if v:
-                return v
     except Exception:
         pass
     return ""
@@ -1903,64 +1892,6 @@ def split_node_host(server_addr: str) -> str:
     return server_addr.strip("[]")
 
 
-def read_proc_meminfo() -> dict[str, int]:
-    info: dict[str, int] = {}
-    try:
-        for line in Path("/proc/meminfo").read_text().splitlines():
-            key, rest = line.split(":", 1)
-            value = int(rest.strip().split()[0]) * 1024
-            info[key] = value
-    except Exception:
-        pass
-    return info
-
-
-def read_cpu_times() -> tuple[int, int] | None:
-    try:
-        parts = Path("/proc/stat").read_text().splitlines()[0].split()[1:]
-        nums = [int(x) for x in parts]
-        idle = nums[3] + (nums[4] if len(nums) > 4 else 0)
-        total = sum(nums)
-        return idle, total
-    except Exception:
-        return None
-
-
-def host_system_stats() -> dict[str, Any]:
-    cpu_count = os.cpu_count() or 0
-    load1 = load5 = load15 = 0.0
-    try:
-        load1, load5, load15 = os.getloadavg()
-    except Exception:
-        pass
-    cpu_percent = None
-    first = read_cpu_times()
-    if first:
-        time.sleep(0.05)
-        second = read_cpu_times()
-        if second:
-            idle_delta = second[0] - first[0]
-            total_delta = second[1] - first[1]
-            if total_delta > 0:
-                cpu_percent = round(max(0.0, min(100.0, (1 - idle_delta / total_delta) * 100)), 1)
-    mem = read_proc_meminfo()
-    mem_total = int(mem.get("MemTotal", 0))
-    mem_available = int(mem.get("MemAvailable", 0))
-    mem_used = max(0, mem_total - mem_available) if mem_total else 0
-    mem_percent = round((mem_used / mem_total) * 100, 1) if mem_total else None
-    return {
-        "cpu_count": cpu_count,
-        "cpu_percent": cpu_percent,
-        "load1": round(load1, 2),
-        "load5": round(load5, 2),
-        "load15": round(load15, 2),
-        "memory_total": mem_total,
-        "memory_used": mem_used,
-        "memory_available": mem_available,
-        "memory_percent": mem_percent,
-    }
-
-
 def check_node_auth_port(node: dict[str, Any]) -> dict[str, Any]:
     """Check whether the frps auth/bind port accepts TCP connections."""
     checked_at = now()
@@ -2602,71 +2533,6 @@ def start_traffic_sampler() -> None:
             time.sleep(max(60, TRAFFIC_SAMPLE_SECONDS))
     threading.Thread(target=_loop, name="traffic-sampler", daemon=True).start()
 
-
-# --- Host resource sampling (in-memory ring buffer powering 2D charts) ----------------
-HOST_SAMPLE_SECONDS = int(os.getenv("FML_HOST_SAMPLE_SECONDS", "30") or "30")
-HOST_SAMPLE_POINTS = int(os.getenv("FML_HOST_SAMPLE_POINTS", "60") or "60")
-_host_history_lock = threading.Lock()
-_host_history: "collections.deque[dict[str, Any]]" = collections.deque(maxlen=HOST_SAMPLE_POINTS)
-
-
-def host_sample_snapshot(stats: dict[str, Any] | None = None) -> dict[str, Any]:
-    s = stats if stats is not None else host_system_stats()
-    return {
-        "ts": now(),
-        "cpu": s.get("cpu_percent"),
-        "mem": s.get("memory_percent"),
-        "load1": s.get("load1"),
-    }
-
-
-def record_host_sample(stats: dict[str, Any] | None = None, min_interval: int = 0) -> bool:
-    """Append a host stats sample; skip when the newest sample is younger than min_interval."""
-    with _host_history_lock:
-        if min_interval and _host_history:
-            try:
-                if now() - int(_host_history[-1].get("ts") or 0) < min_interval:
-                    return False
-            except Exception:
-                pass
-        _host_history.append(host_sample_snapshot(stats))
-    return True
-
-
-def host_history() -> list[dict[str, Any]]:
-    with _host_history_lock:
-        return [dict(p) for p in _host_history]
-
-
-def host_stats_with_history() -> dict[str, Any]:
-    """host_system_stats() plus the recent sample ring buffer used by the admin charts."""
-    stats = host_system_stats()
-    record_host_sample(stats, min_interval=max(5, HOST_SAMPLE_SECONDS))
-    stats["history"] = host_history()
-    stats["sample_seconds"] = HOST_SAMPLE_SECONDS
-    stats["sample_points"] = HOST_SAMPLE_POINTS
-    return stats
-
-
-_host_sampler_started = False
-
-
-def start_host_sampler() -> None:
-    global _host_sampler_started
-    if _host_sampler_started:
-        return
-    _host_sampler_started = True
-
-    def _loop() -> None:
-        time.sleep(3)
-        while True:
-            try:
-                record_host_sample(None, min_interval=max(5, HOST_SAMPLE_SECONDS))
-            except Exception:
-                pass
-            time.sleep(max(5, HOST_SAMPLE_SECONDS))
-
-    threading.Thread(target=_loop, name="host-sampler", daemon=True).start()
 
 def traffic_stats_for_user(user: sqlite3.Row, range_key: str = "30d") -> dict[str, Any]:
     if range_key not in {"today", "7d", "30d"}:
@@ -7413,7 +7279,6 @@ class Handler(BaseHTTPRequestHandler):
                 "tunnel_count": int(tunnel_count),
                 "ban_count": int(ban_count),
                 "traffic_today": traffic_today,
-                "host": host_stats_with_history(),
                 "nodes": node_list,
                 "setup_key": effective_setup_key(),
                 "has_setup_key": bool(effective_setup_key()),
@@ -9319,7 +9184,6 @@ def main() -> None:
     init_db()
     start_traffic_sampler()
     start_plan_usage_loop()
-    start_host_sampler()
     start_proxy_sampler()
     start_node_health_sampler()
     start_update_checker()

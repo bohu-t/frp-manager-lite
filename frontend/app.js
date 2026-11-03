@@ -5022,63 +5022,6 @@ async function loadAdminHealth(){
   fillNodeLatencies();
 }
 
-/* --- Admin host resource charts (2D line/area, no external libs) --- */
-let adminHostHistory = [];
-
-function hostClockText(ts){
-  const d = new Date((Number(ts) || 0) * 1000);
-  if(isNaN(d.getTime())) return '';
-  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-}
-
-function hostChartSvg(points, key, color, gradId, width, label){
-  const W = Math.max(180, Math.round(width || 300));
-  const H = 132, padL = 30, padR = 30, padT = 14, padB = 20;
-  const innerW = Math.max(10, W - padL - padR), innerH = Math.max(10, H - padT - padB);
-  let pts = (points || []).filter(p => p && p[key] !== null && p[key] !== undefined && !isNaN(Number(p[key])));
-  if(!pts.length) return '<div class="host-chart-empty">等待采样…</div>';
-  if(pts.length === 1) pts = [pts[0], pts[0]];
-  const n = pts.length;
-  const clamp = v => Math.max(0, Math.min(100, Number(v)));
-  const xs = i => padL + (innerW * i) / (n - 1);
-  const ys = v => padT + innerH - (clamp(v) / 100) * innerH;
-  let grid = '';
-  [0, 25, 50, 75, 100].forEach(v => {
-    const yy = ys(v).toFixed(1);
-    grid += `<line x1="${padL}" y1="${yy}" x2="${(W - padR).toFixed(1)}" y2="${yy}" class="host-chart-grid"/>`;
-  });
-  [100, 50, 0].forEach(v => {
-    grid += `<text x="${padL - 6}" y="${(ys(v) + 3.5).toFixed(1)}" text-anchor="end" class="host-chart-ylabel">${v}%</text>`;
-  });
-  const coords = pts.map((p, i) => [xs(i), ys(p[key])]);
-  const line = coords.map((c, i) => `${i ? 'L' : 'M'}${c[0].toFixed(1)},${c[1].toFixed(1)}`).join(' ');
-  const base = (padT + innerH).toFixed(1);
-  const area = `${line} L${coords[n-1][0].toFixed(1)},${base} L${coords[0][0].toFixed(1)},${base} Z`;
-  const last = coords[n-1], lastV = Math.round(clamp(pts[n-1][key]));
-  const vx = Math.min(Math.max(last[0], padL + 14), W - padR - 14);
-  const vy = Math.max(last[1] - 10, padT + 10);
-  const t0 = hostClockText(pts[0].ts), t1 = hostClockText(pts[n-1].ts);
-  return `<svg class="host-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label || '')}">
-    <defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity=".32"/><stop offset="100%" stop-color="${color}" stop-opacity=".02"/></linearGradient></defs>
-    ${grid}
-    <path d="${area}" fill="url(#${gradId})"/>
-    <path d="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3.6" fill="#fff" stroke="${color}" stroke-width="2.2"/>
-    <text x="${vx.toFixed(1)}" y="${vy.toFixed(1)}" text-anchor="middle" class="host-chart-value">${lastV}%</text>
-    ${n > 2 ? `<text x="${padL}" y="${H - 5}" text-anchor="start" class="host-chart-xlabel">${esc(t0)}</text>` : ''}
-    <text x="${(W - padR).toFixed(1)}" y="${H - 5}" text-anchor="end" class="host-chart-xlabel">${n > 2 ? esc(t1) : '采样中'}</text>
-  </svg>`;
-}
-
-function hostChartPanelHtml(history, key, color, gradId, label, valueLabel, note){
-  const count = (history || []).filter(p => p && p[key] !== null && p[key] !== undefined).length;
-  return `<div class="host-chart-panel">
-    <div class="host-chart-head"><span class="host-chart-name"><i class="host-dot ${key}"></i>${esc(label)}</span><b>${esc(valueLabel)}</b></div>
-    <div class="host-chart-slot" data-metric="${key}" data-color="${color}" data-grad="${gradId}" data-label="${esc(label)}"></div>
-    <div class="host-chart-foot"><small>${esc(note)}</small><small class="host-chart-samples">采样 ${count} 点</small></div>
-  </div>`;
-}
-
 function financeChartSvg(points){
   const days = Array.isArray(points) && points.length ? points : [{ label: '-', income: 0, expense: 0 }];
   const W = 560, H = 210, P = { l: 48, r: 14, t: 16, b: 28 };
@@ -5135,14 +5078,6 @@ async function setFinRange(days){
   setHtml('#finChart', financeChartSvg(info.series || []));
   setHtml('#finCats', (info.categories || []).map(c => `<span class="fin-cat ${c.direction}">${esc(c.text)} <b>${c.direction === 'in' ? '+' : '-'}¥${money(c.amount)}</b></span>`).join(''));
   document.querySelectorAll('.fin-range-btn').forEach(b => b.classList.toggle('active', Number(b.dataset.days) === finRange));
-}
-
-function renderHostCharts(){
-  const slots = document.querySelectorAll('.host-chart-slot');
-  if(!slots.length) return;
-  Array.prototype.forEach.call(slots, slot => {
-    slot.innerHTML = hostChartSvg(adminHostHistory, slot.dataset.metric, slot.dataset.color, slot.dataset.grad, slot.clientWidth || 260, slot.dataset.label);
-  });
 }
 
 function reloadAdminCurrentPage(){
@@ -5612,7 +5547,6 @@ async function loadAdminDashboard(auto=false){
   const refreshSeconds = Math.max(10, Number(data.refresh_seconds || 30));
   const portStats = data.port_stats || {};
   const userStats = data.user_stats || {};
-  const host = data.host || {};
   const smtp = data.smtp || {}; adminSmtp = smtp;
   const r2 = data.r2 || {};
   const usedPorts = Number(portStats.used || 0);
@@ -5633,13 +5567,6 @@ async function loadAdminDashboard(auto=false){
   window.adminProxyTypeOptions = data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux'];
   const frpcUserOptions = frpcUsers.map(u => `<option value="${u.id}">${esc(u.username)} · ${esc(u.node_region || '-')} / ${esc(u.node_name || '-')} · 端口 ${u.port_count || 0} · 可用 ${(u.available_ports || []).length} · 隧道 ${u.tunnel_count || 0}</option>`).join('');
   const proxyTypeOptions = (data.allowed_proxy_types || ['tcp','udp','http','https','stcp','xtcp','tcpmux']).map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
-  const hostCpu = host.cpu_percent == null ? null : Number(host.cpu_percent);
-  const hostMem = host.memory_percent == null ? null : Number(host.memory_percent);
-  const hostCpuLabel = hostCpu == null ? '—' : hostCpu + '%';
-  const hostMemLabel = hostMem == null ? '—' : hostMem + '%';
-  const hostHistory = Array.isArray(host.history) ? host.history : [];
-  const hostSampleSeconds = Math.max(5, Number(host.sample_seconds || 30));
-  const hostSamplePoints = Math.max(6, Number(host.sample_points || 60));
   const nodeRows = (data.nodes || []).map(n => {
     const ok = !!n.auth_port_ok;
     const latency = n.auth_latency_ms == null ? '—' : `${n.auth_latency_ms} ms`;
@@ -5714,8 +5641,6 @@ async function loadAdminDashboard(auto=false){
       </section>
     </div>
     `, 'admin-dashboard', '运行总览');
-  adminHostHistory = hostHistory;
-  renderHostCharts();
   fillNodeLatencies();
   adminDashboardTimer = setTimeout(() => loadAdminDashboard(true), refreshSeconds * 1000);
   startPortStatsTimer();
