@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/bohu-t/lite-install/main/deploy-ima
 
 ### 公开安装脚本仓库
 
-源码仓库保持私有；公开一键安装脚本放在：
+源码仓库：https://github.com/bohu-t/frp-manager-lite；一键安装脚本放在：
 
 ```text
 https://github.com/bohu-t/lite-install
@@ -48,7 +48,7 @@ sudo bash scripts/deploy-production.sh
 
 ## 文档
 
-- 📖 [完整部署文档](DEPLOY.md) — 面板部署、添加 frps 节点、卖家日常操作、最终用户使用
+- 📖 [完整部署文档](DEPLOY.md) — 面板部署、添加 frps 节点、管理员日常操作、用户侧使用
 
 ## 项目结构
 
@@ -93,13 +93,13 @@ frp-manager-lite/
 - ✅ 状态按颜色区分：待处理琥珀 / 处理中蓝 / 已关闭绿 / 已拒绝红
 - ✅ 站内通知中心：通知 + 系统公告双页签，查看后自动已读
 - ✅ 系统通知固定模板（新工单、工单回复、提现申请、打款、驳回等）
-- ✅ 普通用户可自建通知渠道（21 种：邮件、Telegram、Server酱、WxPusher 等），按事件订阅
+- ✅ 普通用户可自建通知渠道（21 种：Bark、Telegram、钉钉、企业微信、Server 酱、WxPusher 等），按事件订阅
 
 ### 财务
 
 - ✅ 统一收支流水表（`ledger`），收入 / 支出 / 冲正 / 事件四种方向
 - ✅ 收益转余额只记事件不计收支；提现驳回记冲正抵扣支出
-- ✅ 汇率固定 1 积分 = 1 元，积分支持两位小数
+- ✅ 金额统一以元计，保留两位小数
 - ✅ 供给方按服务进度结算，10% 留存保证金
 - ✅ 提现走工单：管理员在工单内标记已打款或拒绝，处理完自动关单
 
@@ -131,7 +131,7 @@ frp-manager-lite/
 | `FML_HOST` / `FML_PORT` | `127.0.0.1` / `8080` | 面板监听地址与端口 |
 | `FML_DB` | `data.sqlite3` | SQLite 数据库路径 |
 | `FML_ADMIN_USER` / `FML_ADMIN_PASSWORD` | `admin` / `admin123` | 管理员账号，生产务必改密码 |
-| `FML_OPEN_REGISTRATION` | `0` | `1` 开放邮箱验证码注册；`0` 使用邀请密钥 |
+| `FML_OPEN_REGISTRATION` | `0` | `1` 开放邮箱验证码注册（需配 SMTP）；`0` 关闭自助注册，由管理员建号 |
 | `FML_OPEN_REGISTRATION_EXPIRES_DAYS` | `30` | 开放注册用户的默认有效期天数 |
 | `FML_DEFAULT_MAX_PORTS` | `10` | 新用户默认端口数 |
 | `FML_PORT_START` / `FML_PORT_END` | `20000` / `20199` | 默认端口池范围 |
@@ -139,7 +139,7 @@ frp-manager-lite/
 | `FML_FULL_REFUND_MINUTES` | `10` | 全额退款窗口（分钟） |
 | `FML_PLAN_GRACE_HOURS` | `0` | 套餐到期后端口保留小时数，`0` 立即回收 |
 | `FML_NODE_OFFLINE_SUSPEND_HOURS` | `6` | 节点离线多久自动停售 |
-| `FML_MAX_PLANS_PER_NODE` | `2` | 单节点每人最大实例数 |
+| `FML_MAX_PLANS_PER_NODE` | `2` | 预留配置，当前版本未参与实例数量限制 |
 | `FML_PROVIDER_COMMISSION` | `10` | 供给方保证金比例（%） |
 | `FML_PROVIDER_SETTLE_DAYS` | `7` | 供给方结算周期（天） |
 | `FML_HSTS_MAX_AGE` | `0` | HSTS 有效期秒数，HTTPS 稳定后开启 |
