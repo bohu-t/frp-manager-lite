@@ -46,29 +46,68 @@ sudo bash scripts/deploy-production.sh
 
 ### 环境变量参考
 
-部署后在 `dist/obfuscated/.env` 中可修改配置：
+生产配置统一在 `/opt/frp-manager-lite/.env`，改完执行 `docker compose up -d` 生效。
 
 ```bash
-FML_PUBLISH_BIND=127.0.0.1     # 监听地址
-FML_PUBLISH_PORT=18081          # 监听端口
-FML_ADMIN_USER=admin            # 管理员用户名
-FML_ADMIN_PASSWORD=***          # 管理员密码
-FML_PORT_START=20000            # 端口池起始
-FML_PORT_END=20199              # 端口池结束
-FML_DEFAULT_MAX_PORTS=5         # 新用户默认端口数
-FML_SETUP_KEY=***               # 添加 frps 节点的密钥
-FRP_SERVER_ADDR=frp.example.com # frps 地址
-FRP_SERVER_PORT=7000            # frps 端口
-FRP_AUTH_TOKEN=***              # frps token
-# 软件授权（由卖家签发）
-FML_LICENSE_FILE=/data/software-license.json   # 本地授权文件位置
-FML_LICENSE_CHECK_HOURS=12      # 授权静默校验间隔（小时）
-FML_LICENSE_GRACE_DAYS=7        # 连不上授权服务器的宽限天数
-# 版本更新提醒（可选）
-FML_UPDATE_CHECK_HOURS=8        # 检查新版本间隔（小时）
-FML_UPDATE_URL=                 # 自定义版本地址（纯文本或 {"version":"x"}，优先）
-FML_UPDATE_VERSION_REPO=bohu-t/lite-install  # 公开仓库的 VERSION 文件
-FML_UPDATE_LINK=                # 升级提示跳转地址
+# ---- 面板 ----
+FML_PUBLISH_BIND=127.0.0.1       # 面板对外监听地址（一般交给 Nginx 反代）
+FML_PUBLISH_PORT=18081           # 面板映射端口
+FML_ADMIN_USER=admin             # 管理员用户名
+FML_ADMIN_PASSWORD=***           # 管理员密码（生产务必修改）
+FML_HSTS_MAX_AGE=0               # HSTS 秒数，HTTPS 稳定后再开，例如 63072000
+
+# ---- 注册与配额 ----
+FML_OPEN_REGISTRATION=1          # 1=邮箱验证码注册；0=邀请密钥注册
+FML_OPEN_REGISTRATION_EXPIRES_DAYS=30   # 开放注册用户默认有效期
+FML_OPEN_REGISTRATION_MAX_PORTS=0       # 开放注册用户默认端口数，0=用全局默认
+FML_DEFAULT_MAX_PORTS=10         # 新用户默认端口数
+FML_PORT_START=20000             # 默认端口池起始
+FML_PORT_END=20199               # 默认端口池结束
+FML_MAX_PLANS_PER_NODE=2         # 单节点每人最大实例数
+
+# ---- 计费与退款 ----
+FML_ALLOW_MOCK_PAY=0             # 1=开启测试支付（仅开发）
+FML_FULL_REFUND_MINUTES=10       # 全额退款窗口
+FML_PLAN_GRACE_HOURS=0           # 套餐到期后端口保留小时数，0=立即回收
+FML_PROVIDER_COMMISSION=10       # 供给方保证金比例（%）
+FML_PROVIDER_SETTLE_DAYS=7       # 供给方结算周期（天）
+
+# ---- 节点 ----
+FML_SETUP_KEY=***                # 一键添加 frps 节点的验证密钥
+FML_NODE_OFFLINE_SUSPEND_HOURS=6 # 节点离线多久自动停售
+FML_NODE_HEALTH_SAMPLE_SECONDS=600  # 健康巡检间隔
+FRP_SERVER_ADDR=frp.example.com  # frps 地址
+FRP_SERVER_PORT=7000             # frps 端口
+FRP_AUTH_TOKEN=***               # frps token
+
+# ---- 软件授权（由卖家签发）----
+FML_LICENSE_FILE=/data/software-license.json
+FML_LICENSE_CHECK_HOURS=12
+FML_LICENSE_GRACE_DAYS=7
+
+# ---- 版本更新提醒（可选）----
+FML_UPDATE_CHECK_HOURS=8
+FML_UPDATE_URL=
+FML_UPDATE_VERSION_REPO=bohu-t/lite-install
+FML_UPDATE_LINK=
+```
+
+### 升级面板
+
+镜像版部署直接替换镜像标签，源码部署重新构建：
+
+```bash
+cd /opt/frp-manager-lite
+cp .env .env.bak-$(date +%F-%H%M%S)          # 先备份配置
+sudo docker compose pull && sudo docker compose up -d   # 镜像版
+# 或：sudo docker compose up -d --build                 # 源码版
+```
+
+升级前建议在面板「设置 → 备份」下载一份全量 zip，或直接备份数据卷：
+
+```bash
+sudo cp -a /var/lib/docker/volumes/frp-manager-lite_frp-manager-lite-data/_data/data.sqlite3 \
+        /root/backups/data-$(date +%F-%H%M%S).sqlite3
 ```
 
 ## 二、添加 frps 节点
@@ -207,3 +246,76 @@ cd dist/obfuscated && docker compose down && docker compose up -d --build
 2. `FML_SETUP_KEY` 部署后不要泄露
 3. frps 仪表盘建议仅监听 127.0.0.1
 4. 定期备份 `dist/obfuscated/` 目录下的 `.env` 和 Docker volume 数据
+
+## 八、托管市场（母鸡）
+
+用户可以把闲置服务器接入平台，由平台统一售卖套餐。
+
+**用户侧四步向导**（面板 → 托管申请 → 添加母鸡）：
+
+1. **托管准则**：弹窗展示规则，点「同意并继续」
+2. **母鸡信息**：名称、地区、公网地址、frps 端口、端口池、带宽、月流量、服务器到期时间
+3. **设置套餐**：名称、价格、计费方式（时间/流量）、端口数
+4. **接入平台**：生成带专属部署令牌的一键脚本，在母鸡机器上执行
+
+执行脚本后母鸡自动注册并提交审核，管理员在「技术支持 → 托管申请」点进工单查看信息并「通过审核」，节点与该节点下的套餐会一并上架。
+
+**自动规则**
+
+- 母鸡连续离线超过 `FML_NODE_OFFLINE_SUSPEND_HOURS`（默认 6 小时）自动停售，恢复在线自动重新上架
+- 节点 `expires_at` 到期后不能再上架新套餐（套餐时长不得超过节点剩余天数）
+- 用户提交托管前需完成企业微信绑定（若启用群通知）
+
+## 九、工单体系
+
+三类工单共用一套详情页，列表只做展示，操作全部在工单内部：
+
+| 工单 | 用户操作 | 管理员操作 |
+|---|---|---|
+| 故障工单 | 提交、回复、发图、撤销 | 回复、结束工单 |
+| 提现工单 | 申请提现、回复、撤销 | 已打款 / 拒绝、回复、结束 |
+| 托管申请 | 提交母鸡、回复 | 通过 / 拒绝 / 拉黑、回复 |
+
+- 状态颜色：待处理琥珀、处理中蓝、已关闭绿、已拒绝红
+- 提现单处理完（打款或拒绝）后工单自动关闭
+- 用户撤销提现工单会自动取消提现并把积分退回收益池
+- 查看工单或列表后，相关站内通知自动标记已读
+
+## 十、收支与财务
+
+面板「订单收支 → 收支表」记录平台资金流水：
+
+| 方向 | 含义 | 计入收支 |
+|---|---|---|
+| 收入 | 充值、套餐销售、保证金留存 | 是 |
+| 支出 | 退款、供应商结算、提现打款 | 是 |
+| 冲正 | 提现驳回 / 撤销 | 抵扣支出，不算收入 |
+| 事件 | 收益转余额（内部划转） | 否 |
+
+- 汇率固定 **1 积分 = 1 元**，积分保留两位小数
+- 退款金额 = 累计实付 × 剩余比例 ×（1 − 手续费），续费会累加实付与时长
+- 供给方按服务进度结算：90% 到账，10% 留存保证金
+
+## 十一、企业微信群通知（Bncr）
+
+可选功能，把节点离线、新工单、工单超时推送到企微群并 @对应供货商。
+
+**面板侧**：设置 → Bncr 企微群通知，填写插件地址、Token、平台名、群 chatid。
+
+**Bncr 侧**：部署 `frp-manager-lite-hook.js` 插件，配置面板地址、Token、监听端口（默认 9099）、企业 ID / 应用 Secret、托管群 chatid。
+
+**绑定流程**：用户加入企业 → 打开机器人单聊发送绑定码 → 插件回调面板完成绑定并拉入托管群。
+
+## 十二、备份与恢复
+
+- **下载备份**：设置 → 备份与恢复 → 下载全量备份（zip 内含 `data.sqlite3`、`dump.sql`、`metadata.json`、`RESTORE.md`）
+- **上传恢复**：选择 zip，输入 `RESTORE` 确认；系统会先把当前库另存到 `restore-backups/before-restore-*.zip` 再替换
+- **R2 备份**：配置 Cloudflare R2 后可一键上传到对象存储
+- 备份包含 SMTP、支付、R2、Bncr 等密钥，请妥善保管
+
+## 十三、移动端
+
+- 侧栏在移动端收起为抽屉，左下角悬浮按钮打开
+- 表格在卡片内横向滚动，页面本身不会横向溢出
+- 通知铃铛固定在右下角
+
