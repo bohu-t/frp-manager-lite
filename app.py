@@ -35,7 +35,7 @@ import urllib.parse
 import threading
 
 APP_NAME = "frp-manager-lite"
-APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.7")  # 面板版本，不是 frp 版本
+APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.8")  # 面板版本，不是 frp 版本
 SERVER_START_TS = time.time()  # 进程启动时间，用于计算面板运行时间
 FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0.66.0"))
 BASE_DIR = Path(__file__).resolve().parent
@@ -7316,6 +7316,11 @@ class Handler(BaseHTTPRequestHandler):
         csrf = self.headers.get("X-CSRF-Token")
         if not validate_csrf(csrf, self.headers.get("Cookie")):
             self.send_json({"ok": False, "error": "CSRF token 无效或已过期，请刷新页面重试"}, 403)
+            return
+
+        demo_user = self.current_user
+        if demo_user and (demo_user["role"] or "") == "demo" and path != "/api/logout":
+            self.send_json({"ok": False, "error": "演示账号只读，不能修改内容"}, 403)
             return
 
         if path in {"/api/login", "/api/register"}:

@@ -2650,3 +2650,7 @@ html[data-theme="dark"] .user-notify .notify-chip{background:#0f172a;border-colo
 .nn-chip{padding-right:52px}
 .nn-chip-name{display:inline-flex;align-items:center;gap:6px}
 .nn-chip.active .nn-chip-self{background:linear-gradient(135deg,#ffb066,#ff7a3d);box-shadow:0 3px 9px rgba(0,0,0,.25)}
+
+/* 演示账号只读提示 */
+.demo-readonly-banner{margin:0 0 12px;padding:10px 14px;border:1px solid #f6d58a;border-radius:8px;background:#fff8e6;color:#8a5a00;font-size:13px;line-height:1.5}
+html[data-theme="dark"] .demo-readonly-banner{border-color:#6b5420;background:#2a2412;color:#f4d488}
