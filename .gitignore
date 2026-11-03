@@ -23,3 +23,24 @@ frontend/*_before_*.css
 .idea/
 dist/
 .shots/
+
+# Production-only local files — never publish
+backups/
+restore-backups/
+software-license.json
+.env.production
+docker-compose.production.yml
+deploy/production/
+*.bak
+*.bak.*
+
+# Private workspace / local ops scripts
+AGENTS.md
+IDENTITY.md
+SOUL.md
+USER.md
+memory/
+skills/
+scripts/install-frps.sh
+scripts/netcfg.sh
+scripts/install-frpc.ps1
