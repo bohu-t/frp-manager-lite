@@ -1803,6 +1803,7 @@ async function loadHosts(){
   const pGuarantee = Number(eData.guarantee || 0);
   const pIncome = Number(eData.income || 0);
   window.__providerIncome = pIncome;
+  window.__providerWithdrawFee = Number(eData.withdraw_fee_percent || 0);
   const pct = Number(eData.commission_pct ?? 10);
   const tab = hostsTab || 'nodes';
   const nodesSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('node')}我的节点</h2><p>${pNodes.length ? '已接入平台的主机' : '提交母鸡并通过审核后，这里会显示你的节点'}</p></div></div>
@@ -2033,7 +2034,7 @@ async function loadPayoutTickets(){
     income = Number(a.income || 0); payouts = a.payouts || []; acc = b.account || acc;
   }catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
   const hasAcc = !!(acc.account && acc.holder);
-  const rows = payouts.map((p, i) => `<tr class="${p.ticket_id ? 'clickable-row' : ''}"${p.ticket_id ? ` onclick="loadTicketDetail(${p.ticket_id})"` : ''}><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td><b>¥${fmtPts(p.amount)}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${payoutBadge(p.status)}</td><td>${fmtTs(p.created_at)}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">暂无提现记录</td></tr>';
+  const rows = payouts.map((p, i) => `<tr class="${p.ticket_id ? 'clickable-row' : ''}"${p.ticket_id ? ` onclick="loadTicketDetail(${p.ticket_id})"` : ''}><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td><b>¥${fmtPts(p.amount)}</b></td><td>¥${fmtPts(p.fee_amount || 0)}</td><td><b>¥${fmtPts(p.net_amount ?? p.amount)}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${payoutBadge(p.status)}</td><td>${fmtTs(p.created_at)}</td></tr>`).join('') || '<tr><td colspan="9" class="muted">暂无提现记录</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">PAYOUTS</span><h1>提现工单</h1><p>把托管收益转入余额，或提现到已配置的收款账户。</p></div></div>
     <section class="card"><div class="section-title"><div><h2>${stIcon('key')}申请提现</h2><p>可提现收益 <b>¥${fmtPts(income)}</b>${hasAcc ? '' : ' · 尚未配置收款信息'}</p></div><span class="section-count">${hasAcc ? esc(acc.method + ' ' + acc.account) : '未配置'}</span></div>
@@ -2044,7 +2045,7 @@ async function loadPayoutTickets(){
         <div class="form-actions span-2"><button type="submit" ${income > 0 ? '' : 'disabled'}>提交提现工单</button></div>
       </form>
     </section>
-    <section class="card"><div class="section-title"><div><h2>提现记录</h2><p>共 ${payouts.length} 条</p></div></div><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>金额</th><th>方式</th><th>账号</th><th>状态</th><th>时间</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+    <section class="card"><div class="section-title"><div><h2>提现记录</h2><p>共 ${payouts.length} 条</p></div></div><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>金额</th><th>手续费</th><th>实付</th><th>方式</th><th>账号</th><th>状态</th><th>时间</th></tr></thead><tbody>${rows}</tbody></table></div></section>
   `, 'dashboard-payouts', '提现工单');
   const form = document.querySelector('#withdrawForm');
   form.onsubmit = async (e) => {
@@ -2095,6 +2096,8 @@ async function loadTicketDetail(id, scope){
           ${payoutBadge(payout.status)}</div>
         <div class="payout-panel-grid">
           <div><span>金额</span><b>¥${fmtPts(payout.amount)}</b></div>
+          <div><span>手续费</span><b>¥${fmtPts(payout.fee_amount || 0)}</b></div>
+          <div><span>实付</span><b>¥${fmtPts(payout.net_amount ?? payout.amount)}</b></div>
           <div><span>方式</span><b>${esc(payout.method)}</b></div>
           <div><span>账号</span><b>${esc(payout.account)}</b></div>
           <div><span>姓名</span><b>${esc(payout.holder)}</b></div>
@@ -2479,10 +2482,10 @@ async function loadAdminPayouts(){
   let payouts = [];
   try{ payouts = (await api('/api/admin/payouts')).payouts || []; }
   catch(err){ if(err.message === 'unauthorized') return renderLogin(); show(err.message, true); return; }
-  const rows = payouts.map((p, i) => `<tr class="${p.ticket_id ? 'clickable-row' : ''}"${p.ticket_id ? ` onclick="loadTicketDetail(${p.ticket_id}, 'admin')"` : ''}><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td>${esc(p.username)}</td><td><b>¥${fmtPts(p.amount)}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${esc(p.holder)}</td><td>${p.qr_token ? `<img class="qr-thumb" src="/api/upload/${encodeURIComponent(p.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(p.qr_token)}')">` : '-'}</td><td>${payoutBadge(p.status)}</td><td>${fmtTs(p.created_at)}</td></tr>`).join('') || '<tr><td colspan="10" class="muted">暂无提现申请</td></tr>';
+  const rows = payouts.map((p, i) => `<tr class="${p.ticket_id ? 'clickable-row' : ''}"${p.ticket_id ? ` onclick="loadTicketDetail(${p.ticket_id}, 'admin')"` : ''}><td>${i + 1}</td><td>${esc(p.payout_no)}</td><td>${esc(p.username)}</td><td><b>¥${fmtPts(p.amount)}</b></td><td>¥${fmtPts(p.fee_amount || 0)}</td><td><b>¥${fmtPts(p.net_amount ?? p.amount)}</b></td><td>${esc(p.method)}</td><td>${esc(p.account)}</td><td>${esc(p.holder)}</td><td>${p.qr_token ? `<img class="qr-thumb" src="/api/upload/${encodeURIComponent(p.qr_token)}" alt="收款码" onclick="showImageViewer('/api/upload/${encodeURIComponent(p.qr_token)}')">` : '-'}</td><td>${payoutBadge(p.status)}</td><td>${fmtTs(p.created_at)}</td></tr>`).join('') || '<tr><td colspan="12" class="muted">暂无提现申请</td></tr>';
   app.innerHTML = appLayoutHtml(`
     <div class="ov-page-head"><div><span class="section-kicker">PAYOUTS</span><h1>提现工单</h1><p>处理供给方的收款提现申请</p></div><button type="button" class="secondary" onclick="loadAdminPayouts()">刷新</button></div>
-    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>用户</th><th>金额</th><th>方式</th><th>账号</th><th>姓名</th><th>收款码</th><th>状态</th><th>时间</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+    <section class="card"><div class="table-wrap"><table><thead><tr><th>序号</th><th>单号</th><th>用户</th><th>金额</th><th>手续费</th><th>实付</th><th>方式</th><th>账号</th><th>姓名</th><th>收款码</th><th>状态</th><th>时间</th></tr></thead><tbody>${rows}</tbody></table></div></section>
   `, 'admin-payouts', '提现');
 }
 
@@ -2501,6 +2504,12 @@ async function providerWithdraw(mode){
   const points = Number(val);
   if(!Number.isFinite(points) || points <= 0){ show('请输入正确的金额', true); return; }
   if(points > income){ show(`最多可提现 ¥${fmtPts(income)}`, true); return; }
+  if(mode === 'external'){
+    const feePct = Number(window.__providerWithdrawFee || 0);
+    const fee = points * feePct / 100;
+    const net = points - fee;
+    if(feePct > 0 && !await appConfirm(`提现 ¥${fmtPts(points)}，手续费 ${feePct}%（¥${fmtPts(fee)}），预计到账 ¥${fmtPts(net)}。确认提交？`, {title:'确认提现'})) return;
+  }
   try{
     const r = await api('/api/user/withdraw', {method:'POST', body:{mode, amount:points}});
     show(r.message || '已提交');
@@ -5154,6 +5163,7 @@ function adminPaymentCardHtml(pay){
       </div><span class="muted small">全部取消即关闭在线支付；只有已配置完成的渠道才会对用户可用</span></div>
       <div class="span-2"><label>对外访问地址</label><input name="public_url" value="${esc(pay.public_url || '')}" placeholder="https://frp.example.com"><span class="muted small">支付回调地址，必须是公网可访问的 https</span></div>
       <div><label>退订手续费（%）</label><input name="refund_fee_percent" type="number" value="${Number(pay.refund_fee_percent ?? 10)}" min="0" max="100"><span class="muted small">按剩余比例退款后再扣</span></div>
+      <div><label>提现手续费（%）</label><input name="withdraw_fee_percent" type="number" value="${Number(pay.withdraw_fee_percent ?? 0)}" min="0" max="100"><span class="muted small">按提现金额扣除，实付 = 金额 − 手续费</span></div>
       <div class="span-2 pay-config-row">
         <div class="pay-config-item"><div><b>支付宝</b>${badge(pay.alipay_configured)}</div><button type="button" class="secondary" onclick="openPayConfig('alipay')">配置支付宝</button></div>
         <div class="pay-config-item"><div><b>微信支付</b>${badge(pay.wechat_configured)}</div><button type="button" class="secondary" onclick="openPayConfig('wechat')">配置微信支付</button></div>

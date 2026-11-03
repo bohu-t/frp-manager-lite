@@ -36,7 +36,7 @@ import urllib.parse
 import threading
 
 APP_NAME = "frp-manager-lite"
-APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.1")  # 面板版本，不是 frp 版本
+APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.2")  # 面板版本，不是 frp 版本
 SERVER_START_TS = time.time()  # 进程启动时间，用于计算面板运行时间
 FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0.66.0"))
 BASE_DIR = Path(__file__).resolve().parent
@@ -3030,6 +3030,8 @@ def init_db() -> None:
                 user_id INTEGER NOT NULL,
                 username TEXT NOT NULL DEFAULT '',
                 amount REAL NOT NULL DEFAULT 0,
+                fee_amount REAL NOT NULL DEFAULT 0,
+                net_amount REAL,
                 method TEXT NOT NULL DEFAULT 'alipay',
                 account TEXT NOT NULL DEFAULT '',
                 holder TEXT NOT NULL DEFAULT '',
@@ -3403,6 +3405,8 @@ def init_db() -> None:
             ("tickets", "resolution", "TEXT NOT NULL DEFAULT ''"),
             ("ticket_messages", "attachments", "TEXT NOT NULL DEFAULT '[]'"),
             ("payouts", "qr_token", "TEXT NOT NULL DEFAULT ''"),
+            ("payouts", "fee_amount", "REAL NOT NULL DEFAULT 0"),
+            ("payouts", "net_amount", "REAL"),
         ):
             cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({tbl})").fetchall()}
             if col not in cols:
@@ -3945,10 +3949,19 @@ def payout_ticket_id(conn: sqlite3.Connection, payout_no: str) -> int:
     return int(row["id"]) if row else 0
 
 
+def payout_amounts(row: sqlite3.Row) -> tuple[float, float, float]:
+    amount = q2(row["amount"] or 0)
+    fee = q2(row_val(row, "fee_amount", 0) or 0)
+    net_raw = row_val(row, "net_amount", None)
+    net = q2(net_raw) if net_raw is not None else q2(amount - fee)
+    return amount, fee, net
+
+
 def payout_public(row: sqlite3.Row, conn: sqlite3.Connection | None = None) -> dict[str, Any]:
+    amount, fee, net = payout_amounts(row)
     return {
         "id": int(row["id"]), "payout_no": row["payout_no"], "user_id": int(row["user_id"]),
-        "username": row["username"], "amount": q2(row["amount"] or 0), "method": row["method"],
+        "username": row["username"], "amount": amount, "fee_amount": fee, "net_amount": net, "method": row["method"],
         "account": row["account"], "holder": row["holder"],
         "qr_token": row_val(row, "qr_token", "") or "", "status": row["status"],
         "note": row["note"], "created_at": int(row["created_at"] or 0), "updated_at": int(row["updated_at"] or 0),
@@ -4615,6 +4628,13 @@ def rsa_verify_sha256(message: bytes, signature_b64: str, public_pem: str) -> bo
         return False
 
 
+def withdraw_fee_percent(conn: sqlite3.Connection) -> int:
+    try:
+        return max(0, min(100, int(setting_get(conn, "withdraw_fee_percent", "0") or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
 def payment_config(conn: sqlite3.Connection) -> dict[str, Any]:
     return {
         "provider": setting_get(conn, "pay_provider", ""),
@@ -4628,6 +4648,7 @@ def payment_config(conn: sqlite3.Connection) -> dict[str, Any]:
         "wechat_mch_id": setting_get(conn, "wechat_mch_id", ""),
         "wechat_api_key": setting_get(conn, "wechat_api_key", ""),
         "refund_fee_percent": max(0, min(100, int(setting_get(conn, "refund_fee_percent", "10") or 10))),
+        "withdraw_fee_percent": withdraw_fee_percent(conn),
     }
 
 
@@ -4676,6 +4697,7 @@ def payment_public(cfg: dict[str, Any]) -> dict[str, Any]:
         "wechat_appid": cfg.get("wechat_appid", ""),
         "wechat_mch_id": cfg.get("wechat_mch_id", ""),
         "refund_fee_percent": int(cfg.get("refund_fee_percent") or 10),
+        "withdraw_fee_percent": int(cfg.get("withdraw_fee_percent") or 0),
         "alipay_configured": bool(cfg.get("alipay_app_id") and cfg.get("alipay_private_key") and cfg.get("alipay_public_key")),
         "wechat_configured": bool(cfg.get("wechat_appid") and cfg.get("wechat_mch_id") and cfg.get("wechat_api_key")),
     }
@@ -7142,6 +7164,7 @@ class Handler(BaseHTTPRequestHandler):
                     "income": q2(row_val(inc, "amount", 0) or 0) if inc else 0.0,
                     "debt": q2(debt_row["amount"] or 0) if debt_row else 0.0,
                     "commission_pct": PROVIDER_COMMISSION_PCT,
+                    "withdraw_fee_percent": withdraw_fee_percent(conn),
                 })
             return
         if path == "/api/user/provider/nodes":
@@ -7747,16 +7770,21 @@ class Handler(BaseHTTPRequestHandler):
                     acc = conn.execute("SELECT * FROM payout_accounts WHERE user_id=?", (int(user["id"]),)).fetchone()
                     if not acc or not acc["account"]:
                         raise ValueError("请先在个人中心配置收款信息")
+                    fee_pct = withdraw_fee_percent(conn)
+                    fee = q2(amount * fee_pct / 100)
+                    net = q2(amount - fee)
                     pno = new_payout_no()
                     conn.execute(
-                        "INSERT INTO payouts(payout_no, user_id, username, amount, method, account, holder, qr_token, status, note, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                        (pno, int(user["id"]), user["username"], amount, acc["method"], acc["account"], acc["holder"], row_val(acc, "qr_token", "") or "", "pending", "", now(), now()))
+                        "INSERT INTO payouts(payout_no, user_id, username, amount, fee_amount, net_amount, method, account, holder, qr_token, status, note, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (pno, int(user["id"]), user["username"], amount, fee, net, acc["method"], acc["account"], acc["holder"], row_val(acc, "qr_token", "") or "", "pending", "", now(), now()))
                     ledger_add(conn, "balance", "out", "withdraw_request", amount, int(user["id"]), user["username"], 0, pno, "external", "提现申请")
                     conn.execute(
                         "INSERT INTO tickets(ticket_no, user_id, username, kind, status, node_id, owner_id, title, content, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                         (new_ticket_no(), int(user["id"]), user["username"], "withdraw", "open", 0, 0,
-                         f"提现 ¥{q2(amount):.2f}", f"提现单号 {pno}，金额 ¥{q2(amount):.2f}，方式 {acc['method']}，账号 {acc['account']}，姓名 {acc['holder']}", now(), now()))
-                    notify_admins_tpl(conn, "payout_new", "payouts", amount=f"{q2(amount):.2f}", username=user["username"], payout_no=pno, method=acc["method"])
+                         f"提现 ¥{q2(amount):.2f}", f"提现单号 {pno}，金额 ¥{q2(amount):.2f}，手续费 ¥{fee:.2f}（{fee_pct}%），实付 ¥{net:.2f}，方式 {acc['method']}，账号 {acc['account']}，姓名 {acc['holder']}", now(), now()))
+                    notify_admins_tpl(conn, "payout_new", "payouts", amount=f"{net:.2f}", username=user["username"], payout_no=pno, method=acc["method"])
+                    self.send_json({"ok": True, "message": f"提现申请已提交，手续费 ¥{fee:.2f}，预计到账 ¥{net:.2f}"})
+                    return
                 self.send_json({"ok": True, "message": "提现申请已提交，等待管理员处理"})
             except ValueError as e:
                 self.send_json({"ok": False, "error": str(e)}, 400)
@@ -7910,23 +7938,28 @@ class Handler(BaseHTTPRequestHandler):
                 if not row or row["status"] != "pending":
                     self.send_json({"ok": False, "error": "提现单不存在或已处理"}, 404)
                     return
+                amount, fee, net = payout_amounts(row)
                 if action == "paid":
                     conn.execute("UPDATE payouts SET status='paid', updated_at=? WHERE id=?", (now(), pid))
-                    ledger_add(conn, "cash", "out", "withdraw_cash", q2(row["amount"] or 0),
-                               int(row["user_id"]), row["username"], 0, str(row["payout_no"]), "", f"提现打款 {row['method']}")
+                    ledger_add(conn, "cash", "out", "withdraw_cash", net,
+                               int(row["user_id"]), row["username"], 0, str(row["payout_no"]), "", f"提现打款 {row['method']}（手续费 ¥{fee:.2f}）")
+                    if fee > 0:
+                        conn.execute(
+                            "INSERT INTO platform_revenue(order_no, plan_id, node_id, amount, created_at) VALUES(?,?,?,?,?)",
+                            (str(row["payout_no"]), 0, 0, fee, now()))
                 else:
                     conn.execute("UPDATE payouts SET status='rejected', updated_at=? WHERE id=?", (now(), pid))
-                    ledger_add(conn, "balance", "reverse", "payout_reject", q2(row["amount"]), int(row["user_id"]),
+                    ledger_add(conn, "balance", "reverse", "payout_reject", amount, int(row["user_id"]),
                                row["username"], 0, str(row["payout_no"]), "", "提现冲正")
                     conn.execute(
                         "INSERT INTO provider_income(owner_id, amount, updated_at) VALUES(?,?,?) ON CONFLICT(owner_id) DO UPDATE SET amount=amount+excluded.amount, updated_at=excluded.updated_at",
-                        (int(row["user_id"]), q2(row["amount"] or 0), now()))
+                        (int(row["user_id"]), amount, now()))
                 # 处理完提现单，同步关闭对应工单
                 tid = payout_ticket_id(conn, str(row["payout_no"] or ""))
                 if tid:
                     conn.execute("UPDATE tickets SET status='closed', resolution=?, updated_at=? WHERE id=? AND status<>'closed'",
-                                 ("已打款，提现完成" if action == "paid" else "已拒绝，金额退回收益池", now(), tid))
-            self.send_json({"ok": True, "message": "已打款，工单已关闭" if action == "paid" else "已拒绝，工单已关闭"})
+                                 (f"已打款，实付 ¥{net:.2f}（手续费 ¥{fee:.2f}）" if action == "paid" else "已拒绝，金额退回收益池", now(), tid))
+            self.send_json({"ok": True, "message": (f"已打款 ¥{net:.2f}，工单已关闭" if action == "paid" else "已拒绝，工单已关闭")})
             return
 
         if path == "/api/user/plans/cancel":
@@ -8786,6 +8819,12 @@ class Handler(BaseHTTPRequestHandler):
                 except (TypeError, ValueError):
                     fee = 10
                 setting_set(conn, "refund_fee_percent", str(max(0, min(100, fee))))
+            if "withdraw_fee_percent" in data:
+                try:
+                    wfee = int(data.get("withdraw_fee_percent", 0) or 0)
+                except (TypeError, ValueError):
+                    wfee = 0
+                setting_set(conn, "withdraw_fee_percent", str(max(0, min(100, wfee))))
         self.send_json({"ok": True, "message": "支付设置已保存"})
 
     def admin_smtp_config_save(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
