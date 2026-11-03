@@ -830,7 +830,7 @@ function appSidebarHtml(kind='dashboard'){
   const brandName = 'Frp 管理台';
   const brandSub = '内网穿透管理平台';
   return `<aside class="app-sidebar">
-    <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>${brandName}</strong><span>${brandSub}</span></div></div>
+    <div class="sidebar-brand"><div class="brand-mark-small">F</div><div><strong>${brandName}</strong><span>${brandSub}</span></div><button type="button" class="sidebar-close" onclick="toggleMobileNav(false)" aria-label="关闭导航">×</button></div>
     <div class="sidebar-section-label">工作空间</div>${layoutItems.map(x => x === '__tickets__' ? ticketsBlock : (x === '__finance__' ? financeBlock : linkHtml(x, false))).join('')}
     ${''}
     <div class="sidebar-spacer"></div>
@@ -1043,12 +1043,7 @@ function appLayoutHtml(content, kind='dashboard', topTitle='工作区'){
 function ensureTableWraps(){
   document.querySelectorAll('#app table').forEach(t => {
     const p = t.parentElement;
-    if(!p) return;
-    if(p.classList.contains('table-wrap')) return;
-    if(p.classList.contains('card') || p.classList.contains('risk-result') || p.classList.contains('maint-table')){
-      p.style.overflowX = 'auto';
-      return;
-    }
+    if(!p || p.classList.contains('table-wrap')) return;
     const wrap = document.createElement('div');
     wrap.className = 'table-wrap';
     p.insertBefore(wrap, t);
@@ -1067,16 +1062,27 @@ function startTableWrapObserver(){
 function toggleMobileNav(force){
   const open = typeof force === 'boolean' ? force : !document.body.classList.contains('mobile-nav-open');
   document.body.classList.toggle('mobile-nav-open', open);
+  const btn = document.querySelector('#mobileNavBtn');
+  if(btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if(!open){
+    const menu = document.querySelector('#userMenu');
+    if(menu) menu.classList.add('hidden');
+  }
 }
 
 function ensureMobileNavToggle(){
   if(!document.querySelector('#mobileNavBtn')){
-    document.body.insertAdjacentHTML('beforeend', '<button type="button" id="mobileNavBtn" class="mobile-nav-toggle" aria-label="打开导航" onclick="toggleMobileNav()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button><div id="mobileNavMask" class="mobile-nav-mask" onclick="toggleMobileNav(false)"></div>');
+    document.body.insertAdjacentHTML('beforeend', '<button type="button" id="mobileNavBtn" class="mobile-nav-toggle" aria-label="打开导航" aria-expanded="false" onclick="toggleMobileNav()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button><div id="mobileNavMask" class="mobile-nav-mask" onclick="toggleMobileNav(false)"></div>');
   }
 }
 
 function setNav(){
   document.body.classList.toggle('is-app', !!currentUser);
+  if(!currentUser){
+    document.body.classList.remove('mobile-nav-open');
+    const menu = document.querySelector('#userMenu');
+    if(menu) menu.classList.add('hidden');
+  }
   if(currentUser) ensureMobileNavToggle();
   setTimeout(startTableWrapObserver, 0);
   if(currentUser){
@@ -1802,7 +1808,7 @@ async function loadHosts(){
   const nodesSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('node')}我的节点</h2><p>${pNodes.length ? '已接入平台的主机' : '提交母鸡并通过审核后，这里会显示你的节点'}</p></div></div>
       ${pNodes.length ? `<div class="table-wrap"><table><thead><tr><th>序号</th><th>节点</th><th>地区</th><th>接入地址</th><th>端口（已用/总）</th><th>本月流量</th><th>实例</th><th>状态</th><th>到期时间</th><th>上次在线</th></tr></thead><tbody>
         ${pNodes.map((n, i) => `<tr><td>${i + 1}</td><td><b>${esc(n.name)}</b></td><td>${esc(n.region)}</td><td>${esc(n.server_addr)}:${n.server_port}</td><td>${n.ports_used} / ${n.ports_total}</td><td>${fmtBytes(n.month_used_bytes)} / ${n.monthly_traffic_bytes > 0 ? fmtBytes(n.monthly_traffic_bytes) : '不限'}</td><td>${n.active_plans}</td><td><span class="status-badge ${n.auto_suspended ? 'bad' : (n.active ? 'ok' : 'bad')}"><i></i>${n.auto_suspended ? '已停售' : (n.active ? '在线' : '已停用')}</span></td><td>${n.expires_at ? fmtTs(n.expires_at) : '-'}</td><td>${n.last_online_at ? fmtTs(n.last_online_at) : '-'}</td></tr>`).join('')}
-      </tbody></table></div>` : '<div class="empty-state"><strong>还没有节点</strong><p class="muted small">点右上角「添加母鸡」，审核通过后自动成为你的节点。</p></div>'}
+      </tbody></table></div>` : '<div class="empty-state"><strong>还没有节点</strong><p class="muted small">点「添加母鸡」，审核通过后自动成为你的节点。</p></div>'}
     </section>`;
   const plansSection = `<section class="card"><div class="section-title"><div><h2>${stIcon('license')}我的套餐</h2><p>${pNodes.length ? '上架后买家可在该节点购买' : '先有节点，才能上架套餐'}</p></div><button type="button" onclick="providerPlanForm()" ${pNodes.length ? '' : 'disabled'}>＋ 上架套餐</button></div>
       <div class="table-wrap"><table><thead><tr><th>序号</th><th>名称</th><th>节点</th><th>计费</th><th>价格</th><th>端口</th><th>时长/流量</th><th>状态</th><th>操作</th></tr></thead><tbody>
