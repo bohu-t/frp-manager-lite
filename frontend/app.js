@@ -5574,6 +5574,7 @@ async function loadAdminSettings(){
   const smtp = data.smtp || {}; adminSmtp = smtp;
   const notify = data.notify || {};
   const bncr = data.bncr || {};
+  const bncrAvailable = !!data.bncr_available;
   setPanelMeta(data);
   const r2 = data.r2 || {};
   const r2Source = r2.source === 'database' ? '面板配置' : (r2.source === 'env' ? '环境变量兼容' : '未配置');
@@ -5584,7 +5585,7 @@ async function loadAdminSettings(){
     <div class="admin-settings-grid">
       ${adminPaymentCardHtml(data.payment)}
       ${adminSmtpCardHtml(smtp)}
-      ${adminBncrCardHtml(bncr)}
+      ${bncrAvailable ? adminBncrCardHtml(bncr) : adminNotifyCardHtml(notify)}
       ${adminBackupCardHtml(r2, r2Status, r2Source)}
       ${adminR2CardHtml(r2, r2Status, r2Source)}
       ${adminSystemInfoCardHtml(data)}

@@ -93,7 +93,7 @@ curl -fsSL https://raw.githubusercontent.com/bohu-t/lite-install/main/deploy-ima
 - 数据库：`/data/data.sqlite3`（Docker 卷 `frp-manager-lite-data`）
 - 备份：管理端「设置 → 备份与恢复」下载全量 zip
 - 恢复：上传 zip 并输入 `RESTORE` 确认
-- 备份包含 SMTP、支付、R2、Bncr 等密钥，请妥善保管
+- 备份包含 SMTP、支付、R2 等密钥，请妥善保管
 
 ## 授权
 

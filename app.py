@@ -36,7 +36,7 @@ import urllib.parse
 import threading
 
 APP_NAME = "frp-manager-lite"
-APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.4")  # 面板版本，不是 frp 版本
+APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.5")  # 面板版本，不是 frp 版本
 SERVER_START_TS = time.time()  # 进程启动时间，用于计算面板运行时间
 FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0.66.0"))
 BASE_DIR = Path(__file__).resolve().parent
@@ -78,6 +78,7 @@ SOFTWARE_LICENSE_FILE = Path(os.getenv("FML_LICENSE_FILE", DB_PATH.parent / "sof
 # 面板内不再内置「授权服务器」模式（防止拿到源码后自助授权）；授权只由卖家的独立服务签发
 SOFTWARE_LICENSE_AUTHORITY = False
 SOFTWARE_LICENSE_REQUIRED = True  # always enforced — no env-var off switch
+BNCR_FEATURE_ENABLED = os.getenv("FML_ENABLE_BNCR", "0").strip().lower() in ("1", "true", "yes", "on")
 RATE_WINDOW = 15 * 60
 LOGIN_RATE_LIMIT = 8
 HSTS_MAX_AGE = int(os.getenv("FML_HSTS_MAX_AGE", "0") or "0")
@@ -524,6 +525,8 @@ def bncr_public(cfg: dict[str, Any]) -> dict[str, Any]:
 
 
 def bncr_push(msg: str, at_userids: list[str] | None = None) -> bool:
+    if not BNCR_FEATURE_ENABLED:
+        return False
     """推送消息到 Bncr（企微群）。at_userids 为企微 userid 列表，会拼 <@userid>。"""
     try:
         with db() as conn:
@@ -542,6 +545,8 @@ def bncr_push(msg: str, at_userids: list[str] | None = None) -> bool:
 
 
 def bncr_notify_text(title: str, lines: list[str], at_userids: list[str] | None = None) -> bool:
+    if not BNCR_FEATURE_ENABLED:
+        return False
     at = [str(x).strip() for x in (at_userids or []) if str(x).strip()]
     parts = ["## " + title, ""] + [str(x) for x in lines]
     if at:
@@ -7418,6 +7423,7 @@ class Handler(BaseHTTPRequestHandler):
                 "plans": list_plans(conn, active_only=False),
                 "notify": notify_public(notify_config(conn)),
                 "bncr": bncr_public(bncr_config(conn)),
+                "bncr_available": BNCR_FEATURE_ENABLED,
                 "r2": r2_public,
                 "r2_configured": r2_public["configured"],
                 "frpc_users": frpc_users,
@@ -8911,6 +8917,9 @@ class Handler(BaseHTTPRequestHandler):
     def admin_bncr_config_save(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
         if not self.require_admin():
             return
+        if not BNCR_FEATURE_ENABLED:
+            self.send_json({"ok": False, "error": "not found"}, 404)
+            return
         enabled = "1" if str(data.get("enabled", "")) in ("1", "true", "True", "on", "yes") else "0"
         url = str(data.get("url", "")).strip()[:300]
         token = str(data.get("token", "")).strip()[:200]
@@ -8937,6 +8946,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def admin_bncr_test(self, admin: sqlite3.Row, data: dict[str, Any]) -> None:
         if not self.require_admin():
+            return
+        if not BNCR_FEATURE_ENABLED:
+            self.send_json({"ok": False, "error": "not found"}, 404)
             return
         ok = bncr_notify_text("Frp 管理台测试通知",
                               ["这是一条来自面板的测试消息，说明 Bncr 群通知链路已打通。",
