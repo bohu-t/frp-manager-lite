@@ -35,7 +35,7 @@ import urllib.parse
 import threading
 
 APP_NAME = "frp-manager-lite"
-APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.9")  # 面板版本，不是 frp 版本
+APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.10")  # 面板版本，不是 frp 版本
 SERVER_START_TS = time.time()  # 进程启动时间，用于计算面板运行时间
 FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0.66.0"))
 BASE_DIR = Path(__file__).resolve().parent
@@ -6082,10 +6082,14 @@ class Handler(BaseHTTPRequestHandler):
         user = self.require_user()
         if not user:
             return None
-        if user["role"] != "admin":
+        if (user["role"] or "") not in ("admin", "demo"):
             self.send_json({"ok": False, "error": "forbidden"}, 403)
             return None
         return user
+
+    def is_demo_user(self) -> bool:
+        user = self.current_user
+        return bool(user and (user["role"] or "") == "demo")
 
     def require_software_license(self) -> bool:
         if not SOFTWARE_LICENSE_REQUIRED:
@@ -6289,6 +6293,9 @@ class Handler(BaseHTTPRequestHandler):
     def download_full_backup(self) -> None:
         admin = self.require_admin()
         if not admin or not self.require_software_license():
+            return
+        if (admin["role"] or "") == "demo":
+            self.send_json({"ok": False, "error": "演示账号只读，不能下载备份"}, 403)
             return
         stamp, payload = make_full_backup_zip(admin["username"])
         audit("backup_download", admin, None, None, "", f"full backup {stamp}")
@@ -7177,7 +7184,7 @@ class Handler(BaseHTTPRequestHandler):
                             "active": bool(k["active"]), "expires_at": k["expires_at"], "expires_text": fmt_time(k["expires_at"]),
                             "expired": bool(k["expires_at"] and k["expires_at"] <= now()), "activated_at": k["activated_at"], "last_check_at": k["last_check_at"], "created_at": k["created_at"],
                         })
-            self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": effective_setup_key(), "has_setup_key": bool(effective_setup_key()), "setup_key_source": setup_key_source(), "smtp": smtp_public(smtp_config(conn)), "payment": payment_public(payment_config(conn)), "plans": list_plans(conn, active_only=False), "orders": [order_public(r) for r in conn.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 100")], "recharge_keys": [{"id": r["id"], "seq_no": r["seq_no"], "key": r["key"], "amount": q2(r["amount"] or 0), "note": r["note"], "active": bool(r["active"]), "expires_at": r["expires_at"], "used_by": r["used_by"], "used_at": r["used_at"], "created_at": r["created_at"]} for r in conn.execute("SELECT * FROM recharge_keys WHERE deleted=0 ORDER BY id DESC LIMIT 200")]})
+            self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": "" if self.is_demo_user() else effective_setup_key(), "has_setup_key": False if self.is_demo_user() else bool(effective_setup_key()), "setup_key_source": "" if self.is_demo_user() else setup_key_source(), "smtp": smtp_public(smtp_config(conn)), "payment": payment_public(payment_config(conn)), "plans": list_plans(conn, active_only=False), "orders": [order_public(r) for r in conn.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 100")], "recharge_keys": [{"id": r["id"], "seq_no": r["seq_no"], "key": r["key"], "amount": q2(r["amount"] or 0), "note": r["note"], "active": bool(r["active"]), "expires_at": r["expires_at"], "used_by": r["used_by"], "used_at": r["used_at"], "created_at": r["created_at"]} for r in conn.execute("SELECT * FROM recharge_keys WHERE deleted=0 ORDER BY id DESC LIMIT 200")]})
             return
         if path == "/api/admin/frps-proxies":
             if not self.require_admin():
@@ -7289,9 +7296,9 @@ class Handler(BaseHTTPRequestHandler):
                 "ban_count": int(ban_count),
                 "traffic_today": traffic_today,
                 "nodes": node_list,
-                "setup_key": effective_setup_key(),
-                "has_setup_key": bool(effective_setup_key()),
-                "setup_key_source": setup_key_source(),
+                "setup_key": "" if self.is_demo_user() else effective_setup_key(),
+                "has_setup_key": False if self.is_demo_user() else bool(effective_setup_key()),
+                "setup_key_source": "" if self.is_demo_user() else setup_key_source(),
                 "smtp": smtp_public(smtp_config(conn)),
                 "payment": payment_public(payment_config(conn)),
                 "plans": list_plans(conn, active_only=False),
@@ -9075,7 +9082,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_body(script.encode(), 200, "application/x-sh; charset=utf-8", {"Content-Disposition": 'attachment; filename="deploy-frpc.sh"'})
 
     def download_frps_example(self) -> None:
-        if not self.require_admin() or not self.require_software_license():
+        admin = self.require_admin()
+        if not admin or not self.require_software_license():
+            return
+        if (admin["role"] or "") == "demo":
+            self.send_json({"ok": False, "error": "演示账号只读，不能下载节点配置"}, 403)
             return
         query = urlparse(self.path).query
         node_id = 0

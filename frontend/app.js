@@ -2,6 +2,7 @@ const app = document.querySelector('#app');
 const nav = document.querySelector('#nav');
 const flash = document.querySelector('#flash');
 let currentUser = null;
+function isAdminRole(role){ return role === 'admin' || role === 'demo'; }
 let softwareLicense = null;
 let currentAdminSection = 'users';
 let adminDashboardTimer = null;
@@ -786,7 +787,7 @@ function initPasswordForm(){
 }
 
 function appSidebarHtml(kind='dashboard'){
-  const isAdmin = currentUser?.role === 'admin';
+  const isAdmin = isAdminRole(currentUser?.role);
   const username = currentUser?.username || '用户';
   const layoutItems = isAdmin ? [
     ['admin-dashboard','home','运行总览'],
@@ -852,7 +853,7 @@ function appSidebarHtml(kind='dashboard'){
     <div class="sidebar-user-wrap">
       <div class="sidebar-user-card" onclick="toggleUserMenu(event)" role="button" tabindex="0" aria-label="账号菜单">
         <span class="sidebar-user-avatar">${avatarSvg(username, currentUser?.role, 32)}</span>
-        <span class="sidebar-user-copy"><strong>${esc(username)}</strong><small>${isAdmin ? '系统管理员' : (currentUser?.role === 'demo' ? '演示账号' : '普通用户')}</small></span>
+        <span class="sidebar-user-copy"><strong>${esc(username)}</strong><small>${currentUser?.role === 'demo' ? '演示账号' : (isAdmin ? '系统管理员' : '普通用户')}</small></span>
         <span class="sidebar-user-more">⋯</span>
       </div>
       <div class="user-menu hidden" id="userMenu">
@@ -1028,12 +1029,12 @@ async function openNotif(id, link){
   if(!link) return;
   if(link.startsWith('ticket:')){
     const tid = Number(link.slice(7));
-    if(currentUser && currentUser.role === 'admin') loadTicketDetail(tid, 'admin');
+    if(currentUser && isAdminRole(currentUser.role)) loadTicketDetail(tid, 'admin');
     else loadTicketDetail(tid);
     return;
   }
-  if(link === 'payouts'){ if(currentUser && currentUser.role === 'admin') loadAdminPayouts(); return; }
-  if(link === 'tickets'){ if(currentUser && currentUser.role === 'admin') loadAdminTickets(); else loadTickets(); }
+  if(link === 'payouts'){ if(currentUser && isAdminRole(currentUser.role)) loadAdminPayouts(); return; }
+  if(link === 'tickets'){ if(currentUser && isAdminRole(currentUser.role)) loadAdminTickets(); else loadTickets(); }
 }
 
 function toggleUserMenu(ev){
@@ -1109,7 +1110,7 @@ function setNav(){
   const themeBtn = navButton(`${colorMode === 'dark' ? '浅色' : '深色'}模式`, 'theme');
   if(!currentUser){ nav.innerHTML = themeBtn; return; }
   const licenseRequired = !!(softwareLicense && softwareLicense.required && !softwareLicense.licensed);
-  const isAdmin = currentUser.role === 'admin';
+  const isAdmin = isAdminRole(currentUser.role);
   const adminNav = isAdmin && !licenseRequired ? [
     navButton('用户', 'admin', 'secondary', 'users'),
     navButton('套餐', 'admin', 'secondary', 'plans'),
@@ -3417,7 +3418,7 @@ async function loadMe(){
     softwareLicense = data.software_license || null;
     setNav();
     if(currentUser){
-      if(softwareLicense && softwareLicense.required && !softwareLicense.licensed && currentUser.role === 'admin') renderLicenseActivate();
+      if(softwareLicense && softwareLicense.required && !softwareLicense.licensed && isAdminRole(currentUser.role)) renderLicenseActivate();
       else await loadDashboard();
     }else renderLogin();
     if(currentUser) await handlePayReturn();
@@ -3430,7 +3431,7 @@ async function handlePayReturn(){
   if(!pay) return;
   const orderNo = qp.get('order') || '';
   history.replaceState(null, '', location.pathname);
-  if(currentUser && currentUser.role === 'admin') return;
+  if(currentUser && isAdminRole(currentUser.role)) return;
   if(pay === 'success'){
     show('支付成功，套餐已开通');
     return loadPlans();
@@ -3628,7 +3629,7 @@ async function loadDashboard(view='overview'){
     show(err.message, true); return;
   }
   currentUser = data.user; softwareLicense = data.software_license || softwareLicense; setPanelMeta(data); setNav();
-  const isAdmin = data.user.role === 'admin';
+  const isAdmin = isAdminRole(data.user.role);
   if(isAdmin){ loadAdminDashboard(); return; }
   const used = new Set(data.tunnels.map(t => t.remote_port));
   const ps = data.port_stats || {};
@@ -4013,7 +4014,7 @@ ${trafficLimit > 0 ? `<div class="tunnel-usage"><div class="tunnel-usage-label">
     app.innerHTML = appLayoutHtml(`
       <div class="profile-grid">
         <section class="card profile-card">
-          <div class="profile-head"><span class="profile-avatar">${avatarSvg(data.user.username||'U', data.user.role, 56)}</span><div class="profile-id"><strong>${esc(data.user.username||'-')}</strong><small>${data.user.role === 'admin' ? '系统管理员' : '普通用户'}</small></div></div>
+          <div class="profile-head"><span class="profile-avatar">${avatarSvg(data.user.username||'U', data.user.role, 56)}</span><div class="profile-id"><strong>${esc(data.user.username||'-')}</strong><small>${data.user.role === 'admin' ? '系统管理员' : (data.user.role === 'demo' ? '演示账号' : '普通用户')}</small></div></div>
           <div class="profile-rows">
             <div class="info-line"><span>生效套餐</span><strong>${activePlans.length} 个</strong></div>
             <div class="info-line"><span>今日流量</span><strong>${fmtBytes(todayTraffic)}${trafficLimit ? ' / ' + fmtBytes(trafficLimit) : ' / 不限'}</strong></div>
