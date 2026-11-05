@@ -151,9 +151,9 @@ async function appAlert(message, opts){
 const show = (msg, err=false) => { flash.textContent = msg; flash.className = 'flash' + (err ? ' err' : ''); setTimeout(()=>flash.classList.add('hidden'), 8000); };
 const hideFlash = () => flash.classList.add('hidden');
 
-async function ensureCsrf(){
-  if(csrfToken) return csrfToken;
-  const res = await fetch('/api/csrf', {credentials:'same-origin'});
+async function ensureCsrf(force=false){
+  if(csrfToken && !force) return csrfToken;
+  const res = await fetch('/api/csrf', {credentials:'same-origin', cache:'no-store'});
   const data = await res.json();
   csrfToken = data.csrf_token;
   return csrfToken;
@@ -166,23 +166,32 @@ async function api(path, opts={}){
     err.data = { demo: true };
     throw err;
   }
-  const headers = {'Content-Type':'application/json', ...(opts.headers || {})};
-  if(method !== 'GET' && method !== 'HEAD'){
-    headers['X-CSRF-Token'] = await ensureCsrf();
+  let token = null;
+  if(method !== 'GET' && method !== 'HEAD') token = await ensureCsrf();
+  const doFetch = async () => {
+    const headers = {'Content-Type':'application/json', ...(opts.headers || {})};
+    if(token) headers['X-CSRF-Token'] = token;
+    const res = await fetch(path, {
+      ...opts,
+      credentials: 'same-origin',
+      headers,
+      body: opts.body && typeof opts.body !== 'string' ? JSON.stringify(opts.body) : opts.body
+    });
+    const data = await res.json().catch(()=>({ok:false,error:'响应不是 JSON'}));
+    return {res, data};
+  };
+  let out = await doFetch();
+  if(method !== 'GET' && method !== 'HEAD' && out.res.status === 403 && String(out.data.error || '').includes('CSRF')){
+    csrfToken = null;
+    token = await ensureCsrf(true);
+    out = await doFetch();
   }
-  const res = await fetch(path, {
-    credentials: 'same-origin',
-    headers,
-    ...opts,
-    body: opts.body && typeof opts.body !== 'string' ? JSON.stringify(opts.body) : opts.body
-  });
-  const data = await res.json().catch(()=>({ok:false,error:'响应不是 JSON'}));
-  if(!res.ok || data.ok === false){
-    const err = new Error(data.error || data.message || `HTTP ${res.status}`);
-    err.data = data;
+  if(!out.res.ok || out.data.ok === false){
+    const err = new Error(out.data.error || out.data.message || `HTTP ${out.res.status}`);
+    err.data = out.data;
     throw err;
   }
-  return data;
+  return out.data;
 }
 
 async function loadNodes(){
