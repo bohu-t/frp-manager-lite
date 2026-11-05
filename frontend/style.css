@@ -2654,3 +2654,9 @@ html[data-theme="dark"] .user-notify .notify-chip{background:#0f172a;border-colo
 /* 演示账号只读提示 */
 .demo-readonly-banner{margin:0 0 12px;padding:10px 14px;border:1px solid #f6d58a;border-radius:8px;background:#fff8e6;color:#8a5a00;font-size:13px;line-height:1.5}
 html[data-theme="dark"] .demo-readonly-banner{border-color:#6b5420;background:#2a2412;color:#f4d488}
+
+/* 只保留自定义密码眼睛，隐藏浏览器原生显示/清除按钮 */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear{display:none!important}
+input[type="password"]::-webkit-textfield-decoration-container{display:none!important}
+input[type="password"]::-webkit-credentials-auto-fill-button{display:none!important;visibility:hidden;pointer-events:none}
