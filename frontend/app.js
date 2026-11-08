@@ -4314,22 +4314,9 @@ async function loadAdmin(section=currentAdminSection){
   const usersSlice = pageItems(filteredUsers, usersPage, ADMIN_PAGE_SIZE);
   const nodesSlice = pageItems(data.nodes || [], nodesPage, ADMIN_PAGE_SIZE);
   const logsSlice = pageItems(data.logs || [], riskPage, ADMIN_PAGE_SIZE);
-  const planStatusText = {active:'生效中', expired:'已到期', cancelled:'已退订', exhausted:'流量用尽'};
-  const planCell = (u) => {
-    const active = String(u.plan_names || '').trim();
-    const names = active ? active.split(' / ').filter(Boolean) : [];
-    const latest = String(u.latest_plan_name || '').trim();
-    const count = Number(u.plan_count || names.length || 0);
-    if(!active && !latest) return '—';
-    if(count > 1) return `<b>${count} 个套餐</b><br><span class="muted small">点「查看套餐」看明细</span>`;
-    const name = names[0] || `${latest}（${planStatusText[u.latest_plan_status] || u.latest_plan_status || '已失效'}）`;
-    const exp = Number(u.plan_expires_at || 0);
-    const sub = names.length ? (exp ? `到期 ${fmtTs(exp).slice(0,10)}` : '永久') : '';
-    return `<b>${esc(name)}</b>${sub ? `<br><span class="muted small">${esc(sub)}</span>` : ''}`;
-  };
   const rows = usersSlice.map((u, i) => `
     <tr>
-      <td>${(usersPage - 1) * ADMIN_PAGE_SIZE + i + 1}</td><td>${esc(u.username)}</td><td>${u.email ? esc(u.email) : '—'}</td><td>${esc(u.role)}</td><td><b>¥${fmtPts(u.balance)}</b></td><td>${planCell(u)}</td><td>${esc(u.node_region || '-')} / ${esc(u.node_name || '-')}</td><td>${u.port_count}/${u.max_ports}</td><td>${u.tunnel_count}</td>
+      <td>${(usersPage - 1) * ADMIN_PAGE_SIZE + i + 1}</td><td>${esc(u.username)}</td><td>${u.email ? esc(u.email) : '—'}</td><td>${esc(u.role)}</td><td><b>¥${fmtPts(u.balance)}</b></td><td>${esc(u.node_region || '-')} / ${esc(u.node_name || '-')}</td><td>${u.port_count}/${u.max_ports}</td><td>${u.tunnel_count}</td>
       <td>${fmtBytes(u.traffic_limit_bytes)} / ${u.bandwidth_limit_kbps ? `${(Number(u.bandwidth_limit_kbps) / 1024).toFixed(1)} MB/s` : '不限'}</td>
       <td>${u.active ? '<span class="ok">启用</span>' : '<span class="bad">停用</span>'}</td>
       <td class="actions node-actions user-actions">
@@ -4487,7 +4474,7 @@ async function loadAdmin(section=currentAdminSection){
         <div><label for="adminUserStatus">账号状态</label><select id="adminUserStatus" name="status"><option value="all" ${adminUserStatus==='all'?'selected':''}>全部状态</option><option value="active" ${adminUserStatus==='active'?'selected':''}>正常启用</option><option value="disabled" ${adminUserStatus==='disabled'?'selected':''}>已停用</option><option value="expired" ${adminUserStatus==='expired'?'selected':''}>已到期</option></select></div>
         <div class="form-actions"><button type="submit">筛选</button><button type="button" class="secondary" id="adminUserFilterReset">重置</button></div>
       </form>
-      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>序号</th><th>用户</th><th>邮箱</th><th>角色</th><th>余额</th><th>套餐</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>
+      <p class="muted small">当前 ${filteredUsers.length} 个用户符合条件，共 ${allUsers.length} 个用户。</p><table><thead><tr><th>序号</th><th>用户</th><th>邮箱</th><th>角色</th><th>余额</th><th>接入节点</th><th>端口</th><th>隧道</th><th>流量/速率策略</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>${paginationHtml('users', usersPage, filteredUsers.length, ADMIN_PAGE_SIZE)}</section>
     <div id="adminLimitsModal" class="modal-backdrop modal-center hidden" role="dialog" aria-modal="true" aria-labelledby="adminLimitsTitle" onclick="if(event.target===this)closeAdminLimits()">
       <section class="modal-page card admin-limits-modal">
         <div class="section-title modal-title">
