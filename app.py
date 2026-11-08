@@ -35,7 +35,7 @@ import urllib.parse
 import threading
 
 APP_NAME = "frp-manager-lite"
-APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.12")  # 面板版本，不是 frp 版本
+APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.13")  # 面板版本，不是 frp 版本
 SERVER_START_TS = time.time()  # 进程启动时间，用于计算面板运行时间
 FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0.66.0"))
 BASE_DIR = Path(__file__).resolve().parent
@@ -7154,6 +7154,9 @@ class Handler(BaseHTTPRequestHandler):
                            (SELECT MAX(up.expires_at) FROM user_plans up
                              WHERE up.user_id=u.id AND up.status='active'
                                AND (up.expires_at=0 OR up.expires_at>?)) AS active_plan_expires_at,
+                           (SELECT COUNT(*) FROM user_plans up
+                             WHERE up.user_id=u.id AND up.status='active'
+                               AND (up.expires_at=0 OR up.expires_at>?)) AS active_plan_count,
                            (SELECT up.plan_name FROM user_plans up WHERE up.user_id=u.id ORDER BY up.id DESC LIMIT 1) AS latest_plan_name,
                            (SELECT up.status FROM user_plans up WHERE up.user_id=u.id ORDER BY up.id DESC LIMIT 1) AS latest_plan_status
                     FROM users u
@@ -7162,7 +7165,7 @@ class Handler(BaseHTTPRequestHandler):
                     LEFT JOIN tunnels t ON t.user_id=u.id
                     WHERE u.role != 'admin'
                     GROUP BY u.id ORDER BY u.id
-                    """, (now(), now())
+                    """, (now(), now(), now())
                 ):
                     item = public_user(r)
                     item["bandwidth_limit_kbps"] = int(row_val(r, "bandwidth_limit_kbps", 0) or 0)
@@ -7172,6 +7175,7 @@ class Handler(BaseHTTPRequestHandler):
                     item["node_region"] = r["node_region"]
                     item["plan_names"] = r["active_plan_names"] or ""
                     item["plan_expires_at"] = int(r["active_plan_expires_at"] or 0)
+                    item["plan_count"] = int(r["active_plan_count"] or 0)
                     item["latest_plan_name"] = r["latest_plan_name"] or ""
                     item["latest_plan_status"] = r["latest_plan_status"] or ""
                     users.append(item)
@@ -7198,6 +7202,43 @@ class Handler(BaseHTTPRequestHandler):
                             "expired": bool(k["expires_at"] and k["expires_at"] <= now()), "activated_at": k["activated_at"], "last_check_at": k["last_check_at"], "created_at": k["created_at"],
                         })
             self.send_json({"ok": True, "stats": stats, "users": users, "nodes": nodes, "logs": logs, "allowed_proxy_types": PROXY_TYPE_ORDER, "software_license": sw_license, "software_license_authority": SOFTWARE_LICENSE_AUTHORITY, "software_license_keys": software_keys, "setup_key": "" if self.is_demo_user() else effective_setup_key(), "has_setup_key": False if self.is_demo_user() else bool(effective_setup_key()), "setup_key_source": "" if self.is_demo_user() else setup_key_source(), "smtp": smtp_public(smtp_config(conn)), "payment": payment_public(payment_config(conn)), "plans": list_plans(conn, active_only=False), "orders": [order_public(r) for r in conn.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 100")], "recharge_keys": [{"id": r["id"], "seq_no": r["seq_no"], "key": r["key"], "amount": q2(r["amount"] or 0), "note": r["note"], "active": bool(r["active"]), "expires_at": r["expires_at"], "used_by": r["used_by"], "used_at": r["used_at"], "created_at": r["created_at"]} for r in conn.execute("SELECT * FROM recharge_keys WHERE deleted=0 ORDER BY id DESC LIMIT 200")]})
+            return
+        if path == "/api/admin/user/plans":
+            if not self.require_admin():
+                return
+            qs = urllib.parse.parse_qs(urlparse(self.path).query)
+            try:
+                uid = int((qs.get("id") or ["0"])[0])
+            except (TypeError, ValueError):
+                uid = 0
+            with db() as conn:
+                user_row = conn.execute("SELECT id, username FROM users WHERE id=?", (uid,)).fetchone()
+                if not user_row:
+                    self.send_json({"ok": False, "error": "用户不存在"}, 404)
+                    return
+                rows = conn.execute(
+                    "SELECT * FROM user_plans WHERE user_id=? ORDER BY id DESC LIMIT 100", (uid,)
+                ).fetchall()
+            plans = []
+            for r in rows:
+                plans.append({
+                    "id": int(r["id"]), "plan_id": int(row_val(r, "plan_id", 0) or 0),
+                    "plan_name": r["plan_name"], "status": r["status"],
+                    "billing_mode": row_val(r, "billing_mode", "time") or "time",
+                    "max_ports": int(row_val(r, "max_ports", 0) or 0),
+                    "price": q2(row_val(r, "price", 0) or 0),
+                    "duration_days": int(row_val(r, "duration_days", 0) or 0),
+                    "traffic_limit_bytes": int(row_val(r, "traffic_limit_bytes", 0) or 0),
+                    "quota_bytes": int(row_val(r, "quota_bytes", 0) or 0),
+                    "used_bytes": int(row_val(r, "used_bytes", 0) or 0),
+                    "expires_at": int(row_val(r, "expires_at", 0) or 0),
+                    "expires_text": fmt_time(int(row_val(r, "expires_at", 0) or 0)),
+                    "created_at": int(row_val(r, "created_at", 0) or 0),
+                    "created_text": fmt_time(int(row_val(r, "created_at", 0) or 0)),
+                    "order_no": r["order_no"] or "",
+                    "auto_renew": int(row_val(r, "auto_renew", 0) or 0),
+                })
+            self.send_json({"ok": True, "user": {"id": int(user_row["id"]), "username": user_row["username"]}, "plans": plans})
             return
         if path == "/api/admin/frps-proxies":
             if not self.require_admin():

@@ -4317,11 +4317,14 @@ async function loadAdmin(section=currentAdminSection){
   const planStatusText = {active:'生效中', expired:'已到期', cancelled:'已退订', exhausted:'流量用尽'};
   const planCell = (u) => {
     const active = String(u.plan_names || '').trim();
+    const names = active ? active.split(' / ').filter(Boolean) : [];
     const latest = String(u.latest_plan_name || '').trim();
+    const count = Number(u.plan_count || names.length || 0);
     if(!active && !latest) return '—';
-    const name = active || `${latest}（${planStatusText[u.latest_plan_status] || u.latest_plan_status || '已失效'}）`;
+    if(count > 1) return `<b>${count} 个套餐</b><br><span class="muted small">点「查看套餐」看明细</span>`;
+    const name = names[0] || `${latest}（${planStatusText[u.latest_plan_status] || u.latest_plan_status || '已失效'}）`;
     const exp = Number(u.plan_expires_at || 0);
-    const sub = active ? (exp ? `到期 ${fmtTs(exp).slice(0,10)}` : '永久') : '';
+    const sub = names.length ? (exp ? `到期 ${fmtTs(exp).slice(0,10)}` : '永久') : '';
     return `<b>${esc(name)}</b>${sub ? `<br><span class="muted small">${esc(sub)}</span>` : ''}`;
   };
   const rows = usersSlice.map((u, i) => `
@@ -4334,6 +4337,7 @@ async function loadAdmin(section=currentAdminSection){
         <button class="node-action" onclick="openAdminLimits(${u.id}, ${Number(u.traffic_limit_bytes || 0)}, ${Number(u.bandwidth_limit_kbps || 0)}, '${esc(u.username)}')">流量限制</button>
         <button class="node-action" onclick="openAdminCred('password', ${u.id}, '${esc(u.username)}')">重置密码</button>
         <button class="node-action" onclick="openAdminCred('token', ${u.id}, '${esc(u.username)}')">重置令牌</button>
+        <button class="node-action" onclick="viewUserPlans(${u.id}, '${esc(u.username)}')">查看套餐</button>
         <button class="node-action" onclick="adminAdjustPoints(${u.id}, '${esc(u.username)}')">调余额</button>
         <button class="node-action" onclick="openAdminEmail(${u.id}, '${esc(u.email || '')}', '${esc(u.username)}')">设邮箱</button>
         <button class="node-action node-action-danger" onclick="adminDelete(${u.id})">删除</button>
@@ -4801,6 +4805,50 @@ async function submitAdminCred(e){
   }catch(err){ show(err.message, true); }
 }
 async function adminDelete(id){ if(await appConfirm('删除用户会释放端口并删除隧道，确定？', {title:'删除用户', okText:'删除', danger:true})) await api('/api/admin/users/delete', {method:'POST', body:{id}}).then(()=>loadAdmin().then(()=>show('用户已删除'))).catch(e=>show(e.message,true)); }
+async function viewUserPlans(userId, username){
+  let data;
+  try{ data = await api('/api/admin/user/plans?id=' + encodeURIComponent(userId)); }
+  catch(err){ show(err.message, true); return; }
+  const plans = data.plans || [];
+  const statusText = {active:'生效中', expired:'已到期', cancelled:'已退订', exhausted:'流量用尽'};
+  const rows = plans.map((p, i) => {
+    const mode = p.billing_mode === 'traffic' ? '流量' : '时间';
+    const usage = p.billing_mode === 'traffic'
+      ? `${fmtBytes(p.used_bytes || 0)} / ${p.quota_bytes ? fmtBytes(p.quota_bytes) : '不限'}`
+      : (p.expires_at ? p.expires_text : '永久');
+    return `<tr>
+      <td>${i + 1}</td>
+      <td><b>${esc(p.plan_name || '-')}</b></td>
+      <td>${esc(statusText[p.status] || p.status || '-')}</td>
+      <td>${mode}</td>
+      <td>${Number(p.max_ports || 0)}</td>
+      <td>${esc(usage)}</td>
+      <td>¥${fmtPts(p.price || 0)}</td>
+      <td>${esc(p.created_text || '-')}</td>
+      <td>${esc(p.order_no || '—')}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="9" class="muted">该用户还没有套餐记录</td></tr>';
+  const old = document.getElementById('userPlansModal');
+  if(old) old.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop modal-center" id="userPlansModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeUserPlans()">
+    <section class="modal-page card" style="width:min(980px,100%)">
+      <div class="section-title modal-title">
+        <div><div class="section-kicker">USER PLANS</div><h2>用户 ${esc(username)} 的套餐</h2><p>共 ${plans.length} 条记录，按购买时间倒序</p></div>
+        <button type="button" class="secondary modal-close" onclick="closeUserPlans()" aria-label="关闭">关闭 ×</button>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>序号</th><th>套餐</th><th>状态</th><th>计费</th><th>端口</th><th>到期 / 流量</th><th>金额</th><th>创建时间</th><th>订单号</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </section>
+  </div>`);
+}
+
+function closeUserPlans(){
+  const el = document.getElementById('userPlansModal');
+  if(el) el.remove();
+}
+
 function resetPlanForm(){
   const f = document.querySelector('#planForm');
   if(!f) return;
