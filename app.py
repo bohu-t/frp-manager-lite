@@ -35,7 +35,7 @@ import urllib.parse
 import threading
 
 APP_NAME = "frp-manager-lite"
-APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.11")  # 面板版本，不是 frp 版本
+APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.12")  # 面板版本，不是 frp 版本
 SERVER_START_TS = time.time()  # 进程启动时间，用于计算面板运行时间
 FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0.66.0"))
 BASE_DIR = Path(__file__).resolve().parent
@@ -7146,14 +7146,23 @@ class Handler(BaseHTTPRequestHandler):
                 users = []
                 for r in conn.execute(
                     """
-                    SELECT u.*, n.name AS node_name, n.region AS node_region, COUNT(DISTINCT p.id) AS port_count, COUNT(DISTINCT t.id) AS tunnel_count
+                    SELECT u.*, n.name AS node_name, n.region AS node_region,
+                           COUNT(DISTINCT p.id) AS port_count, COUNT(DISTINCT t.id) AS tunnel_count,
+                           (SELECT GROUP_CONCAT(up.plan_name, ' / ') FROM user_plans up
+                             WHERE up.user_id=u.id AND up.status='active'
+                               AND (up.expires_at=0 OR up.expires_at>?)) AS active_plan_names,
+                           (SELECT MAX(up.expires_at) FROM user_plans up
+                             WHERE up.user_id=u.id AND up.status='active'
+                               AND (up.expires_at=0 OR up.expires_at>?)) AS active_plan_expires_at,
+                           (SELECT up.plan_name FROM user_plans up WHERE up.user_id=u.id ORDER BY up.id DESC LIMIT 1) AS latest_plan_name,
+                           (SELECT up.status FROM user_plans up WHERE up.user_id=u.id ORDER BY up.id DESC LIMIT 1) AS latest_plan_status
                     FROM users u
                     LEFT JOIN nodes n ON n.id=u.node_id
                     LEFT JOIN ports p ON p.user_id=u.id AND p.node_id=u.node_id
                     LEFT JOIN tunnels t ON t.user_id=u.id
                     WHERE u.role != 'admin'
                     GROUP BY u.id ORDER BY u.id
-                    """
+                    """, (now(), now())
                 ):
                     item = public_user(r)
                     item["bandwidth_limit_kbps"] = int(row_val(r, "bandwidth_limit_kbps", 0) or 0)
@@ -7161,6 +7170,10 @@ class Handler(BaseHTTPRequestHandler):
                     item["tunnel_count"] = r["tunnel_count"]
                     item["node_name"] = r["node_name"]
                     item["node_region"] = r["node_region"]
+                    item["plan_names"] = r["active_plan_names"] or ""
+                    item["plan_expires_at"] = int(r["active_plan_expires_at"] or 0)
+                    item["latest_plan_name"] = r["latest_plan_name"] or ""
+                    item["latest_plan_status"] = r["latest_plan_status"] or ""
                     users.append(item)
                 nodes = list_public_nodes(conn, active_only=False)
                 logs = [row_dict(r) for r in conn.execute("SELECT * FROM audit_logs ORDER BY id DESC LIMIT 80")]
