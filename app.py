@@ -35,7 +35,7 @@ import urllib.parse
 import threading
 
 APP_NAME = "frp-manager-lite"
-APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.14")  # 面板版本，不是 frp 版本
+APP_VERSION = os.getenv("FML_PANEL_VERSION", "2.1.15")  # 面板版本，不是 frp 版本
 SERVER_START_TS = time.time()  # 进程启动时间，用于计算面板运行时间
 FRP_CLIENT_VERSION = os.getenv("FRP_CLIENT_VERSION", os.getenv("FRP_VERSION", "0.66.0"))
 BASE_DIR = Path(__file__).resolve().parent
@@ -3513,7 +3513,7 @@ def register_open_account(username: str, password: str, node_id: int, email: str
         node = conn.execute("SELECT * FROM nodes WHERE id=? AND active=1", (node_id,)).fetchone() if node_id else None
         if not node:
             node_id = None
-        max_ports = OPEN_REGISTRATION_MAX_PORTS or DEFAULT_MAX_PORTS
+        max_ports = OPEN_REGISTRATION_MAX_PORTS
         free_ports = available_ports_for_assignment(conn, node_id, max_ports) if node and max_ports else []
         if node and len(free_ports) < max_ports:
             return False, f"端口池不足，只剩 {len(free_ports)} 个可用端口"
@@ -6576,7 +6576,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         if path == "/api/registration-status":
-            self.send_json({"ok": True, "open_registration": OPEN_REGISTRATION, "max_ports": OPEN_REGISTRATION_MAX_PORTS or DEFAULT_MAX_PORTS, "expires_days": OPEN_REGISTRATION_EXPIRES_DAYS})
+            self.send_json({"ok": True, "open_registration": OPEN_REGISTRATION, "max_ports": OPEN_REGISTRATION_MAX_PORTS, "expires_days": OPEN_REGISTRATION_EXPIRES_DAYS})
             return
         if path == "/api/nodes":
             with db() as conn:
